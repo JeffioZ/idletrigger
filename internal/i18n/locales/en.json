@@ -42,5 +42,8 @@
   "cli_usage": "Usage: IdleTrigger <command>\n\nCommands:\n  sleep        Suspend system\n  hibernate    Hibernate system\n  shutdown     Shut down system\n  lock         Lock workstation\n  nosleep      Stay Awake (on|off|toggle|status)\n  monitor      Idle monitor (on|off)\n  autostart    Auto-start (enable|disable|status)\n  status       Show current state\n  version      Print version",
   "cli_unknown": "Unknown command. Run without arguments to start the tray icon.",
   "version": "IdleTrigger v1.3.0",
-  "msg_action_failed": "Action failed:\n%s"
+  "msg_action_failed": "Action failed:\n%s",
+  "menu_theme_switch": "Auto Theme",
+  "menu_theme_light_time": "Light at",
+  "menu_theme_dark_time": "Dark at"
 }

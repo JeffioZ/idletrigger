@@ -65,6 +65,15 @@ type Config struct {
 	// LoggingEnabled writes debug logs to IdleTrigger.log.
 	LoggingEnabled bool `toml:"logging_enabled"`
 
+	// ThemeSwitchEnabled auto-switches Windows theme at scheduled times.
+	ThemeSwitchEnabled bool `toml:"theme_switch_enabled"`
+
+	// ThemeLightTime is when to switch to light mode (HH:MM).
+	ThemeLightTime string `toml:"theme_light_time"`
+
+	// ThemeDarkTime is when to switch to dark mode (HH:MM).
+	ThemeDarkTime string `toml:"theme_dark_time"`
+
 	// StartMinimized: when true the tray icon starts without showing any window.
 	StartMinimized bool `toml:"start_minimized"`
 
@@ -87,6 +96,9 @@ func DefaultConfig() Config {
 		ProcessWatchEnabled:     false,
 		ProcessWatchList:        nil,
 		LoggingEnabled:          false,
+		ThemeSwitchEnabled:      false,
+		ThemeLightTime:          "07:00",
+		ThemeDarkTime:           "19:00",
 		StartMinimized:          true,
 		AutostartEnabled:        false,
 	}
