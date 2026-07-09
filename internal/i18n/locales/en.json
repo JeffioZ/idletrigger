@@ -25,7 +25,7 @@
   "menu_open_config": "Config",
   "menu_about": "About",
   "menu_exit": "Exit",
-  "about_text": "IdleTrigger v1.2.0\n\nStay Awake      Prevent system sleep, optionally keep screen on\nIdle Monitor    Auto-trigger sleep/hibernate/shutdown/lock\n                after a configurable idle timeout\nGlobal Hotkeys  Win+Shift+S (sleep) / L (lock) / N (stay awake)\nBattery Aware   Auto-disable stay-awake on battery power\nProcess Watch   Auto-enable stay-awake for specific apps\nCLI & IPC       Full command-line support with tray communication\n\nhttps://github.com/JeffioZ/idletrigger",
+  "about_text": "IdleTrigger v1.3.0\n\nStay Awake      Prevent system sleep, optionally keep screen on\nIdle Monitor    Auto-trigger sleep/hibernate/shutdown/lock\n                after a configurable idle timeout\nGlobal Hotkeys  Win+Shift+S (sleep) / L (lock) / N (stay awake)\nBattery Aware   Auto-disable stay-awake on battery power\nProcess Watch   Auto-enable stay-awake for specific apps\nCLI & IPC       Full command-line support with tray communication\n\nhttps://github.com/JeffioZ/idletrigger",
   "msg_sleeping": "Suspending...",
   "msg_hibernating": "Hibernating...",
   "msg_shutting_down": "Shutting down...",
@@ -41,6 +41,6 @@
   "tooltip_default": "IdleTrigger",
   "cli_usage": "Usage: IdleTrigger <command>\n\nCommands:\n  sleep        Suspend system\n  hibernate    Hibernate system\n  shutdown     Shut down system\n  lock         Lock workstation\n  nosleep      Stay Awake (on|off|toggle|status)\n  monitor      Idle monitor (on|off)\n  autostart    Auto-start (enable|disable|status)\n  status       Show current state\n  version      Print version",
   "cli_unknown": "Unknown command. Run without arguments to start the tray icon.",
-  "version": "IdleTrigger v1.2.0",
+  "version": "IdleTrigger v1.3.0",
   "msg_action_failed": "Action failed:\n%s"
 }
