@@ -15,3 +15,4 @@ var (
 )
 
 // IconDefault is also kept for backwards-compatibility as the legacy name.
+var IconData = IconDefault

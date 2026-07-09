@@ -5,8 +5,6 @@ package darkmode
 
 import (
 	"syscall"
-
-	"github.com/JeffioZ/idletrigger/internal/log"
 )
 
 // Enable forces the process to use the dark (immersive) theme.
@@ -27,15 +25,11 @@ func Enable() {
 	if proc1 != 0 {
 		const forceDark = 2
 		syscall.Syscall(proc1, 1, uintptr(forceDark), 0, 0)
-		log.Info("Dark mode: SetPreferredAppMode(ForceDark) called")
 	}
 
 	// FlushMenuThemes — ordinal 136
 	proc2, _, _ := getProc.Call(uintptr(uxtheme), uintptr(136))
 	if proc2 != 0 {
 		syscall.Syscall(proc2, 0, 0, 0, 0)
-		log.Info("Dark mode: FlushMenuThemes called")
-	} else {
-		log.Info("Dark mode: not available on this system")
 	}
 }

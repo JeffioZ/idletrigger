@@ -1,5 +1,7 @@
 # Build artifacts
 IdleTrigger.exe
+
+
 # Runtime config (generated next to the EXE)
 IdleTrigger.toml
 
@@ -13,5 +15,3 @@ IdleTrigger.toml
 # OS
 .DS_Store
 Thumbs.db
-IdleTrigger.log
-ROADMAP.md

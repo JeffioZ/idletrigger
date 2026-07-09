@@ -1,6 +1,5 @@
-// Package monitor — tracks user idle time via GetLastInputInfo and fires
-// callbacks at configurable thresholds (warning + trigger).
-// 通过 GetLastInputInfo 追踪用户空闲时间，在可配置阈值触发回调（警告 + 执行）。
+// Package monitor tracks user idle time via the Win32 GetLastInputInfo API
+// and fires callbacks when the configured threshold is approached and exceeded.
 package monitor
 
 import (

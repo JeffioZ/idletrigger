@@ -6,8 +6,6 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
-
-	"github.com/JeffioZ/idletrigger/internal/log"
 )
 
 type Action int
@@ -89,9 +87,8 @@ func NewManager(bindings []Binding, cbs Callbacks) *Manager {
 	}
 }
 
-// Register creates a hidden message-only window and registers each hotkey.
-// Returns Labels of bindings that failed (already in use by another app).
-// 创建隐藏的消息窗口并注册每个热键，返回注册失败的绑定标签（被其他应用占用）。
+// Register creates the message-only window and calls RegisterHotKey for each
+// binding.  Returns labels for any that failed (conflict with another app).
 func (m *Manager) Register() Failed {
 	user32 := windows.NewLazySystemDLL("user32.dll")
 
@@ -111,8 +108,6 @@ func (m *Manager) Register() Failed {
 
 	create := user32.NewProc("CreateWindowExW")
 	const wsOverlapped = 0
-	// HWND_MESSAGE (−1): creates a message-only window (invisible, no Z-order).
-	// HWND_MESSAGE（−1）：创建仅消息窗口，不可见，无 Z 序。
 	const hwndMessage = ^uintptr(0)
 	ret, _, _ := create.Call(
 		0, uintptr(unsafe.Pointer(className)), 0,
@@ -135,11 +130,6 @@ func (m *Manager) Register() Failed {
 		if r == 0 {
 			failed = append(failed, b.Label)
 		}
-	}
-	if len(failed) > 0 {
-		log.Info("Hotkey registration: %d succeeded, %d failed: %v", len(m.bindings)-len(failed), len(failed), failed)
-	} else {
-		log.Info("Hotkey registration: all %d succeeded", len(m.bindings))
 	}
 	return failed
 }
@@ -206,3 +196,4 @@ func (m *Manager) wndProc(hwnd windows.Handle, msg2 uint32, wParam, lParam uintp
 	return r
 }
 
+var _ = unsafe.Sizeof(0)

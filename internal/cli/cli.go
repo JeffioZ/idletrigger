@@ -12,15 +12,11 @@ import (
 	"github.com/JeffioZ/idletrigger/internal/ipc"
 	"github.com/JeffioZ/idletrigger/internal/monitor"
 	"github.com/JeffioZ/idletrigger/internal/nosleep"
-	"github.com/JeffioZ/idletrigger/internal/log"
 	"github.com/JeffioZ/idletrigger/internal/power"
 )
 
 // Run dispatches the first CLI argument.
 func Run(lang string) {
-	if len(os.Args) >= 2 {
-		log.Info("CLI command: %s", os.Args[1])
-	}
 	if len(os.Args) < 2 {
 		fmt.Println(i18n.T(lang, "cli_usage"))
 		return
