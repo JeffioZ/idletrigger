@@ -42,5 +42,8 @@
   "cli_usage": "用法：IdleTrigger <命令>\n\n命令：\n  sleep        进入睡眠\n  hibernate    进入休眠\n  shutdown     关闭系统\n  lock         锁定屏幕\n  nosleep      保持唤醒（on|off|toggle|status）\n  monitor      空闲监测（on|off）\n  autostart    开机自启（enable|disable|status）\n  status       查看当前状态\n  version      显示版本",
   "cli_unknown": "未知命令。不带参数运行以启动托盘图标。",
   "version": "IdleTrigger v1.3.0",
-  "msg_action_failed": "操作失败：\n%s"
+  "msg_action_failed": "操作失败：\n%s",
+  "menu_theme_switch": "自动主题",
+  "menu_theme_light_time": "浅色时间",
+  "menu_theme_dark_time": "深色时间"
 }

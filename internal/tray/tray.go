@@ -23,6 +23,7 @@ import (
 	"github.com/JeffioZ/idletrigger/internal/notify"
 	"github.com/JeffioZ/idletrigger/internal/power"
 	"github.com/JeffioZ/idletrigger/internal/processwatcher"
+	"github.com/JeffioZ/idletrigger/internal/themeswitch"
 )
 
 type Callbacks struct {
@@ -59,7 +60,8 @@ type trayState struct {
 	monMu sync.Mutex
 
 	hotkeyMgr *hotkey.Manager
-	procWatch *processwatcher.Watcher
+	procWatch   *processwatcher.Watcher
+	themeSched  *themeswitch.Scheduler
 
 	// All menu items that display localised text — updated on language switch.
 	labelItems []labelItem
@@ -74,6 +76,7 @@ type trayState struct {
 	mIdleTimeout *systray.MenuItem
 	mIdleAction  *systray.MenuItem
 	mHotkeys     *systray.MenuItem
+	mThemeSwitch *systray.MenuItem
 	timeoutItems []*systray.MenuItem
 	actionItems  []*systray.MenuItem
 }
@@ -119,6 +122,9 @@ func Run(cfg config.Config, cbs Callbacks) {
 		if s.cfg.ProcessWatchEnabled && len(s.cfg.ProcessWatchList) > 0 {
 			s.startProcessWatcher()
 		}
+		if s.cfg.ThemeSwitchEnabled {
+			s.startThemeScheduler()
+		}
 
 		s.eventLoop()
 	}
@@ -127,6 +133,7 @@ func Run(cfg config.Config, cbs Callbacks) {
 		s.stopMonitor()
 		s.stopHotkeys()
 		s.stopProcessWatcher()
+		s.stopThemeScheduler()
 		nosleep.Disable()
 	}
 
@@ -271,7 +278,19 @@ func (s *trayState) buildMenu() {
 				}
 				config.Save(s.cfg)
 
-			case <-s.mHotkeys.ClickedCh:
+			case <-s.mThemeSwitch.ClickedCh:
+			if s.mThemeSwitch.Checked() {
+				s.mThemeSwitch.Uncheck()
+				s.cfg.ThemeSwitchEnabled = false
+				s.stopThemeScheduler()
+			} else {
+				s.mThemeSwitch.Check()
+				s.cfg.ThemeSwitchEnabled = true
+				s.startThemeScheduler()
+			}
+			config.Save(s.cfg)
+
+		case <-s.mHotkeys.ClickedCh:
 				if s.mHotkeys.Checked() {
 					s.mHotkeys.Uncheck()
 					s.cfg.HotkeysEnabled = false
@@ -377,6 +396,11 @@ func (s *trayState) syncChecks() {
 		s.mHotkeys.Check()
 	} else {
 		s.mHotkeys.Uncheck()
+	}
+	if s.cfg.ThemeSwitchEnabled {
+		s.mThemeSwitch.Check()
+	} else {
+		s.mThemeSwitch.Uncheck()
 	}
 	s.updateTimeoutChecks()
 	s.updateActionChecks()
@@ -829,4 +853,21 @@ func (s *trayState) showError(actionKey string, err error) {
 	actionName := i18n.T(s.lang, actionKey)
 	msg := fmt.Sprintf(i18n.T(s.lang, "msg_action_failed"), actionName+": "+err.Error())
 	dialog.Warn(i18n.T(s.lang, "app_title"), "", msg)
+}
+
+func (s *trayState) startThemeScheduler() {
+	s.stopThemeScheduler()
+	if s.cfg.ThemeLightTime == "" || s.cfg.ThemeDarkTime == "" {
+		return
+	}
+	s.themeSched = themeswitch.NewScheduler(s.cfg.ThemeLightTime, s.cfg.ThemeDarkTime)
+	s.themeSched.Start()
+	mylog.Info("Theme scheduler started: light=%s dark=%s", s.cfg.ThemeLightTime, s.cfg.ThemeDarkTime)
+}
+
+func (s *trayState) stopThemeScheduler() {
+	if s.themeSched != nil {
+		s.themeSched.Stop()
+		s.themeSched = nil
+	}
 }
