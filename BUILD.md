@@ -10,7 +10,7 @@
 Verify:
 
 ```
-go version   # → go version go1.21+ windows/amd64
+go version   # → go version go1.21.x windows/amd64
 ```
 
 ## One-command Build

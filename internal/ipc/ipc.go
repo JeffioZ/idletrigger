@@ -35,6 +35,7 @@ func pipeSA() (*windows.SecurityAttributes, error) {
 	// and Built-in Administrators (BA).  This prevents sandboxed / low-integrity
 	// processes from connecting to the pipe.
 	// SDDL 格式：允许交互用户、SYSTEM 和管理员完全访问，阻止沙箱/低完整性进程连接管道。
+	// and Built-in Administrators (BA).
 	sddl, _ := syscall.UTF16PtrFromString("D:(A;;GA;;;IU)(A;;GA;;;SY)(A;;GA;;;BA)")
 
 	var sd unsafe.Pointer
@@ -139,3 +140,4 @@ func IsTrayRunning() bool {
 
 func Notify(cmd string) { Send(cmd) }
 
+var _ = unsafe.Sizeof(0)

@@ -14,7 +14,7 @@ A lightweight, single-EXE utility that lives in your system tray.  It can:
 ## Features
 
 - **System tray** — right-click menu with full settings control, no window
-- **Stay Awake** — prevent Windows from sleeping (also keeps screen on)
+- **Stay Awake** — prevent Windows from sleeping, optionally keep screen on
 - **Idle monitor** — auto-trigger after N minutes of no keyboard/mouse input
   (5 / 10 / 30 / 60 / 120 min, configurable from tray submenu)
 - **Global hotkeys** — `Win+Shift+S` sleep / `+L` lock / `+N` toggle stay-awake
@@ -87,7 +87,6 @@ process_watch_enabled = false      # auto stay-awake when apps run
 process_watch_list = []            # e.g. ["chrome.exe", "powerpnt.exe"]
 
 start_minimized = true
-logging_enabled = false            # debug log to IdleTrigger.log
 autostart_enabled = false
 ```
 
@@ -103,6 +102,7 @@ IdleTrigger/
 │   ├── icon_monitor.ico             # Tray: monitor active (amber)
 │   ├── icon_active.ico              # Tray: stay-awake active (green)
 │   ├── manifest.xml                 # DPI & dark mode manifest
+│   └── resource.rc                  # Windows resource script
 ├── scripts/
 │   └── gen_icon.py                  # Icon generator (dev-only)
 ├── internal/
@@ -124,7 +124,7 @@ IdleTrigger/
 │   ├── power/power.go               # Battery status + sleep capabilities
 │   ├── processwatcher/processwatcher.go  # Process-list watcher
 │   └── tray/tray.go                 # System-tray menu + IPC server
-├── rsrc_windows_386.syso          # Compiled resource (icon + manifest)
+├── rsrc_windows_amd64.syso          # Compiled resource (icon + manifest)
 ├── go.mod  go.sum  LICENSE  .gitattributes  .gitignore
 ├── README.md  README.zh-CN.md  BUILD.md  BUILD.zh-CN.md
 ```
@@ -135,6 +135,7 @@ IdleTrigger/
 Sleep / Hibernate / Shut Down / Lock
 ─────────────────
 Stay Awake
+  Keep Screen On
 ─────────────────
 Idle Monitor
   Timeout ▸  5 / 10 / 30 / 60 / 120 min
@@ -142,9 +143,9 @@ Idle Monitor
 ─────────────────
 Global Hotkeys
 Start with Windows
-Language ▸  English / 简体中文
+Language ▸  English / 中文
 ─────────────────
-Config
+Open Config File
 About
 ─────────────────
 Exit

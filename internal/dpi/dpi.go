@@ -3,11 +3,7 @@
 // v2 first (Windows 10 1703+), falling back to System DPI awareness.
 package dpi
 
-import (
-	"golang.org/x/sys/windows"
-
-	"github.com/JeffioZ/idletrigger/internal/log"
-)
+import "golang.org/x/sys/windows"
 
 // Enable declares this process as DPI-aware.  Call once at startup before
 // any UI is created.
@@ -20,7 +16,6 @@ func Enable() {
 	setCtx := user32.NewProc("SetProcessDpiAwarenessContext")
 	ret, _, _ := setCtx.Call(perMonitorV2)
 	if ret != 0 {
-		log.Info("DPI: Per-Monitor V2 enabled")
 		return
 	}
 
@@ -29,5 +24,4 @@ func Enable() {
 	setAware := shcore.NewProc("SetProcessDpiAwareness")
 	const perMonitor = 2
 	setAware.Call(uintptr(perMonitor))
-	log.Info("DPI: fallback to Per-Monitor V1")
 }

@@ -86,7 +86,6 @@ process_watch_enabled = false      # 进程关联自动唤醒
 process_watch_list = []            # 例如 ["chrome.exe", "powerpnt.exe"]
 
 start_minimized = true
-logging_enabled = false            # 调试日志输出到 IdleTrigger.log
 autostart_enabled = false
 ```
 
@@ -102,6 +101,7 @@ IdleTrigger/
 │   ├── icon_monitor.ico             # 托盘：监测中（琥珀色）
 │   ├── icon_active.ico              # 托盘：保持唤醒中（绿色）
 │   ├── manifest.xml                 # DPI 和深色模式清单
+│   └── resource.rc                  # Windows 资源脚本
 ├── scripts/
 │   └── gen_icon.py                  # 图标生成脚本（仅开发用）
 ├── internal/
@@ -110,7 +110,7 @@ IdleTrigger/
 │   ├── cli/cli.go                   # CLI 命令分发 + IPC 客户端
 │   ├── config/config.go             # TOML 配置读写
 │   ├── darkmode/darkmode.go         # uxtheme 序号 135/136
-│   ├── dialog/dialog.go             # MessageBox 对话框
+│   ├── dialog/dialog.go             # TaskDialog（深色适配）
 │   ├── dpi/dpi.go                   # Per-Monitor V2
 │   ├── hotkey/hotkey.go             # 全局热键
 │   ├── i18n/                        # 多语言
@@ -123,7 +123,7 @@ IdleTrigger/
 │   ├── power/power.go               # 电池状态 + 睡眠能力检测
 │   ├── processwatcher/processwatcher.go  # 进程列表监测
 │   └── tray/tray.go                 # 系统托盘菜单 + IPC 服务端
-├── rsrc_windows_386.syso          # 编译后的资源文件
+├── rsrc_windows_amd64.syso          # 编译后的资源文件
 ├── go.mod  go.sum  LICENSE  .gitattributes  .gitignore
 ├── README.md  README.zh-CN.md  BUILD.md  BUILD.zh-CN.md
 ```
@@ -134,6 +134,7 @@ IdleTrigger/
 睡眠 / 休眠 / 关机 / 锁屏
 ─────────────────
 保持唤醒
+  屏幕常亮
 ─────────────────
 空闲监测
   超时时间 ▸  5 / 10 / 30 / 60 / 120 分钟
@@ -141,10 +142,10 @@ IdleTrigger/
 ─────────────────
 全局热键
 开机自启
-语言切换 ▸  English / 简体中文
+语言 ▸  English / 中文
 ─────────────────
-编辑配置
-软件信息
+打开配置文件
+关于
 ─────────────────
 退出
 ```

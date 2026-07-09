@@ -1,5 +1,5 @@
-// Package notify — Windows balloon-tip notifications via Shell_NotifyIcon.
-// Windows 托盘气泡通知，通过 Shell_NotifyIcon + NIF_INFO 实现。  These show a brief
+// Package notify provides Windows balloon-tip notifications via the
+// system-tray icon (NOTIFYICONDATA + NIF_INFO).  These show a brief
 // message near the tray without stealing focus.
 package notify
 

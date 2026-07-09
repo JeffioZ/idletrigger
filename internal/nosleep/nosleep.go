@@ -1,5 +1,5 @@
-// Package nosleep — prevents Windows from sleeping via SetThreadExecutionState.
-// 通过 SetThreadExecutionState API 阻止 Windows 自动休眠。
+// Package nosleep prevents Windows from automatically activating sleep mode
+// or turning off the display via the Win32 SetThreadExecutionState API.
 //
 // Usage:
 //
@@ -15,8 +15,6 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
-
-	"github.com/JeffioZ/idletrigger/internal/log"
 )
 
 var (
@@ -44,7 +42,6 @@ func Enable(keepScreenOn bool) {
 
 	keepScr.Store(keepScreenOn)
 
-	log.Info("NoSleep enabled (keepScreenOn=%v)", keepScreenOn)
 	if enabled.Swap(true) {
 		// Already running — just update the flags at the next tick.
 		return
@@ -59,7 +56,6 @@ func Disable() {
 	mu.Lock()
 	defer mu.Unlock()
 
-	log.Info("NoSleep disabled")
 	if !enabled.Swap(false) {
 		return // already disabled
 	}
