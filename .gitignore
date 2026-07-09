@@ -1,0 +1,17 @@
+# Build artifacts
+IdleTrigger.exe
+# Runtime config (generated next to the EXE)
+IdleTrigger.toml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+IdleTrigger.log
+ROADMAP.md

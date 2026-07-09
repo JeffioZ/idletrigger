@@ -1,0 +1,70 @@
+// Package log provides lightweight file logging for debugging.
+// Logs are written to IdleTrigger.log next to the executable;
+// falls back to %TEMP% if the EXE directory is not writable.
+package log
+
+import (
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"sync"
+	"time"
+)
+
+var (
+	mu   sync.Mutex
+	w    io.WriteCloser
+	on   bool
+)
+
+// Init opens the log file.  If enabled is false the package becomes a
+// silent no-op.  exeDir should be os.Executable()'s directory.
+func Init(enabled bool, exeDir string) {
+	on = enabled
+	if !on {
+		return
+	}
+
+	path := filepath.Join(exeDir, "IdleTrigger.log")
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		// Fall back to %TEMP%.
+		path = filepath.Join(os.TempDir(), "IdleTrigger.log")
+		f, err = os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+		if err != nil {
+			on = false
+			return
+		}
+	}
+
+	w = f
+	write("=== IdleTrigger session started ===")
+}
+
+// Close flushes and closes the log file.
+func Close() {
+	if w != nil {
+		write("=== IdleTrigger session ended ===")
+		w.Close()
+		w = nil
+	}
+}
+
+// Info writes a timestamped informational message.
+func Info(format string, args ...interface{}) {
+	if !on {
+		return
+	}
+	write(fmt.Sprintf(format, args...))
+}
+
+func write(msg string) {
+	mu.Lock()
+	defer mu.Unlock()
+	if w == nil {
+		return
+	}
+	ts := time.Now().Format("2006-01-02 15:04:05.000")
+	fmt.Fprintf(w, "[%s] %s\n", ts, msg)
+}
