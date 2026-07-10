@@ -26,9 +26,7 @@ jobs:
 
       - name: Generate .syso
         run: |
-          go install github.com/akavel/rsrc@v0.10.2
-          ~/go/bin/rsrc -arch 386 -ico assets/app.ico -manifest assets/manifest.xml -o rsrc_windows_386.syso
-          ~/go/bin/rsrc -arch amd64 -ico assets/app.ico -manifest assets/manifest.xml -o rsrc_windows_amd64.syso
+          go run ./scripts/gen_resource.go -version ${{ github.ref_name }}
 
       - name: Build
         run: |
@@ -56,9 +54,34 @@ jobs:
             IdleTrigger-x64.exe
             SHA256SUMS.txt
           body: |
+            ## English
+
+            ### Highlights
+
+            - Reworked the tray control panel with clearer grouped controls and dark/light styling.
+            - Added restart to quick actions and made Stay Awake mutually exclusive with Idle Monitor.
+            - Improved Day/Night mode with visible switch times, async theme switching, and theme refresh fallback.
+            - Added Windows version metadata to release executables and refreshed tray/application icons.
+            - Added auto-start path repair and improved tray tooltip/status text.
+
             Download the native 64-bit build `IdleTrigger-x64.exe` (recommended) or
             the 32-bit compatibility build `IdleTrigger-x86.exe` — no installation needed.
 
             See [README.md](https://github.com/JeffioZ/idletrigger/blob/master/README.md) for full documentation.
+
+            ## 中文
+
+            ### 更新重点
+
+            - 重做托盘控制面板，分组更清晰，并适配深浅色样式。
+            - 快速操作新增重启，并让保持唤醒与空闲监测保持互斥。
+            - 昼夜模式新增切换时间展示，主题切换改为异步，并增强刷新兜底。
+            - 发布 EXE 增加 Windows 版本信息，并更新应用和托盘图标。
+            - 增加开机自启路径自动修复，优化托盘提示和状态文案。
+
+            下载原生 64 位版本 `IdleTrigger-x64.exe`（推荐），或下载 32 位兼容版本
+            `IdleTrigger-x86.exe`。无需安装，直接运行即可。
+
+            完整说明见 [README.zh-CN.md](https://github.com/JeffioZ/idletrigger/blob/master/README.zh-CN.md)。
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
