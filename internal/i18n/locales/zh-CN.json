@@ -84,5 +84,8 @@
   "theme_time_1800": "18:00",
   "theme_time_1900": "19:00",
   "theme_time_2000": "20:00",
-  "theme_time_2100": "21:00"
+  "theme_time_2100": "21:00",
+  "menu_theme_sunrise": "日出日落",
+  "menu_theme_battery_dark": "电池深色",
+  "menu_theme_skip_fullscreen": "跳过全屏"
 }
