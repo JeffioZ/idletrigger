@@ -274,6 +274,9 @@ func (s *trayState) buildMenu() {
 	s.mAutostart = systray.AddMenuItemCheckbox(T("menu_autostart"), "", s.cfg.AutostartEnabled)
 	s.registerLabel(s.mAutostart, "menu_autostart")
 
+	mOpenCfg := systray.AddMenuItem(T("menu_open_config"), "")
+	s.registerLabel(mOpenCfg, "menu_open_config")
+
 	// Language submenu
 	mLang := systray.AddMenuItem(T("menu_language"), "")
 	s.registerLabel(mLang, "menu_language")
@@ -281,8 +284,6 @@ func (s *trayState) buildMenu() {
 	s.registerLabel(mLangEn, "menu_lang_en")
 	mLangZh := mLang.AddSubMenuItemCheckbox(T("menu_lang_zh"), "", s.cfg.Language == "zh-CN")
 	s.registerLabel(mLangZh, "menu_lang_zh")
-	mOpenCfg := systray.AddMenuItem(T("menu_open_config"), "")
-	s.registerLabel(mOpenCfg, "menu_open_config")
 	mAbout := systray.AddMenuItem(T("menu_about"), "")
 	s.registerLabel(mAbout, "menu_about")
 
