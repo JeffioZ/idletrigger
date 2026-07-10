@@ -156,6 +156,8 @@ func Run(cfg config.Config, cbs Callbacks) {
 			}
 		}()
 		go s.batteryLoop()
+
+		systray.OnLeftClick = func() { s.showPopup() }
 	}
 
 	onExit := func() {
@@ -324,9 +326,6 @@ func (s *trayState) buildMenu() {
 
 	
 
-	systray.OnLeftClick = func() {
-		s.showPopup()
-	}
 }
 
 func (s *trayState) wireSubmenus() {
