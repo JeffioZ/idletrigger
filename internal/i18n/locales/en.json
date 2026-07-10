@@ -92,5 +92,6 @@
   "about_body": "Stay Awake     Prevent system sleep\nIdle Monitor   Auto-trigger after N min of inactivity\nGlobal Hotkeys Win+Shift+S/L/N\nDay/Night      Auto-switch theme by time or sunrise\nBattery Aware  Auto-disable on battery\nProcess Watch  Auto-enable for specific apps\n\nhttps://github.com/JeffioZ/idletrigger",
   "tooltip_theme": "Day/Night",
   "tooltip_hotkeys": "Hotkeys active",
-  "menu_theme_enable": "Auto Switch"
+  "menu_theme_enable": "Auto Switch",
+  "menu_nosleep_enable": "Enable Stay Awake"
 }
