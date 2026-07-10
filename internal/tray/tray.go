@@ -67,34 +67,8 @@ type trayState struct {
 	batteryBlocked bool
 
 	// All menu items that display localised text — updated on language switch.
-	labelItems []labelItem
 
 	// menu items (action items for capability checking)
-	mSleep          *systray.MenuItem
-	mHibernate      *systray.MenuItem
-	mShutdown       *systray.MenuItem
-	mLock           *systray.MenuItem
-	mNoSleep        *systray.MenuItem
-	mNoSleepEnable  *systray.MenuItem
-	mProcessWatch  *systray.MenuItem
-	mIdleEnable     *systray.MenuItem
-	mIdleTimeout    *systray.MenuItem
-	mIdleAction     *systray.MenuItem
-	mHotkeys        *systray.MenuItem
-	mAutostart      *systray.MenuItem
-	mThemeSwitch    *systray.MenuItem
-	mThemeEnable    *systray.MenuItem
-	mThemeLightAt   *systray.MenuItem
-	mThemeDarkAt    *systray.MenuItem
-	mThemeSwitchNow      *systray.MenuItem
-	mThemeRepair         *systray.MenuItem
-	mThemeSunrise        *systray.MenuItem
-	mThemeBatteryDark    *systray.MenuItem
-	mThemeSkipFullscreen *systray.MenuItem
-	themeLightItems []*systray.MenuItem
-	themeDarkItems  []*systray.MenuItem
-	timeoutItems    []*systray.MenuItem
-	actionItems     []*systray.MenuItem
 }
 
 type stateRequest struct {
@@ -102,10 +76,6 @@ type stateRequest struct {
 	result chan string
 }
 
-type labelItem struct {
-	item *systray.MenuItem
-	key  string
-}
 
 // Run starts the system-tray loop. Blocks until Exit.
 func Run(cfg config.Config, cbs Callbacks) {
@@ -124,7 +94,6 @@ func Run(cfg config.Config, cbs Callbacks) {
 		if enabled, err := autostart.IsEnabled(); err == nil {
 			s.cfg.AutostartEnabled = enabled
 		}
-		
 
 		// Config compatibility: if both NoSleep and idle monitor are enabled,
 		// resolve the conflict — NoSleep takes priority.
@@ -133,7 +102,7 @@ func Run(cfg config.Config, cbs Callbacks) {
 		}
 		s.batteryBlocked = batteryPolicyBlocks(s.cfg, power.GetStatus())
 		s.reconcileRuntime()
-		
+
 		s.updateIcon()
 
 		// Hotkeys
@@ -196,238 +165,12 @@ func (s *trayState) call(fn func() string) string {
 	return <-result
 }
 
-// ---- menu construction -------------------------------------------------
 
-func (s *trayState) buildMenu() {
-	T := func(key string) string { return i18n.T(s.lang, key) }
-
-	systray.SetIcon(assets.IconDefault)
-	systray.SetTitle(T("app_title"))
-	systray.SetTooltip(T("tooltip_default"))
-
-	s.mSleep = systray.AddMenuItem(T("menu_sleep"), "")
-	s.registerLabel(s.mSleep, "menu_sleep")
-	s.mHibernate = systray.AddMenuItem(T("menu_hibernate"), "")
-	s.registerLabel(s.mHibernate, "menu_hibernate")
-	s.mShutdown = systray.AddMenuItem(T("menu_shutdown"), "")
-	s.registerLabel(s.mShutdown, "menu_shutdown")
-	s.mLock = systray.AddMenuItem(T("menu_lock"), "")
-	s.registerLabel(s.mLock, "menu_lock")
-	// Disable actions the system does not support.
-	s.applyCapabilities()
-
-	systray.AddSeparator()
-
-	s.mNoSleep = systray.AddMenuItemCheckbox(T("menu_nosleep"), "", s.cfg.NoSleepEnabled)
-	s.registerLabel(s.mNoSleep, "menu_nosleep")
-	s.mProcessWatch = systray.AddMenuItemCheckbox(T("menu_process_watch"), "", s.cfg.ProcessWatchEnabled)
-	s.registerLabel(s.mProcessWatch, "menu_process_watch")
-
-
-	systray.AddSeparator()
-
-	idleOn := s.cfg.IdleTimeoutMinutes > 0
-	s.mIdleEnable = systray.AddMenuItemCheckbox(T("menu_idle_enable"), "", idleOn)
-	s.registerLabel(s.mIdleEnable, "menu_idle_enable")
-	s.mIdleTimeout = s.mIdleEnable.AddSubMenuItem(T("menu_idle_timeout"), "")
-	s.registerLabel(s.mIdleTimeout, "menu_idle_timeout")
-	s.timeoutItems = make([]*systray.MenuItem, len(timeoutOptions))
-	for i, opt := range timeoutOptions {
-		checked := s.cfg.IdleTimeoutMinutes == opt.minutes
-		s.timeoutItems[i] = s.mIdleTimeout.AddSubMenuItemCheckbox(T(opt.key), "", checked)
-		s.registerLabel(s.timeoutItems[i], opt.key)
-	}
-	s.mIdleAction = s.mIdleEnable.AddSubMenuItem(T("menu_idle_action"), "")
-	s.registerLabel(s.mIdleAction, "menu_idle_action")
-	s.actionItems = make([]*systray.MenuItem, len(actionOptions))
-	for i, opt := range actionOptions {
-		checked := s.cfg.IdleAction == opt.action
-		s.actionItems[i] = s.mIdleAction.AddSubMenuItemCheckbox(T(opt.key), "", checked)
-		s.registerLabel(s.actionItems[i], opt.key)
-	}
-
-	// Auto Theme Switch submenu
-	systray.AddSeparator()
-	s.mThemeSwitch = systray.AddMenuItem(T("menu_theme_switch"), "")
-	s.registerLabel(s.mThemeSwitch, "menu_theme_switch")
-
-	// Enable toggle as first submenu item
-	s.mThemeEnable = s.mThemeSwitch.AddSubMenuItemCheckbox(T("menu_theme_enable"), "", s.cfg.ThemeSwitchEnabled)
-	s.registerLabel(s.mThemeEnable, "menu_theme_enable")
-
-	// Light time submenu
-	s.mThemeLightAt = s.mThemeSunrise.AddSubMenuItem(T("menu_theme_light_time"), "")
-	s.registerLabel(s.mThemeLightAt, "menu_theme_light_time")
-	s.themeLightItems = make([]*systray.MenuItem, 3)
-	lightKeys := []string{"theme_time_0600", "theme_time_0700", "theme_time_0800"}
-	lightVals := []string{"06:00", "07:00", "08:00"}
-	for i := 0; i < 3; i++ {
-		checked := s.cfg.ThemeLightTime == lightVals[i]
-		s.themeLightItems[i] = s.mThemeLightAt.AddSubMenuItemCheckbox(T(lightKeys[i]), "", checked)
-		s.registerLabel(s.themeLightItems[i], lightKeys[i])
-	}
-
-	// Dark time submenu
-	s.mThemeDarkAt = s.mThemeSunrise.AddSubMenuItem(T("menu_theme_dark_time"), "")
-	s.registerLabel(s.mThemeDarkAt, "menu_theme_dark_time")
-	s.themeDarkItems = make([]*systray.MenuItem, 4)
-	darkKeys := []string{"theme_time_1800", "theme_time_1900", "theme_time_2000", "theme_time_2100"}
-	darkVals := []string{"18:00", "19:00", "20:00", "21:00"}
-	for i := 0; i < 4; i++ {
-		checked := s.cfg.ThemeDarkTime == darkVals[i]
-		s.themeDarkItems[i] = s.mThemeDarkAt.AddSubMenuItemCheckbox(T(darkKeys[i]), "", checked)
-		s.registerLabel(s.themeDarkItems[i], darkKeys[i])
-	}
-
-	// Manual switch + repair
-	s.mThemeSwitchNow = s.mThemeSwitch.AddSubMenuItem(T("menu_theme_switch_now"), "")
-	s.registerLabel(s.mThemeSwitchNow, "menu_theme_switch_now")
-	s.mThemeRepair = s.mThemeSwitch.AddSubMenuItem(T("menu_theme_repair"), "")
-	s.registerLabel(s.mThemeRepair, "menu_theme_repair")
-
-
-	// Sunrise mode toggle
-	s.mThemeSunrise = s.mThemeSwitch.AddSubMenuItemCheckbox(T("menu_theme_sunrise"), "", s.cfg.ThemeMode == "sunrise")
-	s.registerLabel(s.mThemeSunrise, "menu_theme_sunrise")
-
-
-	// Battery dark toggle
-	s.mThemeBatteryDark = s.mThemeSwitch.AddSubMenuItemCheckbox(T("menu_theme_battery_dark"), "", s.cfg.ThemeDarkOnBattery)
-	s.registerLabel(s.mThemeBatteryDark, "menu_theme_battery_dark")
-
-	// Skip fullscreen toggle
-	s.mThemeSkipFullscreen = s.mThemeSwitch.AddSubMenuItemCheckbox(T("menu_theme_skip_fullscreen"), "", s.cfg.ThemeSkipFullscreen)
-	s.registerLabel(s.mThemeSkipFullscreen, "menu_theme_skip_fullscreen")
-
-	systray.AddSeparator()
-	s.mHotkeys = systray.AddMenuItemCheckbox(T("menu_hotkeys"), "", s.cfg.HotkeysEnabled)
-	s.registerLabel(s.mHotkeys, "menu_hotkeys")
-	s.mAutostart = systray.AddMenuItemCheckbox(T("menu_autostart"), "", s.cfg.AutostartEnabled)
-	s.registerLabel(s.mAutostart, "menu_autostart")
-
-	mOpenCfg := systray.AddMenuItem(T("menu_open_config"), "")
-	s.registerLabel(mOpenCfg, "menu_open_config")
-
-	// Language submenu
-	mLang := systray.AddMenuItem(T("menu_language"), "")
-	s.registerLabel(mLang, "menu_language")
-	mLangEn := mLang.AddSubMenuItemCheckbox(T("menu_lang_en"), "", s.cfg.Language != "zh-CN")
-	s.registerLabel(mLangEn, "menu_lang_en")
-	mLangZh := mLang.AddSubMenuItemCheckbox(T("menu_lang_zh"), "", s.cfg.Language == "zh-CN")
-	s.registerLabel(mLangZh, "menu_lang_zh")
-	mAbout := systray.AddMenuItem(T("menu_about"), "")
-	s.registerLabel(mAbout, "menu_about")
-
-	systray.AddSeparator()
-	mExit := systray.AddMenuItem(T("menu_exit"), "")
-	s.registerLabel(mExit, "menu_exit")
-
-	
-
-	
-
-}
-
-func (s *trayState) wireSubmenus() {
-	for i, item := range s.timeoutItems {
-		idx := i
-		it := item
-		go func() {
-			for range it.ClickedCh {
-				s.post(func() {
-					s.cfg.IdleTimeoutMinutes = timeoutOptions[idx].minutes
-					s.cfg.NoSleepEnabled = false
-					s.updateTimeoutChecks()
-					s.reconcileRuntime()
-					
-					s.updateIcon()
-					s.saveConfig()
-				})
-			}
-		}()
-	}
-	for i, item := range s.actionItems {
-		idx := i
-		it := item
-		go func() {
-			for range it.ClickedCh {
-				s.post(func() {
-					s.cfg.IdleAction = actionOptions[idx].action
-					s.updateActionChecks()
-					if s.mon != nil {
-						s.startMonitor()
-					}
-					s.saveConfig()
-				})
-			}
-		}()
-	}
-}
 
 // ---- state sync -------------------------------------------------------
 
-func (s *trayState) syncChecks() {
-	if s.cfg.NoSleepEnabled {
-		s.mNoSleepEnable.Check()
-	} else {
-		s.mNoSleepEnable.Uncheck()
-	}
-	if s.cfg.IdleTimeoutMinutes > 0 {
-		s.mIdleEnable.Check()
-		s.mIdleTimeout.Show()
-		s.mIdleAction.Show()
-	} else {
-		s.mIdleEnable.Uncheck()
-		s.mIdleTimeout.Hide()
-		s.mIdleAction.Hide()
-	}
-	if s.cfg.ProcessWatchEnabled {
-		s.mProcessWatch.Check()
-	} else {
-		s.mProcessWatch.Uncheck()
-	}
-	if s.cfg.HotkeysEnabled {
-		s.mHotkeys.Check()
-	} else {
-		s.mHotkeys.Uncheck()
-	}
-	if s.cfg.ThemeSwitchEnabled {
-		s.mThemeEnable.Check()
-	} else {
-		s.mThemeSwitch.Uncheck()
-	}
-	// Hide time submenus when sunrise mode is active
-	// 日出日落模式开启时隐藏时间子菜单
-	if s.cfg.ThemeMode == "sunrise" {
-		s.mThemeLightAt.Hide()
-		s.mThemeDarkAt.Hide()
-	} else {
-		s.mThemeLightAt.Show()
-		s.mThemeDarkAt.Show()
-	}
-	s.updateTimeoutChecks()
-	s.updateActionChecks()
-}
 
-func (s *trayState) updateTimeoutChecks() {
-	for i, item := range s.timeoutItems {
-		if s.cfg.IdleTimeoutMinutes == timeoutOptions[i].minutes {
-			item.Check()
-		} else {
-			item.Uncheck()
-		}
-	}
-}
 
-func (s *trayState) updateActionChecks() {
-	for i, item := range s.actionItems {
-		if s.cfg.IdleAction == actionOptions[i].action {
-			item.Check()
-		} else {
-			item.Uncheck()
-		}
-	}
-}
 
 // ---- icon state -------------------------------------------------------
 
@@ -577,41 +320,13 @@ func (s *trayState) toggleNoSleep() {
 	}
 	s.reconcileRuntime()
 	mylog.Info("NoSleep toggled: enabled=%v keep_screen_on=%v", nosleep.IsEnabled(), nosleep.IsKeepingScreenOn())
-	
+
 	s.updateIcon()
 	s.saveConfig()
 }
 
 // applyCapabilities disables menu items for sleep/hibernate if the
 // system does not support them, and adjusts the idle-action options.
-func (s *trayState) applyCapabilities() {
-	caps := power.GetCapabilities()
-	if !caps.SleepAvailable {
-		s.mSleep.Disable()
-	}
-	if !caps.HibernateAvailable {
-		s.mHibernate.Disable()
-	}
-	// Shutdown and Lock are always available.
-
-	// If the configured idle action is unavailable, fall back to Lock.
-	if s.cfg.IdleAction == config.ActionSleep && !caps.SleepAvailable {
-		s.cfg.IdleAction = config.ActionLock
-	}
-	if s.cfg.IdleAction == config.ActionHibernate && !caps.HibernateAvailable {
-		s.cfg.IdleAction = config.ActionLock
-	}
-
-	// Hide idle-action submenu items that are unavailable.
-	for i, opt := range actionOptions {
-		if opt.action == config.ActionSleep && !caps.SleepAvailable {
-			s.actionItems[i].Hide()
-		}
-		if opt.action == config.ActionHibernate && !caps.HibernateAvailable {
-			s.actionItems[i].Hide()
-		}
-	}
-}
 
 // ---- process watcher --------------------------------------------------
 
@@ -627,7 +342,7 @@ func (s *trayState) startProcessWatcher() {
 					mylog.Info("Process watcher: watched app detected, requesting NoSleep")
 					s.processNoSleep = true
 					s.reconcileRuntime()
-					
+
 					s.updateIcon()
 				})
 			},
@@ -636,7 +351,7 @@ func (s *trayState) startProcessWatcher() {
 					mylog.Info("Process watcher: no watched apps running, releasing NoSleep")
 					s.processNoSleep = false
 					s.reconcileRuntime()
-					
+
 					s.updateIcon()
 				})
 			},
@@ -673,7 +388,7 @@ func (s *trayState) refreshBatteryPolicy() {
 	s.batteryBlocked = blocked
 	mylog.Info("Battery policy changed: nosleep_blocked=%v", blocked)
 	s.reconcileRuntime()
-	
+
 	s.updateIcon()
 }
 
@@ -720,7 +435,7 @@ func (s *trayState) handleIPCState(cmd string) string {
 		s.cfg.KeepScreenOn = false
 		s.cfg.IdleTimeoutMinutes = 0
 		s.reconcileRuntime()
-		
+
 		s.updateIcon()
 		if err := s.saveConfigErr(); err != nil {
 			return "err: " + err.Error()
@@ -731,7 +446,7 @@ func (s *trayState) handleIPCState(cmd string) string {
 		s.cfg.KeepScreenOn = true
 		s.cfg.IdleTimeoutMinutes = 0
 		s.reconcileRuntime()
-		
+
 		s.updateIcon()
 		if err := s.saveConfigErr(); err != nil {
 			return "err: " + err.Error()
@@ -740,7 +455,7 @@ func (s *trayState) handleIPCState(cmd string) string {
 	case "nosleep:off":
 		s.cfg.NoSleepEnabled = false
 		s.reconcileRuntime()
-		
+
 		s.updateIcon()
 		if err := s.saveConfigErr(); err != nil {
 			return "err: " + err.Error()
@@ -758,7 +473,7 @@ func (s *trayState) handleIPCState(cmd string) string {
 		}
 		s.cfg.NoSleepEnabled = false
 		s.reconcileRuntime()
-		
+
 		s.updateIcon()
 		if err := s.saveConfigErr(); err != nil {
 			return "err: " + err.Error()
@@ -767,7 +482,7 @@ func (s *trayState) handleIPCState(cmd string) string {
 	case "monitor:off":
 		s.cfg.IdleTimeoutMinutes = 0
 		s.reconcileRuntime()
-		
+
 		s.updateIcon()
 		if err := s.saveConfigErr(); err != nil {
 			return "err: " + err.Error()
@@ -797,8 +512,7 @@ func (s *trayState) handleIPCState(cmd string) string {
 			return "err: " + err.Error()
 		}
 		s.cfg = newCfg
-		// menu items removed (popup handles UI)
-		s.cfg.AutostartEnabled, _ = autostart.IsEnabled()
+			s.cfg.AutostartEnabled, _ = autostart.IsEnabled()
 		s.stopMonitor()
 		s.stopHotkeys()
 		s.stopProcessWatcher()
@@ -823,7 +537,7 @@ func (s *trayState) handleIPCState(cmd string) string {
 			s.startThemeScheduler()
 		}
 		s.reconcileRuntime()
-		
+
 		s.updateIcon()
 		return "ok"
 
@@ -920,9 +634,6 @@ func showAboutDialog(lang string) {
 }
 
 // registerLabel records a menu item so its text can be updated on language switch.
-func (s *trayState) registerLabel(item *systray.MenuItem, key string) {
-	s.labelItems = append(s.labelItems, labelItem{item, key})
-}
 
 // switchLanguage updates the active language, refreshes all menu text,
 // and persists the choice.
@@ -936,7 +647,6 @@ func (s *trayState) switchLanguage(lang string) {
 
 func (s *trayState) applyLanguage() {
 	T := func(key string) string { return i18n.T(s.lang, key) }
-	// labelItems removed (popup handles UI)
 	systray.SetTitle(T("app_title"))
 	s.updateIcon()
 }
@@ -986,57 +696,6 @@ func (s *trayState) stopThemeScheduler() {
 	}
 }
 
-func (s *trayState) wireThemeSubmenus() {
-	// Light time radio
-	lightVals := []string{"06:00", "07:00", "08:00"}
-	for i, item := range s.themeLightItems {
-		idx := i
-		it := item
-		go func() {
-			for range it.ClickedCh {
-				s.post(func() {
-					s.cfg.ThemeLightTime = lightVals[idx]
-					for j, ti := range s.themeLightItems {
-						if j == idx {
-							ti.Check()
-						} else {
-							ti.Uncheck()
-						}
-					}
-					if s.cfg.ThemeSwitchEnabled {
-						s.startThemeScheduler()
-					}
-					s.saveConfig()
-				})
-			}
-		}()
-	}
-	// Dark time radio
-	darkVals := []string{"18:00", "19:00", "20:00", "21:00"}
-	for i, item := range s.themeDarkItems {
-		idx := i
-		it := item
-		go func() {
-			for range it.ClickedCh {
-				s.post(func() {
-					s.cfg.ThemeDarkTime = darkVals[idx]
-					for j, ti := range s.themeDarkItems {
-						if j == idx {
-							ti.Check()
-						} else {
-							ti.Uncheck()
-						}
-					}
-					if s.cfg.ThemeSwitchEnabled {
-						s.startThemeScheduler()
-					}
-					s.saveConfig()
-				})
-			}
-		}()
-	}
-}
-
 
 func (s *trayState) showPopup() {
 	popup.Show(popup.State{
@@ -1054,27 +713,102 @@ func (s *trayState) showPopup() {
 		IsChinese:           s.lang == "zh-CN",
 	}, func(action popup.Action, value int) {
 		switch action {
-		case popup.ActSleep:               actions.Sleep()
-		case popup.ActHibernate:           actions.Hibernate()
-		case popup.ActShutdown:            actions.Shutdown()
-		case popup.ActLock:                actions.Lock()
-		case popup.ActNoSleepToggle:       s.toggleNoSleep()
-		case popup.ActProcessWatchToggle:  s.cfg.ProcessWatchEnabled = !s.cfg.ProcessWatchEnabled; s.reconcileRuntime(); s.saveConfig()
-		case popup.ActIdleToggle:          if s.cfg.IdleTimeoutMinutes > 0 { s.cfg.IdleTimeoutMinutes = 0 } else { s.cfg.IdleTimeoutMinutes = 30 }; s.reconcileRuntime(); s.updateIcon(); s.saveConfig()
-		case popup.ActIdleTimeout:         if value >= 0 { times := []int{5,10,30,60,120}; s.cfg.IdleTimeoutMinutes = times[value]; s.reconcileRuntime(); s.saveConfig() }
-		case popup.ActIdleAction:          if value >= 0 { acts := []config.Action{config.ActionSleep,config.ActionHibernate,config.ActionShutdown,config.ActionLock}; s.cfg.IdleAction = acts[value]; s.saveConfig() }
-		case popup.ActThemeToggle:         s.cfg.ThemeSwitchEnabled = !s.cfg.ThemeSwitchEnabled; if s.cfg.ThemeSwitchEnabled { s.startThemeScheduler() } else { s.stopThemeScheduler() }; s.updateIcon(); s.saveConfig()
-		case popup.ActSunriseToggle:       s.cfg.ThemeMode = map[bool]string{true:"fixed",false:"sunrise"}[s.cfg.ThemeMode=="sunrise"]; s.stopThemeScheduler(); if s.cfg.ThemeSwitchEnabled { s.startThemeScheduler() }; s.saveConfig()
-		case popup.ActBatteryToggle:       s.cfg.ThemeDarkOnBattery = !s.cfg.ThemeDarkOnBattery; s.saveConfig()
-		case popup.ActFullscreenToggle:    s.cfg.ThemeSkipFullscreen = !s.cfg.ThemeSkipFullscreen; s.saveConfig()
-		case popup.ActSwitchTheme:         cur := themeswitch.Current(); if cur == themeswitch.ModeDark { themeswitch.Switch(themeswitch.ModeLight) } else { themeswitch.Switch(themeswitch.ModeDark) }
-		case popup.ActRepairTheme:         themeswitch.Switch(themeswitch.Current())
-		case popup.ActHotkeyToggle:        s.cfg.HotkeysEnabled = !s.cfg.HotkeysEnabled; if s.cfg.HotkeysEnabled { s.startHotkeys() } else { s.stopHotkeys() }; s.saveConfig()
-		case popup.ActAutostartToggle:     s.cfg.AutostartEnabled = !s.cfg.AutostartEnabled; if s.cfg.AutostartEnabled { autostart.Enable() } else { autostart.Disable() }; s.saveConfig()
-		case popup.ActLanguage:            if value == 0 { s.switchLanguage("en") } else { s.switchLanguage("zh-CN") }
-		case popup.ActConfig:              p, _ := config.Path(); exec.Command("notepad.exe", p).Start()
-		case popup.ActAbout:               showAboutDialog(s.lang)
-		case popup.ActExit:                systray.Quit()
+		case popup.ActSleep:
+			actions.Sleep()
+		case popup.ActHibernate:
+			actions.Hibernate()
+		case popup.ActShutdown:
+			actions.Shutdown()
+		case popup.ActLock:
+			actions.Lock()
+		case popup.ActNoSleepToggle:
+			s.toggleNoSleep()
+		case popup.ActProcessWatchToggle:
+			s.cfg.ProcessWatchEnabled = !s.cfg.ProcessWatchEnabled
+			s.reconcileRuntime()
+			s.saveConfig()
+		case popup.ActIdleToggle:
+			if s.cfg.IdleTimeoutMinutes > 0 {
+				s.cfg.IdleTimeoutMinutes = 0
+			} else {
+				s.cfg.IdleTimeoutMinutes = 30
+			}
+			s.reconcileRuntime()
+			s.updateIcon()
+			s.saveConfig()
+		case popup.ActIdleTimeout:
+			if value >= 0 {
+				times := []int{5, 10, 30, 60, 120}
+				s.cfg.IdleTimeoutMinutes = times[value]
+				s.reconcileRuntime()
+				s.saveConfig()
+			}
+		case popup.ActIdleAction:
+			if value >= 0 {
+				acts := []config.Action{config.ActionSleep, config.ActionHibernate, config.ActionShutdown, config.ActionLock}
+				s.cfg.IdleAction = acts[value]
+				s.saveConfig()
+			}
+		case popup.ActThemeToggle:
+			s.cfg.ThemeSwitchEnabled = !s.cfg.ThemeSwitchEnabled
+			if s.cfg.ThemeSwitchEnabled {
+				s.startThemeScheduler()
+			} else {
+				s.stopThemeScheduler()
+			}
+			s.updateIcon()
+			s.saveConfig()
+		case popup.ActSunriseToggle:
+			s.cfg.ThemeMode = map[bool]string{true: "fixed", false: "sunrise"}[s.cfg.ThemeMode == "sunrise"]
+			s.stopThemeScheduler()
+			if s.cfg.ThemeSwitchEnabled {
+				s.startThemeScheduler()
+			}
+			s.saveConfig()
+		case popup.ActBatteryToggle:
+			s.cfg.ThemeDarkOnBattery = !s.cfg.ThemeDarkOnBattery
+			s.saveConfig()
+		case popup.ActFullscreenToggle:
+			s.cfg.ThemeSkipFullscreen = !s.cfg.ThemeSkipFullscreen
+			s.saveConfig()
+		case popup.ActSwitchTheme:
+			cur := themeswitch.Current()
+			if cur == themeswitch.ModeDark {
+				themeswitch.Switch(themeswitch.ModeLight)
+			} else {
+				themeswitch.Switch(themeswitch.ModeDark)
+			}
+		case popup.ActRepairTheme:
+			themeswitch.Switch(themeswitch.Current())
+		case popup.ActHotkeyToggle:
+			s.cfg.HotkeysEnabled = !s.cfg.HotkeysEnabled
+			if s.cfg.HotkeysEnabled {
+				s.startHotkeys()
+			} else {
+				s.stopHotkeys()
+			}
+			s.saveConfig()
+		case popup.ActAutostartToggle:
+			s.cfg.AutostartEnabled = !s.cfg.AutostartEnabled
+			if s.cfg.AutostartEnabled {
+				autostart.Enable()
+			} else {
+				autostart.Disable()
+			}
+			s.saveConfig()
+		case popup.ActLanguage:
+			if value == 0 {
+				s.switchLanguage("en")
+			} else {
+				s.switchLanguage("zh-CN")
+			}
+		case popup.ActConfig:
+			p, _ := config.Path()
+			exec.Command("notepad.exe", p).Start()
+		case popup.ActAbout:
+			showAboutDialog(s.lang)
+		case popup.ActExit:
+			systray.Quit()
 		}
 	}, func(key string) string { return i18n.T(s.lang, key) })
 }

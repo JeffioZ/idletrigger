@@ -253,4 +253,3 @@ func systrayMenuItemSelected(id uint32) {
 
 // OnLeftClick is called when the user left-clicks the tray icon.
 var OnLeftClick func()
-
