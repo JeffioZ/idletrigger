@@ -58,11 +58,11 @@ jobs:
 
             ### Highlights
 
-            - Reworked the tray control panel with clearer grouped controls and dark/light styling.
-            - Added restart to quick actions and made Stay Awake mutually exclusive with Idle Monitor.
-            - Improved Day/Night mode with visible switch times, async theme switching, and theme refresh fallback.
-            - Added Windows version metadata to release executables and refreshed tray/application icons.
-            - Added auto-start path repair and improved tray tooltip/status text.
+            - Added a Debug Log toggle to the tray control panel.
+            - Added inline tooltips for control-panel actions, including hints for advanced TOML settings.
+            - Removed the About dialog and now shows the app version directly in the control panel.
+            - Improved tray tooltip formatting and status coverage.
+            - Updated English and Simplified Chinese documentation to match the current UI.
 
             Download the native 64-bit build `IdleTrigger-x64.exe` (recommended) or
             the 32-bit compatibility build `IdleTrigger-x86.exe` — no installation needed.
@@ -73,11 +73,11 @@ jobs:
 
             ### 更新重点
 
-            - 重做托盘控制面板，分组更清晰，并适配深浅色样式。
-            - 快速操作新增重启，并让保持唤醒与空闲监测保持互斥。
-            - 昼夜模式新增切换时间展示，主题切换改为异步，并增强刷新兜底。
-            - 发布 EXE 增加 Windows 版本信息，并更新应用和托盘图标。
-            - 增加开机自启路径自动修复，优化托盘提示和状态文案。
+            - 托盘控制面板新增“调试日志”开关。
+            - 控制面板各功能入口新增 tooltip，说明功能作用和高级 TOML 配置位置。
+            - 移除“关于”弹窗，改为在控制面板内直接展示应用版本号。
+            - 优化托盘 tooltip 的格式和状态覆盖范围。
+            - 更新英文和简体中文文档，使其与当前界面保持一致。
 
             下载原生 64 位版本 `IdleTrigger-x64.exe`（推荐），或下载 32 位兼容版本
             `IdleTrigger-x86.exe`。无需安装，直接运行即可。

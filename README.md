@@ -1,6 +1,6 @@
 # IdleTrigger
 
-> 📖 [中文版](README.zh-CN.md)
+> 📖 [简体中文](README.zh-CN.md)
 
 **System idle monitor, power scheduler & sleep preventer for Windows**
 
@@ -24,8 +24,9 @@ A lightweight, single-EXE utility that lives in your system tray.  It can:
 - **Capability detection** — unavailable actions (e.g. hibernate) are auto-disabled
 - **Single EXE** — self-contained and dependent only on Windows system DLLs
 - **Plain-text config** — `IdleTrigger.toml` next to the EXE, edit with Notepad
-- **Multi-language** — English / 中文. Auto-detects OS language (Chinese on zh-CN Windows, English otherwise), manually switchable from the control panel
+- **Multi-language** — English / Simplified Chinese. Auto-detects OS language (Simplified Chinese on zh-CN Windows, English otherwise), manually switchable from the control panel
 - **DPI & dark mode** — Per-Monitor V2, native system dialogs and DPI-aware control panel
+- **Inline help** — Control-panel tooltips explain each feature and point to advanced TOML settings when needed
 - **Platform**: Windows 10 / Server 2016 or newer, 32-bit and 64-bit builds
 
 ## Quick Start
@@ -176,10 +177,11 @@ Day/Night
   ☐ Auto Switch  ☐ Pause Fullscreen  ☐ Dark on Battery
   Switch / Refresh Theme
 
-☐ Global Hotkeys  ☐ Start with Windows
+☐ Global Hotkeys  ☐ Start with Windows  ☐ Debug Log
 Language: English / 简体中文
 
-Edit Config / About / Exit
+IdleTrigger <version>
+Edit Config / Exit
 ```
 
 ## Acknowledgments
