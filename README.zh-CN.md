@@ -7,32 +7,32 @@
 轻量级单文件工具，驻留系统托盘。它可以：
 
 - **阻止休眠** — 保持系统唤醒，重置 Windows 空闲计时器
-- **自动触发** — 空闲超时后自动执行睡眠 / 休眠 / 关机 / 锁屏
+- **自动触发** — 空闲超时后自动执行睡眠 / 休眠 / 关机 / 锁定
 - **命令行调用** — 从终端、脚本或 AI agent 触发动作
 - **进程间通信** — CLI 命令与运行中的托盘实例无缝通信
 
 ## 功能特性
 
-- **系统托盘** — 右键菜单完成全部设置，无窗口
+- **系统托盘** — 点击图标打开紧凑控制面板，无主窗口
 - **保持唤醒** — 阻止 Windows 自动休眠，可选屏幕常亮
 - **空闲监测** — 键鼠无操作 N 分钟后自动触发
-  （5 / 10 / 30 / 60 / 120 分钟，托盘子菜单可配）
-- **全局热键** — `Win+Shift+S` 睡眠 / `+L` 锁屏 / `+N` 切换保持唤醒
+  （5 / 10 / 30 / 60 / 120 分钟，控制面板可配）
+- **全局热键** — `Win+Shift+S` 睡眠 / `+L` 锁定 / `+N` 切换保持唤醒
 - **电池感知** — 使用电池时自动禁用保持唤醒
 - **进程关联** — 检测到指定应用运行时自动启用保持唤醒
 - **IPC 命名管道** — CLI 与运行中的托盘实例通信
 - **能力检测** — 不可用的功能（如休眠）自动禁用
 - **单文件 EXE** — 自包含，仅依赖 Windows 系统 DLL；复制即用，免安装
 - **明文配置** — `IdleTrigger.toml` 位于 EXE 同目录
-- **多语言** — 中文 / English。默认跟随系统语言（中文 Windows 显示中文，其余显示英文），托盘菜单可手动切换
-- **DPI 和深色模式** — Per-Monitor V2，原生深色菜单和对话框
+- **多语言** — 中文 / English。默认跟随系统语言（中文 Windows 显示中文，其余显示英文），控制面板可手动切换
+- **DPI 和深色模式** — Per-Monitor V2，系统原生对话框和支持 DPI 的控制面板
 - **系统支持**：Windows 10 / Server 2016 及以上，提供 32 位和 64 位构建
 
 ## 快速开始
 
 1. 从 [Releases](https://github.com/JeffioZ/idletrigger/releases) 下载 `IdleTrigger-x64.exe`
 2. 双击运行 → 托盘出现蓝色待命状态图标
-3. 右键配置；或直接编辑 `IdleTrigger.toml`
+3. 点击托盘图标配置；或直接编辑 `IdleTrigger.toml`
 
 `IdleTrigger-x64.exe` 是原生 64 位构建，推荐大多数用户使用；
 `IdleTrigger-x86.exe` 是 32 位兼容构建。两者功能一致。
@@ -104,7 +104,7 @@ theme_skip_fullscreen = true
 
 ```
 
-开机自启保存在当前用户的 Windows Run 注册表项中，仅通过托盘菜单或 CLI
+开机自启保存在当前用户的 Windows Run 注册表项中，仅通过控制面板或 CLI
 管理，不属于 TOML 配置。启用日志后，程序优先在 EXE 同目录写入
 `IdleTrigger.log`，目录不可写时回退到 `%TEMP%`；达到 5 MiB 后轮转，并保留
 一份 `IdleTrigger.log.1`。
@@ -123,9 +123,10 @@ IdleTrigger/
 │   ├── icon_active.ico              # 托盘：保持唤醒闪电（绿色）
 │   ├── manifest.xml                 # DPI 和深色模式清单
 ├── scripts/
-│   └── gen_icon.py                  # 图标生成脚本（仅开发用）
+│   ├── gen_icon.py                  # 图标生成脚本（仅开发用）
+│   └── gen_resource.go              # Windows 图标/manifest/版本资源生成
 ├── internal/
-│   ├── actions/actions.go           # Win32 系统动作
+│   ├── actions/actions.go           # Win32 系统动作：睡眠/休眠/关机/重启/锁定
 │   ├── autostart/autostart.go       # 注册表 Run 键管理
 │   ├── cli/cli.go                   # CLI 命令分发 + IPC 客户端
 │   ├── config/config.go             # TOML 配置读写
@@ -142,47 +143,41 @@ IdleTrigger/
 │   ├── notify/notify.go             # 气泡通知
 │   ├── power/power.go               # 电池状态 + 睡眠能力检测
 │   ├── processwatcher/processwatcher.go  # 进程列表监测
+│   ├── popup/popup.go                # 支持 DPI 的托盘控制面板
 │   ├── systray/                      # 本地 Windows 托盘实现（MIT）
 │   ├── themeswitch/themeswitch.go   # 固定时间/日出日落主题调度
-│   └── tray/tray.go                 # 系统托盘菜单 + IPC 服务端
-├── rsrc_windows_386.syso            # 编译后的资源文件
-├── rsrc_windows_amd64.syso          # 64 位编译资源
+│   └── tray/tray.go                 # 托盘集成和串行状态管理
+├── rsrc_windows_386.syso            # 32 位资源：图标 + manifest + 版本信息
+├── rsrc_windows_amd64.syso          # 64 位资源：图标 + manifest + 版本信息
 ├── .github/workflows/release.yml    # 双架构验证与发布
 ├── ROADMAP.md                       # 发布清单与后续计划
 ├── go.mod  go.sum  LICENSE  .gitattributes  .gitignore
 ├── README.md  README.zh-CN.md  BUILD.md  BUILD.zh-CN.md
 ```
 
-## 托盘菜单参考
+## 控制面板参考
 
 ```
-睡眠 / 休眠 / 关机 / 锁屏
-─────────────────
+锁定 / 睡眠 / 休眠 / 关机 / 重启
+
 保持唤醒
-  进程关联
-─────────────────
+  ☐ 启用保持唤醒
+  ☐ 进程关联
+
 空闲监测
-  超时时间 ▸  5 / 10 / 30 / 60 / 120 分钟
-  超时动作 ▸  睡眠 / 休眠 / 关机 / 锁屏
-─────────────────
+  ☐ 启用
+  超时时间：5 / 10 / 30 / 60 / 120 分钟
+  超时动作：睡眠 / 休眠 / 关机 / 锁定
+
 昼夜模式
-  ☐ 启用自动切换
-  切换主题
-  修复主题
-  ☐ 日出日落模式
-    浅色时间 ▸  06/07/08
-    深色时间 ▸  18/19/20/21
-  ☐ 使用电池深色
-  ☐ 全屏暂不切换
-─────────────────
-全局热键
-开机自启
-语言切换 ▸  English / 简体中文
-─────────────────
-编辑配置
-关于 IdleTrigger
-─────────────────
-退出
+  浅色 HH:MM / 深色 HH:MM
+  ☐ 启用自动切换  ☐ 全屏暂不切换  ☐ 使用电池深色
+  切换主题 / 刷新主题
+
+☐ 全局热键  ☐ 开机自启
+语言：English / 简体中文
+
+编辑配置 / 关于 / 退出
 ```
 
 ## 致谢

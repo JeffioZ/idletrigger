@@ -7,7 +7,7 @@
 - Go 1.25 or newer
 - Git
 - Python 3 only when regenerating icons
-- `rsrc v0.10.2` only when regenerating Windows resources
+- `github.com/akavel/rsrc` module only when regenerating Windows resources
 
 ```powershell
 go version
@@ -25,7 +25,9 @@ on Windows 7; do not lower the main build's toolchain.
 ## Build
 
 The repository contains architecture-specific `.syso` resources for 386 and
-amd64, so either build includes the application icon and manifest.
+amd64, so either build includes the application icon, manifest, and Windows
+version information. Regenerate resources when the release version changes so
+Explorer's file properties match the in-app version.
 
 ```powershell
 $env:CGO_ENABLED = "0"
@@ -72,16 +74,18 @@ size as a PNG-compressed frame, supported by the Windows 10+ target platform:
 python scripts/gen_icon.py assets
 ```
 
-Install the pinned resource compiler and regenerate both architectures:
+Regenerate both architectures. Use the same version string for this command and
+for `-X github.com/JeffioZ/idletrigger/internal/version.Value=...` during the
+release build:
 
 ```powershell
-go install github.com/akavel/rsrc@v0.10.2
-rsrc -arch 386 -manifest assets/manifest.xml -ico assets/app.ico -o rsrc_windows_386.syso
-rsrc -arch amd64 -manifest assets/manifest.xml -ico assets/app.ico -o rsrc_windows_amd64.syso
+$version = "1.3.0"
+go run ./scripts/gen_resource.go -version $version
 ```
 
-Commit `app.ico`, the three tray ICO files, the generator, and both `.syso`
-files together so checked-in resources remain reproducible.
+Commit `app.ico`, the three tray ICO files, `assets/manifest.xml`, the resource
+generator, and both `.syso` files together so checked-in resources remain
+reproducible.
 
 ## Development Loop
 
