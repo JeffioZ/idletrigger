@@ -878,7 +878,7 @@ func (s *trayState) startThemeScheduler() {
 	if s.cfg.ThemeLightTime == "" || s.cfg.ThemeDarkTime == "" {
 		return
 	}
-	s.themeSched = themeswitch.NewScheduler(s.cfg.ThemeLightTime, s.cfg.ThemeDarkTime)
+	s.themeSched = themeswitch.NewScheduler(s.cfg.ThemeMode, s.cfg.ThemeLightTime, s.cfg.ThemeDarkTime, s.cfg.ThemeLatitude, s.cfg.ThemeLongitude)
 	s.themeSched.Start()
 	mylog.Info("Theme scheduler started: light=%s dark=%s", s.cfg.ThemeLightTime, s.cfg.ThemeDarkTime)
 }

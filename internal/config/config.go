@@ -74,6 +74,13 @@ type Config struct {
 	// ThemeDarkTime is when to switch to dark mode (HH:MM).
 	ThemeDarkTime string `toml:"theme_dark_time"`
 
+	// ThemeMode: "fixed" (use times above) or "sunrise" (calculate from lat/lon).
+	ThemeMode string `toml:"theme_mode"`
+
+	// ThemeLatitude / ThemeLongitude for sunrise calculation.
+	ThemeLatitude  float64 `toml:"theme_latitude"`
+	ThemeLongitude float64 `toml:"theme_longitude"`
+
 	// StartMinimized: when true the tray icon starts without showing any window.
 	StartMinimized bool `toml:"start_minimized"`
 
@@ -99,6 +106,9 @@ func DefaultConfig() Config {
 		ThemeSwitchEnabled:      false,
 		ThemeLightTime:          "07:00",
 		ThemeDarkTime:           "19:00",
+		ThemeMode:               "fixed",
+		ThemeLatitude:           39.9,
+		ThemeLongitude:          116.4,
 		StartMinimized:          true,
 		AutostartEnabled:        false,
 	}
