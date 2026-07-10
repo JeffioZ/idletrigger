@@ -87,6 +87,17 @@ process_watch_enabled = false      # auto stay-awake when apps run
 process_watch_list = []            # e.g. ["chrome.exe", "powerpnt.exe"]
 
 start_minimized = true
+logging_enabled = false            # debug log to IdleTrigger.log
+
+theme_switch_enabled = false       # auto theme switch
+theme_mode = "sunrise"             # "fixed" or "sunrise"
+theme_light_time = "07:00"
+theme_dark_time = "19:00"
+theme_latitude = 0                 # 0 = auto-detect from timezone
+theme_longitude = 0
+theme_dark_on_battery = true
+theme_skip_fullscreen = true
+
 autostart_enabled = false
 ```
 
