@@ -73,8 +73,6 @@
   "status_battery": "Battery %d%%",
   "status_monitor_active": "%d min → %s",
   "menu_theme_switch": "Day/Night",
-  "menu_theme_light_time": "Light at",
-  "menu_theme_dark_time": "Dark at",
   "theme_schedule_format": "Light %s / Dark %s",
   "theme_schedule_unavailable": "Schedule unavailable",
   "menu_theme_switch_now": "Switch",

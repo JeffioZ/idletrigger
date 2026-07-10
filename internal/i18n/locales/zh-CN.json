@@ -73,8 +73,6 @@
   "status_battery": "电池 %d%%",
   "status_monitor_active": "%d 分钟 → %s",
   "menu_theme_switch": "昼夜模式",
-  "menu_theme_light_time": "浅色时间",
-  "menu_theme_dark_time": "深色时间",
   "theme_schedule_format": "浅色 %s / 深色 %s",
   "theme_schedule_unavailable": "切换时间不可用",
   "menu_theme_switch_now": "切换主题",
