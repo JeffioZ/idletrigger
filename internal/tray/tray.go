@@ -215,7 +215,7 @@ func (s *trayState) buildMenu() {
 
 	s.mNoSleep = systray.AddMenuItemCheckbox(T("menu_nosleep"), "", s.cfg.NoSleepEnabled)
 	s.registerLabel(s.mNoSleep, "menu_nosleep")
-	s.mProcessWatch = s.mNoSleep.AddSubMenuItemCheckbox(T("menu_process_watch"), "", s.cfg.ProcessWatchEnabled)
+	s.mProcessWatch = systray.AddMenuItemCheckbox(T("menu_process_watch"), "", s.cfg.ProcessWatchEnabled)
 	s.registerLabel(s.mProcessWatch, "menu_process_watch")
 
 
