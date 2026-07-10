@@ -62,6 +62,13 @@ func Run(lang string) {
 	case "status":
 		cmdStatus(lang)
 
+	case "config:reload":
+		if resp, ok := ipc.Send("config:reload"); ok {
+			fmt.Println(resp)
+		} else {
+			fmt.Println("error: tray is not running")
+		}
+
 	case "version", "--version", "-V":
 		fmt.Println(i18n.T(lang, "version"))
 

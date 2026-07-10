@@ -113,7 +113,7 @@ func DefaultConfig() Config {
 		ThemeLightTime:          "07:00",
 		ThemeDarkTime:           "19:00",
 		ThemeMode:               "fixed",
-		ThemeLatitude:           39.9,
+		ThemeLatitude:           0,
 		ThemeLongitude:          0,
 		ThemeDarkOnBattery:      true,
 		ThemeSkipFullscreen:     true,

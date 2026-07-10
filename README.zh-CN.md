@@ -30,7 +30,7 @@
 
 ## 快速开始
 
-1. 从 [Releases](https://github.com/jeffio/idletrigger/releases) 下载 `IdleTrigger.exe`
+1. 从 [Releases](https://github.com/JeffioZ/idletrigger/releases) 下载 `IdleTrigger.exe`
 2. 双击运行 → 托盘出现石板蓝色电源图标
 3. 右键配置；或直接编辑 `IdleTrigger.toml`
 

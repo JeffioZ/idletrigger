@@ -194,8 +194,42 @@ func (s *trayState) buildMenu() {
 		s.registerLabel(s.actionItems[i], opt.key)
 	}
 
+	// Auto Theme Switch submenu
 	systray.AddSeparator()
+	s.mThemeSwitch = systray.AddMenuItemCheckbox(T("menu_theme_switch"), "", s.cfg.ThemeSwitchEnabled)
+	s.registerLabel(s.mThemeSwitch, "menu_theme_switch")
 
+	// Light time submenu
+	s.mThemeLightAt = s.mThemeSwitch.AddSubMenuItem(T("menu_theme_light_time"), "")
+	s.registerLabel(s.mThemeLightAt, "menu_theme_light_time")
+	s.themeLightItems = make([]*systray.MenuItem, 3)
+	lightKeys := []string{"theme_time_0600","theme_time_0700","theme_time_0800"}
+	lightVals := []string{"06:00","07:00","08:00"}
+	for i := 0; i < 3; i++ {
+		checked := s.cfg.ThemeLightTime == lightVals[i]
+		s.themeLightItems[i] = s.mThemeLightAt.AddSubMenuItemCheckbox(T(lightKeys[i]), "", checked)
+		s.registerLabel(s.themeLightItems[i], lightKeys[i])
+	}
+
+	// Dark time submenu
+	s.mThemeDarkAt = s.mThemeSwitch.AddSubMenuItem(T("menu_theme_dark_time"), "")
+	s.registerLabel(s.mThemeDarkAt, "menu_theme_dark_time")
+	s.themeDarkItems = make([]*systray.MenuItem, 4)
+	darkKeys := []string{"theme_time_1800","theme_time_1900","theme_time_2000","theme_time_2100"}
+	darkVals := []string{"18:00","19:00","20:00","21:00"}
+	for i := 0; i < 4; i++ {
+		checked := s.cfg.ThemeDarkTime == darkVals[i]
+		s.themeDarkItems[i] = s.mThemeDarkAt.AddSubMenuItemCheckbox(T(darkKeys[i]), "", checked)
+		s.registerLabel(s.themeDarkItems[i], darkKeys[i])
+	}
+
+	// Manual switch + repair
+	s.mThemeSwitchNow = s.mThemeSwitch.AddSubMenuItem(T("menu_theme_switch_now"), "")
+	s.registerLabel(s.mThemeSwitchNow, "menu_theme_switch_now")
+	s.mThemeRepair = s.mThemeSwitch.AddSubMenuItem(T("menu_theme_repair"), "")
+	s.registerLabel(s.mThemeRepair, "menu_theme_repair")
+
+	systray.AddSeparator()
 	s.mHotkeys = systray.AddMenuItemCheckbox(T("menu_hotkeys"), "", s.cfg.HotkeysEnabled)
 	s.registerLabel(s.mHotkeys, "menu_hotkeys")
 	mAutostart := systray.AddMenuItemCheckbox(T("menu_autostart"), "", s.cfg.AutostartEnabled)
@@ -723,6 +757,7 @@ func (s *trayState) handleIPC(cmd string) string {
 		config.Save(s.cfg)
 		return "ok"
 	case "monitor:off":
+			s.cfg.IdleTimeoutMinutes = 0
 		s.stopMonitor()
 		s.syncChecks()
 		s.updateIcon()

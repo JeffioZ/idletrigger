@@ -249,7 +249,12 @@ func sunriseSunset(t time.Time, lat, lon float64) (sunriseMinutes, sunsetMinutes
 	// Hour angle
 	latRad := lat * math.Pi / 180
 	zenith := 90.833 * math.Pi / 180 // official sunrise/sunset zenith
-	ha := math.Acos(math.Cos(zenith)/(math.Cos(latRad)*math.Cos(decl)) - math.Tan(latRad)*math.Tan(decl))
+	// Clamp to [-1, 1] to avoid NaN in polar regions.
+	// 限制在 [-1, 1] 避免极昼/极夜 NaN。
+	acosArg := math.Cos(zenith)/(math.Cos(latRad)*math.Cos(decl)) - math.Tan(latRad)*math.Tan(decl)
+	if acosArg < -1 { acosArg = -1 }
+	if acosArg > 1 { acosArg = 1 }
+	ha := math.Acos(acosArg)
 
 	// Solar noon in minutes (UTC)
 	solarNoon := (720 - 4*lon - eqtime)
