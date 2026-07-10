@@ -81,6 +81,12 @@ type Config struct {
 	ThemeLatitude  float64 `toml:"theme_latitude"`
 	ThemeLongitude float64 `toml:"theme_longitude"`
 
+	// ThemeDarkOnBattery switches to dark mode when on battery.
+	ThemeDarkOnBattery bool `toml:"theme_dark_on_battery"`
+
+	// ThemeSkipFullscreen prevents switching during fullscreen apps/games.
+	ThemeSkipFullscreen bool `toml:"theme_skip_fullscreen"`
+
 	// StartMinimized: when true the tray icon starts without showing any window.
 	StartMinimized bool `toml:"start_minimized"`
 
@@ -108,7 +114,9 @@ func DefaultConfig() Config {
 		ThemeDarkTime:           "19:00",
 		ThemeMode:               "fixed",
 		ThemeLatitude:           39.9,
-		ThemeLongitude:          116.4,
+		ThemeLongitude:          0,
+		ThemeDarkOnBattery:      true,
+		ThemeSkipFullscreen:     true,
 		StartMinimized:          true,
 		AutostartEnabled:        false,
 	}

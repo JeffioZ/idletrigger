@@ -878,7 +878,11 @@ func (s *trayState) startThemeScheduler() {
 	if s.cfg.ThemeLightTime == "" || s.cfg.ThemeDarkTime == "" {
 		return
 	}
-	s.themeSched = themeswitch.NewScheduler(s.cfg.ThemeMode, s.cfg.ThemeLightTime, s.cfg.ThemeDarkTime, s.cfg.ThemeLatitude, s.cfg.ThemeLongitude)
+	lat, lon := s.cfg.ThemeLatitude, s.cfg.ThemeLongitude
+	if lat == 0 && lon == 0 {
+		lat, lon = themeswitch.AutoLocation()
+	}
+	s.themeSched = themeswitch.NewScheduler(s.cfg.ThemeMode, s.cfg.ThemeLightTime, s.cfg.ThemeDarkTime, lat, lon, s.cfg.ThemeSkipFullscreen)
 	s.themeSched.Start()
 	mylog.Info("Theme scheduler started: light=%s dark=%s", s.cfg.ThemeLightTime, s.cfg.ThemeDarkTime)
 }

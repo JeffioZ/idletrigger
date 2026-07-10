@@ -15,6 +15,60 @@ import (
 	"golang.org/x/sys/windows/registry"
 )
 
+
+// timezoneLookup maps Windows timezone names to approximate lat/lon.
+// 时区查找表：Windows 时区名 → 近似经纬度。
+var timezoneLookup = map[string][2]float64{
+	"China Standard Time":           {39.9, 116.4},
+	"Taipei Standard Time":          {25.0, 121.5},
+	"Tokyo Standard Time":           {35.7, 139.7},
+	"Korea Standard Time":           {37.6, 127.0},
+	"Singapore Standard Time":       {1.35, 103.8},
+	"India Standard Time":           {28.6, 77.2},
+	"W. Europe Standard Time":       {52.5, 13.4},
+	"GMT Standard Time":             {51.5, -0.1},
+	"Central Europe Standard Time":  {48.2, 16.4},
+	"E. Europe Standard Time":       {50.4, 30.5},
+	"Russian Standard Time":         {55.8, 37.6},
+	"Eastern Standard Time":         {40.7, -74.0},
+	"Central Standard Time":         {41.9, -87.6},
+	"Mountain Standard Time":        {33.4, -112.0},
+	"Pacific Standard Time":         {34.0, -118.2},
+	"Alaskan Standard Time":         {61.2, -149.9},
+	"Hawaiian Standard Time":        {21.3, -157.8},
+	"E. South America Standard Time":{-23.5, -46.6},
+	"Atlantic Standard Time":        {-34.6, -58.4},
+	"AUS Eastern Standard Time":     {-33.9, 151.2},
+	"AUS Central Standard Time":     {-34.9, 138.6},
+	"New Zealand Standard Time":     {-36.8, 174.8},
+}
+
+// AutoLocation returns approximate coordinates based on the Windows timezone.
+// Falls back to Beijing if the timezone is unknown.
+// 根据 Windows 时区返回近似经纬度，未识别时区回退到北京。
+func AutoLocation() (float64, float64) {
+	// Get the Windows timezone name via GetTimeZoneInformation.
+	// 通过 GetTimeZoneInformation 获取 Windows 时区名称。
+	kernel32 := windows.NewLazySystemDLL("kernel32.dll")
+	proc := kernel32.NewProc("GetTimeZoneInformation")
+	type tzInfo struct {
+		Bias         int32
+		StandardName [32]uint16
+		StandardDate windows.Systemtime
+		StandardBias int32
+		DaylightName [32]uint16
+		DaylightDate windows.Systemtime
+		DaylightBias int32
+	}
+	var tz tzInfo
+	proc.Call(uintptr(unsafe.Pointer(&tz)))
+	name := windows.UTF16ToString(tz.StandardName[:])
+	if coords, ok := timezoneLookup[name]; ok {
+		return coords[0], coords[1]
+	}
+	return 39.9, 116.4
+}
+
 const regPath = `Software\Microsoft\Windows\CurrentVersion\Themes\Personalize`
 
 // Mode is the target theme mode.
@@ -75,20 +129,22 @@ type Scheduler struct {
 	lightTime string  // HH:MM
 	darkTime  string  // HH:MM
 	latitude  float64
-	longitude float64
-	stopCh    chan struct{}
+	longitude      float64
+	skipFullscreen bool
+	stopCh         chan struct{}
 	mu        sync.Mutex
 }
 
 // NewScheduler creates a Scheduler.
-func NewScheduler(mode, lightTime, darkTime string, lat, lon float64) *Scheduler {
+func NewScheduler(mode, lightTime, darkTime string, lat, lon float64, skipFullscreen bool) *Scheduler {
 	return &Scheduler{
 		mode:      mode,
 		lightTime: lightTime,
 		darkTime:  darkTime,
 		latitude:  lat,
-		longitude: lon,
-		stopCh:    make(chan struct{}),
+		longitude:      lon,
+		skipFullscreen: skipFullscreen,
+		stopCh:         make(chan struct{}),
 	}
 }
 
@@ -152,6 +208,11 @@ func (s *Scheduler) check(now time.Time) {
 	}
 
 	if Current() != target {
+		// Skip switch during fullscreen apps/games if configured.
+		// 如果配置了全屏时不切换，则跳过。
+		if s.skipFullscreen && IsFullscreen() {
+			return
+		}
 		Switch(target)
 	}
 }
@@ -207,6 +268,39 @@ func sunriseSunset(t time.Time, lat, lon float64) (sunriseMinutes, sunsetMinutes
 	}
 
 	return sr, ss
+}
+
+// IsFullscreen returns true when the foreground window covers the entire
+// primary monitor (likely a game or fullscreen video).
+// 检测前台窗口是否全屏（可能是游戏或全屏视频）。
+func IsFullscreen() bool {
+	user32 := windows.NewLazySystemDLL("user32.dll")
+	getForeground := user32.NewProc("GetForegroundWindow")
+	hwnd, _, _ := getForeground.Call()
+
+	if hwnd == 0 {
+		return false
+	}
+
+	// Get window rect
+	type rect struct{ left, top, right, bottom int32 }
+	var r rect
+	getWindowRect := user32.NewProc("GetWindowRect")
+	getWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&r)))
+
+	// Get primary monitor dimensions
+	getSystemMetrics := user32.NewProc("GetSystemMetrics")
+	const (
+		smCxScreen = 0
+		smCyScreen = 1
+	)
+	sw, _, _ := getSystemMetrics.Call(smCxScreen)
+	sh, _, _ := getSystemMetrics.Call(smCyScreen)
+
+	// Check if window covers the entire screen
+	w := r.right - r.left
+	h := r.bottom - r.top
+	return int32(sw) <= w && int32(sh) <= h
 }
 
 func parseTime(s string) int {
