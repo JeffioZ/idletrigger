@@ -23,6 +23,7 @@ import (
 	"github.com/JeffioZ/idletrigger/internal/processwatcher"
 	"github.com/JeffioZ/idletrigger/internal/systray"
 	"github.com/JeffioZ/idletrigger/internal/themeswitch"
+	"github.com/JeffioZ/idletrigger/internal/version"
 )
 
 type Callbacks struct {
@@ -1102,11 +1103,10 @@ func actionTranslationKey(a config.Action) string {
 }
 
 func showAboutDialog(lang string) {
-	dialog.Info(
-		i18n.T(lang, "about_title"),
-		i18n.T(lang, "about_heading"),
-		i18n.T(lang, "about_text"),
-	)
+	ver := version.Value
+	nl := string(rune(10))
+	text := "IdleTrigger " + ver + nl + nl + i18n.T(lang, "about_body")
+	dialog.Info(i18n.T(lang, "app_title"), i18n.T(lang, "app_title"), text)
 }
 
 // registerLabel records a menu item so its text can be updated on language switch.
