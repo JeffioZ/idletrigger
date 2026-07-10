@@ -1,6 +1,6 @@
 # Build Instructions
 
-> [中文版](BUILD.zh-CN.md)
+> [简体中文](BUILD.zh-CN.md)
 
 ## Prerequisites
 
