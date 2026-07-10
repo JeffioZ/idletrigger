@@ -81,8 +81,11 @@ type trayState struct {
 	mThemeSwitch    *systray.MenuItem
 	mThemeLightAt   *systray.MenuItem
 	mThemeDarkAt    *systray.MenuItem
-	mThemeSwitchNow *systray.MenuItem
-	mThemeRepair    *systray.MenuItem
+	mThemeSwitchNow      *systray.MenuItem
+	mThemeRepair         *systray.MenuItem
+	mThemeSunrise        *systray.MenuItem
+	mThemeBatteryDark    *systray.MenuItem
+	mThemeSkipFullscreen *systray.MenuItem
 	themeLightItems []*systray.MenuItem
 	themeDarkItems  []*systray.MenuItem
 	timeoutItems    []*systray.MenuItem
@@ -268,6 +271,18 @@ func (s *trayState) buildMenu() {
 	s.mThemeRepair = s.mThemeSwitch.AddSubMenuItem(T("menu_theme_repair"), "")
 	s.registerLabel(s.mThemeRepair, "menu_theme_repair")
 
+	// Sunrise mode toggle
+	s.mThemeSunrise = s.mThemeSwitch.AddSubMenuItemCheckbox(T("menu_theme_sunrise"), "", s.cfg.ThemeMode == "sunrise")
+	s.registerLabel(s.mThemeSunrise, "menu_theme_sunrise")
+
+	// Battery dark toggle
+	s.mThemeBatteryDark = s.mThemeSwitch.AddSubMenuItemCheckbox(T("menu_theme_battery_dark"), "", s.cfg.ThemeDarkOnBattery)
+	s.registerLabel(s.mThemeBatteryDark, "menu_theme_battery_dark")
+
+	// Skip fullscreen toggle
+	s.mThemeSkipFullscreen = s.mThemeSwitch.AddSubMenuItemCheckbox(T("menu_theme_skip_fullscreen"), "", s.cfg.ThemeSkipFullscreen)
+	s.registerLabel(s.mThemeSkipFullscreen, "menu_theme_skip_fullscreen")
+
 	systray.AddSeparator()
 	s.mHotkeys = systray.AddMenuItemCheckbox(T("menu_hotkeys"), "", s.cfg.HotkeysEnabled)
 	s.registerLabel(s.mHotkeys, "menu_hotkeys")
@@ -371,7 +386,43 @@ func (s *trayState) buildMenu() {
 					}
 				})
 
-			case <-s.mThemeRepair.ClickedCh:
+			case <-s.mThemeSunrise.ClickedCh:
+			if s.mThemeSunrise.Checked() {
+				s.mThemeSunrise.Uncheck()
+				s.cfg.ThemeMode = "fixed"
+			} else {
+				s.mThemeSunrise.Check()
+				s.cfg.ThemeMode = "sunrise"
+			}
+			s.stopThemeScheduler()
+			if s.cfg.ThemeSwitchEnabled { s.startThemeScheduler() }
+			config.Save(s.cfg)
+
+		case <-s.mThemeBatteryDark.ClickedCh:
+			if s.mThemeBatteryDark.Checked() {
+				s.mThemeBatteryDark.Uncheck()
+				s.cfg.ThemeDarkOnBattery = false
+			} else {
+				s.mThemeBatteryDark.Check()
+				s.cfg.ThemeDarkOnBattery = true
+			}
+			s.stopThemeScheduler()
+			if s.cfg.ThemeSwitchEnabled { s.startThemeScheduler() }
+			config.Save(s.cfg)
+
+		case <-s.mThemeSkipFullscreen.ClickedCh:
+			if s.mThemeSkipFullscreen.Checked() {
+				s.mThemeSkipFullscreen.Uncheck()
+				s.cfg.ThemeSkipFullscreen = false
+			} else {
+				s.mThemeSkipFullscreen.Check()
+				s.cfg.ThemeSkipFullscreen = true
+			}
+			s.stopThemeScheduler()
+			if s.cfg.ThemeSwitchEnabled { s.startThemeScheduler() }
+			config.Save(s.cfg)
+
+		case <-s.mThemeRepair.ClickedCh:
 				s.post(func() {
 					if err := themeswitch.Switch(themeswitch.Current()); err != nil {
 						s.showError("menu_theme_repair", err)
