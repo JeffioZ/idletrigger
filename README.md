@@ -168,11 +168,11 @@ Idle Monitor
   Trigger Action ▸  Sleep / Hibernate / Shut Down / Lock
 ─────────────────
 Day/Night
-  Light at ▸  06:00 / 07:00 / 08:00
-  Dark at ▸  18:00 / 19:00 / 20:00 / 21:00
   Switch
   Repair Theme
   ☐ Sunrise/Sunset
+    Light at ▸  06/07/08
+    Dark at ▸  18/19/20/21
   ☐ Dark on Battery
   ☐ Pause Fullscreen
 ─────────────────
