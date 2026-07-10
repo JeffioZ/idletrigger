@@ -45,5 +45,14 @@
   "msg_action_failed": "操作失败：\n%s",
   "menu_theme_switch": "自动主题",
   "menu_theme_light_time": "浅色时间",
-  "menu_theme_dark_time": "深色时间"
+  "menu_theme_dark_time": "深色时间",
+  "menu_theme_switch_now": "切换主题",
+  "menu_theme_repair": "修复主题",
+  "theme_time_0600": "06:00",
+  "theme_time_0700": "07:00",
+  "theme_time_0800": "08:00",
+  "theme_time_1800": "18:00",
+  "theme_time_1900": "19:00",
+  "theme_time_2000": "20:00",
+  "theme_time_2100": "21:00"
 }

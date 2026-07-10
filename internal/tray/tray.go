@@ -75,8 +75,14 @@ type trayState struct {
 	mIdleEnable  *systray.MenuItem
 	mIdleTimeout *systray.MenuItem
 	mIdleAction  *systray.MenuItem
-	mHotkeys     *systray.MenuItem
-	mThemeSwitch *systray.MenuItem
+	mHotkeys      *systray.MenuItem
+	mThemeSwitch  *systray.MenuItem
+	mThemeLightAt *systray.MenuItem
+	mThemeDarkAt  *systray.MenuItem
+	mThemeSwitchNow *systray.MenuItem
+	mThemeRepair    *systray.MenuItem
+	themeLightItems []*systray.MenuItem
+	themeDarkItems  []*systray.MenuItem
 	timeoutItems []*systray.MenuItem
 	actionItems  []*systray.MenuItem
 }
@@ -278,7 +284,18 @@ func (s *trayState) buildMenu() {
 				}
 				config.Save(s.cfg)
 
-			case <-s.mThemeSwitch.ClickedCh:
+			case <-s.mThemeSwitchNow.ClickedCh:
+			cur := themeswitch.Current()
+			if cur == themeswitch.ModeDark {
+				themeswitch.Switch(themeswitch.ModeLight)
+			} else {
+				themeswitch.Switch(themeswitch.ModeDark)
+			}
+
+		case <-s.mThemeRepair.ClickedCh:
+			themeswitch.Switch(themeswitch.Current())
+
+		case <-s.mThemeSwitch.ClickedCh:
 			if s.mThemeSwitch.Checked() {
 				s.mThemeSwitch.Uncheck()
 				s.cfg.ThemeSwitchEnabled = false
@@ -331,6 +348,7 @@ func (s *trayState) buildMenu() {
 	}()
 
 	s.wireSubmenus()
+	s.wireThemeSubmenus()
 }
 
 func (s *trayState) eventLoop() {
@@ -869,5 +887,42 @@ func (s *trayState) stopThemeScheduler() {
 	if s.themeSched != nil {
 		s.themeSched.Stop()
 		s.themeSched = nil
+	}
+}
+
+func (s *trayState) wireThemeSubmenus() {
+	// Light time radio
+	lightVals := []string{"06:00","07:00","08:00"}
+	for i, item := range s.themeLightItems {
+		idx := i
+		it := item
+		go func() {
+			for range it.ClickedCh {
+				s.cfg.ThemeLightTime = lightVals[idx]
+				for j, ti := range s.themeLightItems {
+					if j == idx { ti.Check() } else { ti.Uncheck() }
+				}
+				s.stopThemeScheduler()
+				if s.cfg.ThemeSwitchEnabled { s.startThemeScheduler() }
+				config.Save(s.cfg)
+			}
+		}()
+	}
+	// Dark time radio
+	darkVals := []string{"18:00","19:00","20:00","21:00"}
+	for i, item := range s.themeDarkItems {
+		idx := i
+		it := item
+		go func() {
+			for range it.ClickedCh {
+				s.cfg.ThemeDarkTime = darkVals[idx]
+				for j, ti := range s.themeDarkItems {
+					if j == idx { ti.Check() } else { ti.Uncheck() }
+				}
+				s.stopThemeScheduler()
+				if s.cfg.ThemeSwitchEnabled { s.startThemeScheduler() }
+				config.Save(s.cfg)
+			}
+		}()
 	}
 }
