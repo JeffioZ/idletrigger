@@ -13,9 +13,9 @@ import (
 )
 
 var (
-	mu   sync.Mutex
-	w    io.WriteCloser
-	on   bool
+	mu sync.Mutex
+	w  io.WriteCloser
+	on bool
 )
 
 // Init opens the log file.  If enabled is false the package becomes a

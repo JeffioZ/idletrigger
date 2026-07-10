@@ -58,7 +58,7 @@ func IdleDuration() (time.Duration, error) {
 //
 // Both fire at most once per idle session and reset when activity resumes.
 type Monitor struct {
-	thresholdNs  atomic.Int64 // nanoseconds
+	thresholdNs   atomic.Int64 // nanoseconds
 	warningOffset time.Duration
 	onWarning     func()
 	onTrigger     func()

@@ -146,7 +146,6 @@ IdleTrigger/
 Sleep / Hibernate / Shut Down / Lock
 ─────────────────
 Stay Awake
-  Keep Screen On
 ─────────────────
 Idle Monitor
   Timeout ▸  5 / 10 / 30 / 60 / 120 min
@@ -154,9 +153,9 @@ Idle Monitor
 ─────────────────
 Global Hotkeys
 Start with Windows
-Language ▸  English / 中文
+Language ▸  English / 简体中文
 ─────────────────
-Open Config File
+Config
 About
 ─────────────────
 Exit

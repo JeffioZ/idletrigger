@@ -49,11 +49,11 @@ func GetStatus() Status {
 	kernel32 := windows.NewLazySystemDLL("kernel32.dll")
 	proc := kernel32.NewProc("GetSystemPowerStatus")
 	type sps struct {
-		ACLineStatus       byte
-		BatteryFlag        byte
-		BatteryLifePercent byte
-		SystemStatusFlag   byte
-		BatteryLifeTime    uint32
+		ACLineStatus        byte
+		BatteryFlag         byte
+		BatteryLifePercent  byte
+		SystemStatusFlag    byte
+		BatteryLifeTime     uint32
 		BatteryFullLifeTime uint32
 	}
 	var s sps

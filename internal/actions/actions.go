@@ -95,5 +95,3 @@ func acquireShutdownPrivilege() error {
 	}
 	return nil
 }
-
-
