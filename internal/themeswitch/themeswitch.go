@@ -15,32 +15,31 @@ import (
 	"golang.org/x/sys/windows/registry"
 )
 
-
 // timezoneLookup maps Windows timezone names to approximate lat/lon.
 // 时区查找表：Windows 时区名 → 近似经纬度。
 var timezoneLookup = map[string][2]float64{
-	"China Standard Time":           {39.9, 116.4},
-	"Taipei Standard Time":          {25.0, 121.5},
-	"Tokyo Standard Time":           {35.7, 139.7},
-	"Korea Standard Time":           {37.6, 127.0},
-	"Singapore Standard Time":       {1.35, 103.8},
-	"India Standard Time":           {28.6, 77.2},
-	"W. Europe Standard Time":       {52.5, 13.4},
-	"GMT Standard Time":             {51.5, -0.1},
-	"Central Europe Standard Time":  {48.2, 16.4},
-	"E. Europe Standard Time":       {50.4, 30.5},
-	"Russian Standard Time":         {55.8, 37.6},
-	"Eastern Standard Time":         {40.7, -74.0},
-	"Central Standard Time":         {41.9, -87.6},
-	"Mountain Standard Time":        {33.4, -112.0},
-	"Pacific Standard Time":         {34.0, -118.2},
-	"Alaskan Standard Time":         {61.2, -149.9},
-	"Hawaiian Standard Time":        {21.3, -157.8},
-	"E. South America Standard Time":{-23.5, -46.6},
-	"Atlantic Standard Time":        {-34.6, -58.4},
-	"AUS Eastern Standard Time":     {-33.9, 151.2},
-	"AUS Central Standard Time":     {-34.9, 138.6},
-	"New Zealand Standard Time":     {-36.8, 174.8},
+	"China Standard Time":            {39.9, 116.4},
+	"Taipei Standard Time":           {25.0, 121.5},
+	"Tokyo Standard Time":            {35.7, 139.7},
+	"Korea Standard Time":            {37.6, 127.0},
+	"Singapore Standard Time":        {1.35, 103.8},
+	"India Standard Time":            {28.6, 77.2},
+	"W. Europe Standard Time":        {52.5, 13.4},
+	"GMT Standard Time":              {51.5, -0.1},
+	"Central Europe Standard Time":   {48.2, 16.4},
+	"E. Europe Standard Time":        {50.4, 30.5},
+	"Russian Standard Time":          {55.8, 37.6},
+	"Eastern Standard Time":          {40.7, -74.0},
+	"Central Standard Time":          {41.9, -87.6},
+	"Mountain Standard Time":         {33.4, -112.0},
+	"Pacific Standard Time":          {34.0, -118.2},
+	"Alaskan Standard Time":          {61.2, -149.9},
+	"Hawaiian Standard Time":         {21.3, -157.8},
+	"E. South America Standard Time": {-23.5, -46.6},
+	"Atlantic Standard Time":         {-34.6, -58.4},
+	"AUS Eastern Standard Time":      {-33.9, 151.2},
+	"AUS Central Standard Time":      {-34.9, 138.6},
+	"New Zealand Standard Time":      {-36.8, 174.8},
 }
 
 // AutoLocation returns approximate coordinates based on the Windows timezone.
@@ -125,24 +124,24 @@ func Current() Mode {
 // Scheduler checks time periodically and switches theme.
 // 定时器：定期检查并在适当时机切换主题。
 type Scheduler struct {
-	mode      string  // "fixed" or "sunrise"
-	lightTime string  // HH:MM
-	darkTime  string  // HH:MM
-	latitude  float64
-	longitude       float64
-	skipFullscreen  bool
-	darkOnBattery   bool
+	mode           string // "fixed" or "sunrise"
+	lightTime      string // HH:MM
+	darkTime       string // HH:MM
+	latitude       float64
+	longitude      float64
+	skipFullscreen bool
+	darkOnBattery  bool
 	stopCh         chan struct{}
-	mu        sync.Mutex
+	mu             sync.Mutex
 }
 
 // NewScheduler creates a Scheduler.
 func NewScheduler(mode, lightTime, darkTime string, lat, lon float64, skipFullscreen, darkOnBattery bool) *Scheduler {
 	return &Scheduler{
-		mode:      mode,
-		lightTime: lightTime,
-		darkTime:  darkTime,
-		latitude:  lat,
+		mode:           mode,
+		lightTime:      lightTime,
+		darkTime:       darkTime,
+		latitude:       lat,
 		longitude:      lon,
 		skipFullscreen: skipFullscreen,
 		darkOnBattery:  darkOnBattery,
@@ -253,8 +252,12 @@ func sunriseSunset(t time.Time, lat, lon float64) (sunriseMinutes, sunsetMinutes
 	// Clamp to [-1, 1] to avoid NaN in polar regions.
 	// 限制在 [-1, 1] 避免极昼/极夜 NaN。
 	acosArg := math.Cos(zenith)/(math.Cos(latRad)*math.Cos(decl)) - math.Tan(latRad)*math.Tan(decl)
-	if acosArg < -1 { acosArg = -1 }
-	if acosArg > 1 { acosArg = 1 }
+	if acosArg < -1 {
+		acosArg = -1
+	}
+	if acosArg > 1 {
+		acosArg = 1
+	}
 	ha := math.Acos(acosArg)
 
 	// Solar noon in minutes (UTC)
@@ -318,7 +321,6 @@ func IsFullscreen() bool {
 	h := r.bottom - r.top
 	return int32(sw) <= w && int32(sh) <= h
 }
-
 
 func onBattery() bool {
 	kernel32 := windows.NewLazySystemDLL("kernel32.dll")

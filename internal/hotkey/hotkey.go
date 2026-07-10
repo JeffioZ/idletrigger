@@ -155,38 +155,44 @@ func (m *Manager) Run() {
 	}
 }
 
-// Start is a convenience: Register, then Run in a new goroutine.
-// The goroutine locks the OS thread so the message loop and window
-// stay on the same thread as required by Win32.
-// goroutine 锁定 OS 线程以保证消息循环和窗口在同一线程。
+// Start launches the hotkey goroutine, which locks the OS thread and does
+// Register + message loop + cleanup all on the same thread. Returns the
+// Failed list from registration.
+// 在锁定 OS 线程的 goroutine 中完成 注册→消息循环→清理 全流程，返回注册失败列表。
 func (m *Manager) Start() Failed {
-	failed := m.Register()
+	resultCh := make(chan Failed, 1)
 	go func() {
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
-		m.Run()
+
+		failed := m.Register()
+		resultCh <- failed
+
+		// Run message pump on this same thread, then clean up.
+		// 在同一线程运行消息循环，然后清理。
+		if m.hwnd != 0 {
+			m.Run()
+
+			// Unregister hotkeys and destroy window on this thread.
+			// 在本线程注销热键并销毁窗口。
+			user32 := windows.NewLazySystemDLL("user32.dll")
+			for i := range m.bindings {
+				unreg := user32.NewProc("UnregisterHotKey")
+				unreg.Call(uintptr(m.hwnd), uintptr(i))
+			}
+			destroy := user32.NewProc("DestroyWindow")
+			destroy.Call(uintptr(m.hwnd))
+			m.hwnd = 0
+		}
 	}()
-	return failed
+	return <-resultCh
 }
 
+// Stop signals the hotkey goroutine to exit. Cleanup is handled inside
+// Start()'s goroutine on the same OS thread.
+// 发送退出信号，清理由 Start() 的 goroutine 在同一线程处理。
 func (m *Manager) Stop() {
-	user32 := windows.NewLazySystemDLL("user32.dll")
-	// Unregister all hotkeys before destroying the window.
-	// 销毁窗口前注销所有热键。
-	for i := range m.bindings {
-		unreg := user32.NewProc("UnregisterHotKey")
-		unreg.Call(uintptr(m.hwnd), uintptr(i))
-	}
-	// Post WM_QUIT to the message loop, then destroy the window.
-	post := user32.NewProc("PostMessageW")
-	const wmQuit = 0x0012
-	post.Call(uintptr(m.hwnd), wmQuit, 0, 0)
 	close(m.stopCh)
-	if m.hwnd != 0 {
-		destroy := user32.NewProc("DestroyWindow")
-		destroy.Call(uintptr(m.hwnd))
-		m.hwnd = 0
-	}
 }
 
 func (m *Manager) wndProc(hwnd windows.Handle, msg2 uint32, wParam, lParam uintptr) uintptr {
