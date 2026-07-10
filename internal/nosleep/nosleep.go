@@ -28,9 +28,9 @@ var (
 
 const (
 	// win32 execution-state flags
-	esContinuous       = 0x80000000
-	esSystemRequired   = 0x00000001
-	esDisplayRequired  = 0x00000002
+	esContinuous      = 0x80000000
+	esSystemRequired  = 0x00000001
+	esDisplayRequired = 0x00000002
 )
 
 // Enable activates NoSleep.  keepScreenOn controls whether the display is

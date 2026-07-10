@@ -141,14 +141,14 @@ func (m *Manager) Run() {
 	msg2 := &msg{}
 	getMsg := user32.NewProc("GetMessageW")
 	for {
-		select {
-		case <-m.stopCh:
-			return
-		default:
-		}
+		// GetMessage blocks until a message arrives. To stop, we send
+		// WM_QUIT via PostMessage from Stop(), which makes GetMessage
+		// return 0 and exit the loop naturally.
+		// GetMessage 阻塞等待消息。Stop() 通过 PostMessage(hwnd, WM_QUIT)
+		// 发送退出消息，GetMessage 返回 0 后自然退出循环。
 		r, _, _ := getMsg.Call(uintptr(unsafe.Pointer(msg2)), 0, 0, 0)
 		if r == 0 || r == ^uintptr(0) {
-			break
+			return
 		}
 		dispatch := user32.NewProc("DispatchMessageW")
 		dispatch.Call(uintptr(unsafe.Pointer(msg2)))
