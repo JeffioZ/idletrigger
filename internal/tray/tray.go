@@ -76,7 +76,6 @@ type stateRequest struct {
 	result chan string
 }
 
-
 // Run starts the system-tray loop. Blocks until Exit.
 func Run(cfg config.Config, cbs Callbacks) {
 	systray.SetErrorHandler(func(format string, args ...interface{}) {
@@ -165,12 +164,7 @@ func (s *trayState) call(fn func() string) string {
 	return <-result
 }
 
-
-
 // ---- state sync -------------------------------------------------------
-
-
-
 
 // ---- icon state -------------------------------------------------------
 
@@ -512,7 +506,7 @@ func (s *trayState) handleIPCState(cmd string) string {
 			return "err: " + err.Error()
 		}
 		s.cfg = newCfg
-			s.cfg.AutostartEnabled, _ = autostart.IsEnabled()
+		s.cfg.AutostartEnabled, _ = autostart.IsEnabled()
 		s.stopMonitor()
 		s.stopHotkeys()
 		s.stopProcessWatcher()
@@ -695,7 +689,6 @@ func (s *trayState) stopThemeScheduler() {
 		s.themeSched = nil
 	}
 }
-
 
 func (s *trayState) showPopup() {
 	popup.Show(popup.State{
