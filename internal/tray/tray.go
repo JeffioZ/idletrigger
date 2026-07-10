@@ -124,7 +124,7 @@ func Run(cfg config.Config, cbs Callbacks) {
 		if enabled, err := autostart.IsEnabled(); err == nil {
 			s.cfg.AutostartEnabled = enabled
 		}
-		s.buildMenu()
+		
 
 		// Config compatibility: if both NoSleep and idle monitor are enabled,
 		// resolve the conflict — NoSleep takes priority.
@@ -133,7 +133,7 @@ func Run(cfg config.Config, cbs Callbacks) {
 		}
 		s.batteryBlocked = batteryPolicyBlocks(s.cfg, power.GetStatus())
 		s.reconcileRuntime()
-		s.syncChecks()
+		
 		s.updateIcon()
 
 		// Hotkeys
@@ -320,208 +320,9 @@ func (s *trayState) buildMenu() {
 	mExit := systray.AddMenuItem(T("menu_exit"), "")
 	s.registerLabel(mExit, "menu_exit")
 
-	// ---- main event loop goroutine ---------------------------------------
-	go func() {
-		for {
-			select {
-			case <-s.mSleep.ClickedCh:
-				s.post(func() {
-					if err := actions.Sleep(); err != nil {
-						s.showError("menu_sleep", err)
-					}
-				})
-			case <-s.mHibernate.ClickedCh:
-				s.post(func() {
-					if err := actions.Hibernate(); err != nil {
-						s.showError("menu_hibernate", err)
-					}
-				})
-			case <-s.mShutdown.ClickedCh:
-				s.post(func() {
-					if err := actions.Shutdown(); err != nil {
-						s.showError("menu_shutdown", err)
-					}
-				})
-			case <-s.mLock.ClickedCh:
-				s.post(func() {
-					if err := actions.Lock(); err != nil {
-						s.showError("menu_lock", err)
-					}
-				})
-			case <-s.mProcessWatch.ClickedCh:
-					if s.mProcessWatch.Checked() {
-						s.mProcessWatch.Uncheck()
-						s.cfg.ProcessWatchEnabled = false
-						s.stopProcessWatcher()
-					} else {
-						s.mProcessWatch.Check()
-						s.cfg.ProcessWatchEnabled = true
-						s.startProcessWatcher()
-					}
-					config.Save(s.cfg)
+	
 
-
-			config.Save(s.cfg)
-
-			case <-s.mNoSleepEnable.ClickedCh:
-					s.toggleNoSleep()
-
-			case <-s.mIdleEnable.ClickedCh:
-				s.post(func() {
-					if s.cfg.IdleTimeoutMinutes > 0 {
-						s.cfg.IdleTimeoutMinutes = 0
-					} else {
-						s.cfg.NoSleepEnabled = false
-						s.cfg.IdleTimeoutMinutes = 30
-					}
-					s.reconcileRuntime()
-					s.syncChecks()
-					s.updateIcon()
-					s.saveConfig()
-				})
-
-			case <-s.mAutostart.ClickedCh:
-				s.post(func() {
-					enable := !s.cfg.AutostartEnabled
-					var err error
-					if enable {
-						err = autostart.Enable()
-					} else {
-						err = autostart.Disable()
-					}
-					if err != nil {
-						s.showError("menu_autostart", err)
-						return
-					}
-					s.cfg.AutostartEnabled = enable
-					if enable {
-						s.mAutostart.Check()
-					} else {
-						s.mAutostart.Uncheck()
-					}
-					s.saveConfig()
-				})
-
-			case <-s.mThemeSwitchNow.ClickedCh:
-				s.post(func() {
-					cur := themeswitch.Current()
-					target := themeswitch.ModeDark
-					if cur == themeswitch.ModeDark {
-						target = themeswitch.ModeLight
-					}
-					if err := themeswitch.Switch(target); err != nil {
-						s.showError("menu_theme_switch_now", err)
-					}
-				})
-
-			case <-s.mThemeSunrise.ClickedCh:
-			if s.mThemeSunrise.Checked() {
-				s.mThemeSunrise.Uncheck()
-				s.cfg.ThemeMode = "fixed"
-				s.mThemeLightAt.Show()
-				s.mThemeDarkAt.Show()
-			} else {
-				s.mThemeSunrise.Check()
-				s.cfg.ThemeMode = "sunrise"
-				s.mThemeLightAt.Hide()
-				s.mThemeDarkAt.Hide()
-			}
-			s.stopThemeScheduler()
-			if s.cfg.ThemeSwitchEnabled { s.startThemeScheduler() }
-			config.Save(s.cfg)
-
-			case <-s.mThemeBatteryDark.ClickedCh:
-				if s.mThemeBatteryDark.Checked() {
-					s.mThemeBatteryDark.Uncheck()
-					s.cfg.ThemeDarkOnBattery = false
-				} else {
-					s.mThemeBatteryDark.Check()
-					s.cfg.ThemeDarkOnBattery = true
-				}
-			s.stopThemeScheduler()
-			if s.cfg.ThemeSwitchEnabled { s.startThemeScheduler() }
-			config.Save(s.cfg)
-
-			case <-s.mThemeSkipFullscreen.ClickedCh:
-				if s.mThemeSkipFullscreen.Checked() {
-					s.mThemeSkipFullscreen.Uncheck()
-					s.cfg.ThemeSkipFullscreen = false
-				} else {
-					s.mThemeSkipFullscreen.Check()
-					s.cfg.ThemeSkipFullscreen = true
-				}
-			s.stopThemeScheduler()
-			if s.cfg.ThemeSwitchEnabled { s.startThemeScheduler() }
-			config.Save(s.cfg)
-
-		case <-s.mThemeRepair.ClickedCh:
-				s.post(func() {
-					if err := themeswitch.Switch(themeswitch.Current()); err != nil {
-						s.showError("menu_theme_repair", err)
-					}
-				})
-
-			case <-s.mThemeEnable.ClickedCh:
-				s.post(func() {
-					s.cfg.ThemeSwitchEnabled = !s.cfg.ThemeSwitchEnabled
-					if s.cfg.ThemeSwitchEnabled {
-						s.startThemeScheduler()
-					} else {
-						s.stopThemeScheduler()
-					}
-					s.syncChecks()
-					s.saveConfig()
-				})
-
-			case <-s.mHotkeys.ClickedCh:
-				s.post(func() {
-					s.cfg.HotkeysEnabled = !s.cfg.HotkeysEnabled
-					if s.cfg.HotkeysEnabled {
-						s.startHotkeys()
-					} else {
-						s.stopHotkeys()
-					}
-					s.syncChecks()
-					s.saveConfig()
-				})
-
-			case <-mLangEn.ClickedCh:
-				s.post(func() {
-					s.switchLanguage("en")
-					mLangEn.Check()
-					mLangZh.Uncheck()
-				})
-
-			case <-mLangZh.ClickedCh:
-				s.post(func() {
-					s.switchLanguage("zh-CN")
-					mLangZh.Check()
-					mLangEn.Uncheck()
-				})
-
-			case <-mOpenCfg.ClickedCh:
-				s.post(func() {
-					p, err := config.Path()
-					if err == nil {
-						err = exec.Command("notepad.exe", p).Start()
-					}
-					if err != nil {
-						s.showError("menu_open_config", err)
-					}
-				})
-
-			case <-mAbout.ClickedCh:
-				s.post(func() { showAboutDialog(s.lang) })
-
-			case <-mExit.ClickedCh:
-				systray.Quit()
-				return
-			}
-		}
-	}()
-
-	s.wireSubmenus()
-	s.wireThemeSubmenus()
+	
 
 	systray.OnLeftClick = func() {
 		s.showPopup()
@@ -539,7 +340,7 @@ func (s *trayState) wireSubmenus() {
 					s.cfg.NoSleepEnabled = false
 					s.updateTimeoutChecks()
 					s.reconcileRuntime()
-					s.syncChecks()
+					
 					s.updateIcon()
 					s.saveConfig()
 				})
@@ -777,7 +578,7 @@ func (s *trayState) toggleNoSleep() {
 	}
 	s.reconcileRuntime()
 	mylog.Info("NoSleep toggled: enabled=%v keep_screen_on=%v", nosleep.IsEnabled(), nosleep.IsKeepingScreenOn())
-	s.syncChecks()
+	
 	s.updateIcon()
 	s.saveConfig()
 }
@@ -827,7 +628,7 @@ func (s *trayState) startProcessWatcher() {
 					mylog.Info("Process watcher: watched app detected, requesting NoSleep")
 					s.processNoSleep = true
 					s.reconcileRuntime()
-					s.syncChecks()
+					
 					s.updateIcon()
 				})
 			},
@@ -836,7 +637,7 @@ func (s *trayState) startProcessWatcher() {
 					mylog.Info("Process watcher: no watched apps running, releasing NoSleep")
 					s.processNoSleep = false
 					s.reconcileRuntime()
-					s.syncChecks()
+					
 					s.updateIcon()
 				})
 			},
@@ -873,7 +674,7 @@ func (s *trayState) refreshBatteryPolicy() {
 	s.batteryBlocked = blocked
 	mylog.Info("Battery policy changed: nosleep_blocked=%v", blocked)
 	s.reconcileRuntime()
-	s.syncChecks()
+	
 	s.updateIcon()
 }
 
@@ -920,7 +721,7 @@ func (s *trayState) handleIPCState(cmd string) string {
 		s.cfg.KeepScreenOn = false
 		s.cfg.IdleTimeoutMinutes = 0
 		s.reconcileRuntime()
-		s.syncChecks()
+		
 		s.updateIcon()
 		if err := s.saveConfigErr(); err != nil {
 			return "err: " + err.Error()
@@ -931,7 +732,7 @@ func (s *trayState) handleIPCState(cmd string) string {
 		s.cfg.KeepScreenOn = true
 		s.cfg.IdleTimeoutMinutes = 0
 		s.reconcileRuntime()
-		s.syncChecks()
+		
 		s.updateIcon()
 		if err := s.saveConfigErr(); err != nil {
 			return "err: " + err.Error()
@@ -940,7 +741,7 @@ func (s *trayState) handleIPCState(cmd string) string {
 	case "nosleep:off":
 		s.cfg.NoSleepEnabled = false
 		s.reconcileRuntime()
-		s.syncChecks()
+		
 		s.updateIcon()
 		if err := s.saveConfigErr(); err != nil {
 			return "err: " + err.Error()
@@ -958,7 +759,7 @@ func (s *trayState) handleIPCState(cmd string) string {
 		}
 		s.cfg.NoSleepEnabled = false
 		s.reconcileRuntime()
-		s.syncChecks()
+		
 		s.updateIcon()
 		if err := s.saveConfigErr(); err != nil {
 			return "err: " + err.Error()
@@ -967,7 +768,7 @@ func (s *trayState) handleIPCState(cmd string) string {
 	case "monitor:off":
 		s.cfg.IdleTimeoutMinutes = 0
 		s.reconcileRuntime()
-		s.syncChecks()
+		
 		s.updateIcon()
 		if err := s.saveConfigErr(); err != nil {
 			return "err: " + err.Error()
@@ -997,14 +798,8 @@ func (s *trayState) handleIPCState(cmd string) string {
 			return "err: " + err.Error()
 		}
 		s.cfg = newCfg
-		if enabled, statusErr := autostart.IsEnabled(); statusErr == nil {
-			s.cfg.AutostartEnabled = enabled
-			if enabled {
-				s.mAutostart.Check()
-			} else {
-				s.mAutostart.Uncheck()
-			}
-		}
+		// menu items removed (popup handles UI)
+		s.cfg.AutostartEnabled, _ = autostart.IsEnabled()
 		s.stopMonitor()
 		s.stopHotkeys()
 		s.stopProcessWatcher()
@@ -1029,7 +824,7 @@ func (s *trayState) handleIPCState(cmd string) string {
 			s.startThemeScheduler()
 		}
 		s.reconcileRuntime()
-		s.syncChecks()
+		
 		s.updateIcon()
 		return "ok"
 
@@ -1142,9 +937,7 @@ func (s *trayState) switchLanguage(lang string) {
 
 func (s *trayState) applyLanguage() {
 	T := func(key string) string { return i18n.T(s.lang, key) }
-	for _, li := range s.labelItems {
-		li.item.SetTitle(T(li.key))
-	}
+	// labelItems removed (popup handles UI)
 	systray.SetTitle(T("app_title"))
 	s.updateIcon()
 }
