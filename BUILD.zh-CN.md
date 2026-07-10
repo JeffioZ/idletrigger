@@ -7,7 +7,7 @@
 - Go 1.25 或更高版本
 - Git
 - 仅重新生成图标时需要 Python 3
-- 仅重新生成 Windows 资源时需要 `rsrc v0.10.2`
+- 仅重新生成 Windows 资源时需要 `github.com/akavel/rsrc` 模块
 
 ```powershell
 go version
@@ -24,7 +24,8 @@ IdleTrigger 支持 Windows 10 / Server 2016 及以上系统，同时支持
 ## 构建
 
 仓库同时包含 386 和 amd64 的 `.syso` 资源，因此两种架构构建均带有
-应用图标和 manifest。
+应用图标、manifest 和 Windows 版本信息。发布版本号变化时需要重新生成
+资源，确保资源管理器属性页和应用内版本一致。
 
 ```powershell
 $env:CGO_ENABLED = "0"
@@ -70,16 +71,16 @@ PNG 压缩帧写入 ICO：
 python scripts/gen_icon.py assets
 ```
 
-安装固定版本的资源编译器，并生成两种架构资源：
+重新生成两种架构资源。发布构建时，这里的版本号应和
+`-X github.com/JeffioZ/idletrigger/internal/version.Value=...` 使用同一个值：
 
 ```powershell
-go install github.com/akavel/rsrc@v0.10.2
-rsrc -arch 386 -manifest assets/manifest.xml -ico assets/app.ico -o rsrc_windows_386.syso
-rsrc -arch amd64 -manifest assets/manifest.xml -ico assets/app.ico -o rsrc_windows_amd64.syso
+$version = "1.3.0"
+go run ./scripts/gen_resource.go -version $version
 ```
 
-`app.ico`、三种托盘 ICO、生成脚本和两个 `.syso` 应一起提交，确保仓库中的
-生成资源可以复现。
+`app.ico`、三种托盘 ICO、`assets/manifest.xml`、资源生成脚本和两个 `.syso`
+应一起提交，确保仓库中的生成资源可以复现。
 
 ## 开发调试
 
