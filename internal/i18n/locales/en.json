@@ -45,5 +45,14 @@
   "msg_action_failed": "Action failed:\n%s",
   "menu_theme_switch": "Auto Theme",
   "menu_theme_light_time": "Light at",
-  "menu_theme_dark_time": "Dark at"
+  "menu_theme_dark_time": "Dark at",
+  "menu_theme_switch_now": "Switch Now",
+  "menu_theme_repair": "Repair Theme",
+  "theme_time_0600": "06:00",
+  "theme_time_0700": "07:00",
+  "theme_time_0800": "08:00",
+  "theme_time_1800": "18:00",
+  "theme_time_1900": "19:00",
+  "theme_time_2000": "20:00",
+  "theme_time_2100": "21:00"
 }
