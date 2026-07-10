@@ -19,6 +19,7 @@ import (
 	"github.com/JeffioZ/idletrigger/internal/monitor"
 	"github.com/JeffioZ/idletrigger/internal/nosleep"
 	"github.com/JeffioZ/idletrigger/internal/notify"
+	"github.com/JeffioZ/idletrigger/internal/popup"
 	"github.com/JeffioZ/idletrigger/internal/power"
 	"github.com/JeffioZ/idletrigger/internal/processwatcher"
 	"github.com/JeffioZ/idletrigger/internal/systray"
@@ -521,6 +522,10 @@ func (s *trayState) buildMenu() {
 
 	s.wireSubmenus()
 	s.wireThemeSubmenus()
+
+	systray.OnLeftClick = func() {
+		s.showPopup()
+	}
 }
 
 func (s *trayState) wireSubmenus() {
@@ -1238,4 +1243,35 @@ func (s *trayState) wireThemeSubmenus() {
 			}
 		}()
 	}
+}
+
+func (s *trayState) showPopup() {
+	popup.Show(popup.State{
+		NoSleepEnabled:      s.cfg.NoSleepEnabled,
+		ProcessWatchEnabled: s.cfg.ProcessWatchEnabled,
+		IdleEnabled:         s.cfg.IdleTimeoutMinutes > 0,
+		ThemeSwitchEnabled:  s.cfg.ThemeSwitchEnabled,
+		SunriseMode:         s.cfg.ThemeMode == "sunrise",
+		DarkOnBattery:       s.cfg.ThemeDarkOnBattery,
+		SkipFullscreen:      s.cfg.ThemeSkipFullscreen,
+		HotkeysEnabled:      s.cfg.HotkeysEnabled,
+		AutostartEnabled:    s.cfg.AutostartEnabled,
+	}, func(action popup.Action) {
+		switch action {
+		case popup.ActNoSleepToggle:       s.toggleNoSleep()
+		case popup.ActProcessWatchToggle:  s.cfg.ProcessWatchEnabled = !s.cfg.ProcessWatchEnabled; s.reconcileRuntime(); s.syncChecks(); s.saveConfig()
+		case popup.ActIdleToggle:          s.cfg.IdleTimeoutMinutes = 30; if s.cfg.IdleTimeoutMinutes > 0 { s.cfg.IdleTimeoutMinutes = 0 } else { s.cfg.IdleTimeoutMinutes = 30 }; s.reconcileRuntime(); s.syncChecks(); s.updateIcon(); s.saveConfig()
+		case popup.ActThemeToggle:         s.cfg.ThemeSwitchEnabled = !s.cfg.ThemeSwitchEnabled; if s.cfg.ThemeSwitchEnabled { s.startThemeScheduler() } else { s.stopThemeScheduler() }; s.syncChecks(); s.updateIcon(); s.saveConfig()
+		case popup.ActSunriseToggle:       s.cfg.ThemeMode = map[bool]string{true:"fixed",false:"sunrise"}[s.cfg.ThemeMode=="sunrise"]; s.stopThemeScheduler(); if s.cfg.ThemeSwitchEnabled { s.startThemeScheduler() }; s.saveConfig()
+		case popup.ActBatteryToggle:       s.cfg.ThemeDarkOnBattery = !s.cfg.ThemeDarkOnBattery; s.saveConfig()
+		case popup.ActFullscreenToggle:    s.cfg.ThemeSkipFullscreen = !s.cfg.ThemeSkipFullscreen; s.saveConfig()
+		case popup.ActHotkeyToggle:        s.cfg.HotkeysEnabled = !s.cfg.HotkeysEnabled; if s.cfg.HotkeysEnabled { s.startHotkeys() } else { s.stopHotkeys() }; s.syncChecks(); s.saveConfig()
+		case popup.ActAutostartToggle:     s.cfg.AutostartEnabled = !s.cfg.AutostartEnabled; if s.cfg.AutostartEnabled { autostart.Enable() } else { autostart.Disable() }; s.saveConfig()
+		case popup.ActSwitchTheme:         themeswitch.Switch(themeswitch.ModeDark); themeswitch.Switch(themeswitch.Current())
+		case popup.ActRepairTheme:         themeswitch.Switch(themeswitch.Current())
+		case popup.ActConfig:              exec.Command("notepad.exe", func() string { p, _ := config.Path(); return p }()).Start()
+		case popup.ActAbout:               showAboutDialog(s.lang)
+		case popup.ActExit:                systray.Quit()
+		}
+	}, func(key string) string { return i18n.T(s.lang, key) })
 }
