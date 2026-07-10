@@ -214,6 +214,9 @@ func (s *trayState) buildMenu() {
 
 	s.mNoSleep = systray.AddMenuItemCheckbox(T("menu_nosleep"), "", s.cfg.NoSleepEnabled)
 	s.registerLabel(s.mNoSleep, "menu_nosleep")
+	s.mProcessWatch = systray.AddMenuItemCheckbox(T("menu_process_watch"), "", s.cfg.ProcessWatchEnabled)
+	s.registerLabel(s.mProcessWatch, "menu_process_watch")
+
 
 	systray.AddSeparator()
 
@@ -335,21 +338,23 @@ func (s *trayState) buildMenu() {
 						s.showError("menu_lock", err)
 					}
 				})
-
 			case <-s.mProcessWatch.ClickedCh:
-			if s.mProcessWatch.Checked() {
-				s.mProcessWatch.Uncheck()
-				s.cfg.ProcessWatchEnabled = false
-				s.stopProcessWatcher()
-			} else {
-				s.mProcessWatch.Check()
-				s.cfg.ProcessWatchEnabled = true
-				s.startProcessWatcher()
-			}
+					if s.mProcessWatch.Checked() {
+						s.mProcessWatch.Uncheck()
+						s.cfg.ProcessWatchEnabled = false
+						s.stopProcessWatcher()
+					} else {
+						s.mProcessWatch.Check()
+						s.cfg.ProcessWatchEnabled = true
+						s.startProcessWatcher()
+					}
+					config.Save(s.cfg)
+
+
 			config.Save(s.cfg)
 
-		case <-s.mNoSleep.ClickedCh:
-				s.post(func() { s.toggleNoSleep() })
+			case <-s.mNoSleep.ClickedCh:
+					s.post(func() { s.toggleNoSleep() })
 
 			case <-s.mIdleEnable.ClickedCh:
 				s.post(func() {
@@ -411,26 +416,26 @@ func (s *trayState) buildMenu() {
 			if s.cfg.ThemeSwitchEnabled { s.startThemeScheduler() }
 			config.Save(s.cfg)
 
-		case <-s.mThemeBatteryDark.ClickedCh:
-			if s.mThemeBatteryDark.Checked() {
-				s.mThemeBatteryDark.Uncheck()
-				s.cfg.ThemeDarkOnBattery = false
-			} else {
-				s.mThemeBatteryDark.Check()
-				s.cfg.ThemeDarkOnBattery = true
-			}
+			case <-s.mThemeBatteryDark.ClickedCh:
+				if s.mThemeBatteryDark.Checked() {
+					s.mThemeBatteryDark.Uncheck()
+					s.cfg.ThemeDarkOnBattery = false
+				} else {
+					s.mThemeBatteryDark.Check()
+					s.cfg.ThemeDarkOnBattery = true
+				}
 			s.stopThemeScheduler()
 			if s.cfg.ThemeSwitchEnabled { s.startThemeScheduler() }
 			config.Save(s.cfg)
 
-		case <-s.mThemeSkipFullscreen.ClickedCh:
-			if s.mThemeSkipFullscreen.Checked() {
-				s.mThemeSkipFullscreen.Uncheck()
-				s.cfg.ThemeSkipFullscreen = false
-			} else {
-				s.mThemeSkipFullscreen.Check()
-				s.cfg.ThemeSkipFullscreen = true
-			}
+			case <-s.mThemeSkipFullscreen.ClickedCh:
+				if s.mThemeSkipFullscreen.Checked() {
+					s.mThemeSkipFullscreen.Uncheck()
+					s.cfg.ThemeSkipFullscreen = false
+				} else {
+					s.mThemeSkipFullscreen.Check()
+					s.cfg.ThemeSkipFullscreen = true
+				}
 			s.stopThemeScheduler()
 			if s.cfg.ThemeSwitchEnabled { s.startThemeScheduler() }
 			config.Save(s.cfg)
