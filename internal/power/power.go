@@ -17,6 +17,7 @@ type Status struct {
 	Battery  bool
 	Percent  int
 	Charging bool
+	Valid    bool
 }
 
 var (
@@ -57,13 +58,25 @@ func GetStatus() Status {
 		BatteryFullLifeTime uint32
 	}
 	var s sps
-	proc.Call(uintptr(unsafe.Pointer(&s)))
+	r, _, _ := proc.Call(uintptr(unsafe.Pointer(&s)))
+	if r == 0 {
+		return Status{}
+	}
+	batteryKnown := s.BatteryFlag != 255
+	percent := int(s.BatteryLifePercent)
+	if s.BatteryLifePercent == 255 {
+		percent = -1
+	}
 	return Status{
 		ACLine:   s.ACLineStatus == 1,
-		Battery:  s.BatteryFlag != 128,
-		Percent:  int(s.BatteryLifePercent),
+		Battery:  batteryKnown && s.BatteryFlag != 128,
+		Percent:  percent,
 		Charging: s.BatteryFlag&0x08 != 0,
+		Valid:    s.ACLineStatus != 255 && batteryKnown,
 	}
 }
 
-func OnBattery() bool { return !GetStatus().ACLine }
+func OnBattery() bool {
+	status := GetStatus()
+	return status.Valid && status.Battery && !status.ACLine
+}

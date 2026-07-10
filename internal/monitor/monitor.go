@@ -67,7 +67,8 @@ type Monitor struct {
 	warned    atomic.Bool
 	triggered atomic.Bool
 	stopCh    chan struct{}
-	stopped   atomic.Bool
+	doneCh    chan struct{}
+	running   bool
 	mu        sync.Mutex
 }
 
@@ -82,19 +83,18 @@ func New(
 	onWarning, onTrigger func(),
 	pollInterval time.Duration,
 ) *Monitor {
+	if warningOffset < 0 {
+		warningOffset = 0
+	}
 	m := &Monitor{
 		warningOffset: warningOffset,
 		onWarning:     onWarning,
 		onTrigger:     onTrigger,
 		pollInterval:  pollInterval,
-		stopCh:        make(chan struct{}),
 	}
 	m.thresholdNs.Store(int64(threshold))
 	if pollInterval <= 0 {
 		m.pollInterval = 3 * time.Second
-	}
-	if warningOffset < 0 {
-		warningOffset = 0
 	}
 	return m
 }
@@ -102,23 +102,29 @@ func New(
 // Start begins monitoring in a background goroutine.
 func (m *Monitor) Start() {
 	m.mu.Lock()
-	if m.stopped.Load() {
-		m.stopCh = make(chan struct{})
-		m.stopped.Store(false)
+	defer m.mu.Unlock()
+	if m.running {
+		return
 	}
-	m.mu.Unlock()
-	go m.loop()
+	m.stopCh = make(chan struct{})
+	m.doneCh = make(chan struct{})
+	m.running = true
+	go m.loop(m.stopCh, m.doneCh)
 }
 
 // Stop signals the monitor to exit.
 func (m *Monitor) Stop() {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.stopped.Load() {
+	if !m.running {
+		m.mu.Unlock()
 		return
 	}
-	m.stopped.Store(true)
-	close(m.stopCh)
+	stopCh := m.stopCh
+	doneCh := m.doneCh
+	m.running = false
+	close(stopCh)
+	m.mu.Unlock()
+	<-doneCh
 }
 
 // SetThreshold updates the idle threshold at runtime.
@@ -127,13 +133,14 @@ func (m *Monitor) SetThreshold(d time.Duration) { m.thresholdNs.Store(int64(d)) 
 // Threshold returns the current idle threshold.
 func (m *Monitor) Threshold() time.Duration { return time.Duration(m.thresholdNs.Load()) }
 
-func (m *Monitor) loop() {
+func (m *Monitor) loop(stopCh <-chan struct{}, doneCh chan<- struct{}) {
 	ticker := time.NewTicker(m.pollInterval)
 	defer ticker.Stop()
+	defer close(doneCh)
 
 	for {
 		select {
-		case <-m.stopCh:
+		case <-stopCh:
 			return
 		case <-ticker.C:
 			dur, err := IdleDuration()

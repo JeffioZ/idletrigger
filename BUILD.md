@@ -1,105 +1,100 @@
 # Build Instructions
 
-> 📖 [中文版](BUILD.zh-CN.md)
+> [中文版](BUILD.zh-CN.md)
 
 ## Prerequisites
 
-- **Go 1.21+** — [download](https://go.dev/dl/)
-- **Git** — for dependency resolution (or use `GOPROXY`)
-
-Verify:
-
-```
-go version   # → go version go1.21.x windows/amd64
-```
-
-## One-command Build
+- Go 1.25 or newer
+- Git
+- Python 3 only when regenerating icons
+- `rsrc v0.10.2` only when regenerating Windows resources
 
 ```powershell
-cd IdleTrigger
+go version
+go mod download
+```
+
+IdleTrigger targets Windows 10 / Server 2016 or newer. Both `windows/386`
+and `windows/amd64` are supported.
+
+Windows 7 is not supported by the current build: Go 1.20 was the final Go
+release that ran on Windows 7. If real demand appears, maintain a separate
+legacy build based on Go 1.20 with compatible dependency versions and test it
+on Windows 7; do not lower the main build's toolchain.
+
+## Build
+
+The repository contains architecture-specific `.syso` resources for 386 and
+amd64, so either build includes the application icon and manifest.
+
+```powershell
 $env:CGO_ENABLED = "0"
-go mod tidy        # download dependencies (first time only)
-go build -ldflags="-s -w -H windowsgui" -o IdleTrigger.exe .
+$env:GOARCH = "amd64" # or "386"
+$version = "dev"
+$ldflags = "-s -w -H windowsgui -X github.com/JeffioZ/idletrigger/internal/version.Value=$version"
+$output = if ($env:GOARCH -eq "amd64") { "IdleTrigger-x64.exe" } else { "IdleTrigger-x86.exe" }
+go build -trimpath -ldflags=$ldflags -o $output .
 ```
 
-| Flag / Env | Effect |
-|------------|--------|
-| `CGO_ENABLED=0` | **Force pure-Go static linking** — no C runtime, no external DLLs |
-| `-H windowsgui` | **GUI subsystem — no console flash on double-click** |
-| `-s` | Strip symbol table |
-| `-w` | Strip DWARF debug info |
+`CGO_ENABLED=0` produces a self-contained executable that only depends on
+Windows system DLLs. `-H windowsgui` prevents a console window from flashing
+when the tray application starts.
 
-These together produce a **single, fully self-contained EXE** (~5 MB).
-The only "dependencies" are Windows built-in DLLs (kernel32, user32, …)
-that ship with every Windows installation since XP.
-
-
-## Compress Further (optional)
-
-After the Go build, run [UPX](https://upx.github.io/) for maximum compression:
+## Verify
 
 ```powershell
-upx --best --lzma IdleTrigger.exe
+go test ./...
+go vet ./...
+gofmt -l .
+go mod verify
 ```
 
-This typically shrinks the binary to **~1.5 MB**.
+The release workflow performs test/vet first, builds both architectures, and
+publishes `SHA256SUMS.txt` with the executables.
 
-## Dependencies
+## Offline Build
 
-| Package | Purpose |
-|---------|---------|
-| `github.com/BurntSushi/toml` | TOML config parsing |
-| `github.com/getlantern/systray` | Cross-platform system tray |
-| `golang.org/x/sys` | Windows API bindings |
-
-All dependencies resolve automatically on `go build` / `go mod tidy`.
-
-Note: Windows XP support requires Go ≤ 1.20 and a suitable C toolchain.
-With Go 1.21+ the minimum supported Windows version is Windows 7 (or
-Windows Server 2008 R2).
-
-## Offline / Air-gapped Builds
+Run `go mod vendor` while dependencies are available, then copy the repository
+including `vendor/` to the offline machine:
 
 ```powershell
-go mod vendor     # vendor all dependencies
 $env:CGO_ENABLED = "0"
-go build -mod=vendor -ldflags="-s -w -H windowsgui" -o IdleTrigger.exe .
+$env:GOARCH = "amd64"
+go build -mod=vendor -trimpath -ldflags="-s -w -H windowsgui" -o IdleTrigger-x64.exe .
 ```
 
-## Single EXE Guarantee
+## Regenerate Icons and Resources
 
-IdleTrigger is a **true single-file executable**:
-
-- **Pure Go** — `CGO_ENABLED=0` disables CGo entirely; no MinGW, no MSVC runtime
-- **Static linking** — all Go packages and embedded assets are compiled into one `.exe`
-- **System DLLs only** — the binary only calls Windows built-in DLLs (kernel32.dll,
-  user32.dll, powrprof.dll, advapi32.dll) which exist on every Windows since XP
-- **Embedded resources** — tray icons and locales via `//go:embed`; EXE icon and manifest via `.syso` resource
-
-✅ Copy `IdleTrigger.exe` to any folder on any 32-bit or 64-bit Windows machine and it just works.
-No installer, no runtime, no extra files required.
-
-## Generate a New Tray Icon
-
-Edit `scripts/gen_icon.py`, then:
+The icon generator uses only the Python standard library. It stores each ICO
+size as a PNG-compressed frame, supported by the Windows 10+ target platform:
 
 ```powershell
-python scripts/gen_icon.py assets/
+python scripts/gen_icon.py assets
 ```
 
-Rebuild the EXE to embed the new icon.
+Install the pinned resource compiler and regenerate both architectures:
+
+```powershell
+go install github.com/akavel/rsrc@v0.10.2
+rsrc -arch 386 -manifest assets/manifest.xml -ico assets/app.ico -o rsrc_windows_386.syso
+rsrc -arch amd64 -manifest assets/manifest.xml -ico assets/app.ico -o rsrc_windows_amd64.syso
+```
+
+Commit `app.ico`, the three tray ICO files, the generator, and both `.syso`
+files together so checked-in resources remain reproducible.
 
 ## Development Loop
 
 ```powershell
-# Build & run GUI
-go build -o IdleTrigger.exe . && .\IdleTrigger.exe
+go test ./...
+go build -o IdleTrigger-dev.exe .
+./IdleTrigger-dev.exe
 
-# Build & run CLI
-go build -o IdleTrigger.exe . && .\IdleTrigger.exe lock
-
-# Test IPC (tray must be running in another terminal)
-.\IdleTrigger.exe nosleep on
-.\IdleTrigger.exe nosleep status
-.\IdleTrigger.exe monitor on
+# In a second terminal while the tray is running:
+./IdleTrigger-dev.exe nosleep on
+./IdleTrigger-dev.exe nosleep status
+./IdleTrigger-dev.exe monitor on
 ```
+
+UPX compression and code signing are optional release steps. Do not compress
+debug builds because it makes diagnostics and antivirus analysis harder.

@@ -25,7 +25,9 @@ type Watcher struct {
 	cbs       Callbacks
 	interval  time.Duration
 	stopCh    chan struct{}
+	doneCh    chan struct{}
 	mu        sync.Mutex
+	running   bool
 	wasActive atomic.Bool
 }
 
@@ -45,36 +47,48 @@ func New(exeNames []string, cbs Callbacks, interval time.Duration) *Watcher {
 		exes:     lowered,
 		cbs:      cbs,
 		interval: interval,
-		stopCh:   make(chan struct{}),
 	}
 }
 
 // Start begins scanning in a background goroutine.
 func (w *Watcher) Start() {
-	go w.loop()
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.running {
+		return
+	}
+	w.stopCh = make(chan struct{})
+	w.doneCh = make(chan struct{})
+	w.running = true
+	go w.loop(w.stopCh, w.doneCh)
 }
 
 // Stop signals the watcher to exit.
 func (w *Watcher) Stop() {
 	w.mu.Lock()
-	defer w.mu.Unlock()
-	select {
-	case <-w.stopCh:
-	default:
-		close(w.stopCh)
+	if !w.running {
+		w.mu.Unlock()
+		return
 	}
+	stopCh := w.stopCh
+	doneCh := w.doneCh
+	w.running = false
+	close(stopCh)
+	w.mu.Unlock()
+	<-doneCh
 }
 
-func (w *Watcher) loop() {
+func (w *Watcher) loop(stopCh <-chan struct{}, doneCh chan<- struct{}) {
 	ticker := time.NewTicker(w.interval)
 	defer ticker.Stop()
+	defer close(doneCh)
 
 	// Fire initial state.
 	w.check()
 
 	for {
 		select {
-		case <-w.stopCh:
+		case <-stopCh:
 			return
 		case <-ticker.C:
 			w.check()
@@ -86,7 +100,10 @@ func (w *Watcher) check() {
 	if len(w.exes) == 0 {
 		return
 	}
-	active := w.anyRunning()
+	active, err := w.anyRunning()
+	if err != nil {
+		return
+	}
 	was := w.wasActive.Swap(active)
 
 	if active && !was && w.cbs.OnEnable != nil {
@@ -96,10 +113,10 @@ func (w *Watcher) check() {
 	}
 }
 
-func (w *Watcher) anyRunning() bool {
+func (w *Watcher) anyRunning() (bool, error) {
 	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
 	if err != nil {
-		return false
+		return false, err
 	}
 	defer windows.CloseHandle(snapshot)
 
@@ -111,10 +128,13 @@ func (w *Watcher) anyRunning() bool {
 		name := strings.ToLower(windows.UTF16ToString(pe.ExeFile[:]))
 		for _, exe := range w.exes {
 			if name == exe {
-				return true
+				return true, nil
 			}
 		}
 		err = windows.Process32Next(snapshot, &pe)
 	}
-	return false
+	if err == windows.ERROR_NO_MORE_FILES {
+		return false, nil
+	}
+	return false, err
 }

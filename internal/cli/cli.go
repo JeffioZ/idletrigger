@@ -4,7 +4,7 @@ package cli
 import (
 	"fmt"
 	"os"
-	"time"
+	"strings"
 
 	"github.com/JeffioZ/idletrigger/internal/actions"
 	"github.com/JeffioZ/idletrigger/internal/autostart"
@@ -27,28 +27,28 @@ func Run(lang string) {
 	case "sleep":
 		caps := power.GetCapabilities()
 		if !caps.SleepAvailable {
-			fmt.Fprintln(os.Stderr, "error: sleep is not available on this system")
+			printError(lang, i18n.T(lang, "cli_error_sleep_unavailable"))
 			os.Exit(1)
 		}
 		fmt.Println(i18n.T(lang, "msg_sleeping"))
-		exitOnErr(actions.Sleep())
+		exitOnErr(lang, actions.Sleep())
 
 	case "hibernate":
 		caps := power.GetCapabilities()
 		if !caps.HibernateAvailable {
-			fmt.Fprintln(os.Stderr, "error: hibernate is not available on this system")
+			printError(lang, i18n.T(lang, "cli_error_hibernate_unavailable"))
 			os.Exit(1)
 		}
 		fmt.Println(i18n.T(lang, "msg_hibernating"))
-		exitOnErr(actions.Hibernate())
+		exitOnErr(lang, actions.Hibernate())
 
 	case "shutdown":
 		fmt.Println(i18n.T(lang, "msg_shutting_down"))
-		exitOnErr(actions.Shutdown())
+		exitOnErr(lang, actions.Shutdown())
 
 	case "lock":
 		fmt.Println(i18n.T(lang, "msg_locking"))
-		exitOnErr(actions.Lock())
+		exitOnErr(lang, actions.Lock())
 
 	case "nosleep":
 		cmdNoSleep(lang)
@@ -64,9 +64,10 @@ func Run(lang string) {
 
 	case "config:reload":
 		if resp, ok := ipc.Send("config:reload"); ok {
-			fmt.Println(resp)
+			printIPCResponse(lang, resp)
 		} else {
-			fmt.Println("error: tray is not running")
+			printError(lang, i18n.T(lang, "cli_error_tray_not_running"))
+			os.Exit(1)
 		}
 
 	case "version", "--version", "-V":
@@ -84,130 +85,138 @@ func Run(lang string) {
 
 func cmdNoSleep(lang string) {
 	if len(os.Args) < 3 {
-		fmt.Println("Usage: IdleTrigger nosleep <on|off|toggle|status>")
+		fmt.Fprintln(os.Stderr, i18n.T(lang, "cli_usage_nosleep"))
 		os.Exit(1)
 	}
 	sub := os.Args[2]
-	if ipc.IsTrayRunning() {
-		ipcCmd := "nosleep:" + sub
-		if sub == "on" && hasScreenFlag() {
-			ipcCmd = "nosleep:on:screen"
-		}
-		if resp, ok := ipc.Send(ipcCmd); ok {
-			fmt.Println(resp)
-			return
-		}
+	ipcCmd := "nosleep:" + sub
+	if sub == "on" && hasScreenFlag() {
+		ipcCmd = "nosleep:on:screen"
+	}
+	if resp, ok := ipc.Send(ipcCmd); ok {
+		printIPCResponse(lang, resp)
+		return
 	}
 	switch sub {
-	case "on":
-		nosleep.Enable(hasScreenFlag())
-		fmt.Println(i18n.T(lang, "msg_nosleep_on"))
-	case "off":
-		nosleep.Disable()
-		fmt.Println(i18n.T(lang, "msg_nosleep_off"))
-	case "toggle":
-		if nosleep.IsEnabled() {
-			nosleep.Disable()
-			fmt.Println(i18n.T(lang, "msg_nosleep_off"))
-		} else {
-			nosleep.Enable(hasScreenFlag())
-			fmt.Println(i18n.T(lang, "msg_nosleep_on"))
-		}
 	case "status":
 		printNoSleepStatus(lang)
+	case "on", "off", "toggle":
+		printError(lang, i18n.T(lang, "cli_error_nosleep_requires_tray"))
+		os.Exit(1)
 	default:
-		fmt.Println("Usage: IdleTrigger nosleep <on|off|toggle|status>")
+		fmt.Fprintln(os.Stderr, i18n.T(lang, "cli_usage_nosleep"))
 		os.Exit(1)
 	}
 }
 
 func cmdMonitor(lang string) {
 	if len(os.Args) < 3 {
-		fmt.Println("Usage: IdleTrigger monitor <on|off|status>")
+		fmt.Fprintln(os.Stderr, i18n.T(lang, "cli_usage_monitor"))
 		os.Exit(1)
 	}
-	if ipc.IsTrayRunning() {
-		if resp, ok := ipc.Send("monitor:" + os.Args[2]); ok {
-			fmt.Println(resp)
-			return
-		}
-	}
-	if os.Args[2] == "status" {
-		printIdleStatus()
+	if resp, ok := ipc.Send("monitor:" + os.Args[2]); ok {
+		printIPCResponse(lang, resp)
 		return
 	}
-	fmt.Println("error: tray is not running; cannot control monitor directly")
+	if os.Args[2] == "status" {
+		fmt.Println(statusLine(lang, "status_monitor", i18n.T(lang, "status_not_running")))
+		return
+	}
+	printError(lang, i18n.T(lang, "cli_error_monitor_requires_tray"))
 	os.Exit(1)
 }
 
 func cmdAutostart(lang string) {
 	if len(os.Args) < 3 {
-		fmt.Println("Usage: IdleTrigger autostart <enable|disable|status>")
-		return
+		fmt.Fprintln(os.Stderr, i18n.T(lang, "cli_usage_autostart"))
+		os.Exit(1)
 	}
 	switch os.Args[2] {
 	case "enable":
-		exitOnErr(autostart.Enable())
+		exitOnErr(lang, autostart.Enable())
 		fmt.Println(i18n.T(lang, "msg_autostart_enabled"))
 	case "disable":
-		exitOnErr(autostart.Disable())
+		exitOnErr(lang, autostart.Disable())
 		fmt.Println(i18n.T(lang, "msg_autostart_disabled"))
 	case "status":
 		enabled, err := autostart.IsEnabled()
-		exitOnErr(err)
-		fmt.Println("Auto-start:", onOff(enabled))
+		exitOnErr(lang, err)
+		fmt.Println(statusLine(lang, "menu_autostart", onOff(lang, enabled)))
 	default:
-		fmt.Println("Usage: IdleTrigger autostart <enable|disable|status>")
+		fmt.Fprintln(os.Stderr, i18n.T(lang, "cli_usage_autostart"))
+		os.Exit(1)
 	}
 }
 
 func cmdStatus(lang string) {
 	if resp, ok := ipc.Send("status"); ok {
-		fmt.Println(resp)
+		printIPCResponse(lang, resp)
 		return
 	}
-	fmt.Println("───────────────────────────")
+	fmt.Println(statusLine(lang, "status_tray", i18n.T(lang, "status_not_running")))
 	printNoSleepStatus(lang)
-	printPowerStatus()
-	printIdleStatus()
+	fmt.Println(statusLine(lang, "status_monitor", i18n.T(lang, "status_not_running")))
+	printPowerStatus(lang)
+	printIdleStatus(lang)
+	fmt.Println(statusLine(lang, "status_hotkeys", i18n.T(lang, "status_disabled")))
+}
+
+func printIPCResponse(lang, resp string) {
+	if strings.HasPrefix(resp, "err:") {
+		printError(lang, strings.TrimSpace(strings.TrimPrefix(resp, "err:")))
+		os.Exit(1)
+	}
+	if resp == "ok" {
+		fmt.Println(i18n.T(lang, "cli_success"))
+		return
+	}
+	fmt.Println(resp)
 }
 
 func printNoSleepStatus(lang string) {
 	if nosleep.IsEnabled() {
-		scr := ""
+		value := i18n.T(lang, "status_enabled")
 		if nosleep.IsKeepingScreenOn() {
-			scr = " (keep screen on)"
+			value = i18n.T(lang, "status_enabled_keep_screen")
 		}
-		fmt.Println("NoSleep:      ENABLED" + scr)
+		fmt.Println(statusLine(lang, "status_nosleep", value))
 	} else {
-		fmt.Println("NoSleep:      DISABLED")
+		fmt.Println(statusLine(lang, "status_nosleep", i18n.T(lang, "status_disabled")))
 	}
 }
 
-func printPowerStatus() {
+func printPowerStatus(lang string) {
 	ps := power.GetStatus()
-	if ps.ACLine {
-		fmt.Println("Power:        AC")
-	} else if ps.Battery {
-		fmt.Printf("Power:        Battery %d%%\n", ps.Percent)
-	} else {
-		fmt.Println("Power:        Unknown")
+	value := i18n.T(lang, "status_unknown")
+	if ps.Valid && ps.ACLine {
+		value = i18n.T(lang, "status_ac_power")
+	} else if ps.Valid && ps.Battery && ps.Percent >= 0 {
+		value = fmt.Sprintf(i18n.T(lang, "status_battery"), ps.Percent)
 	}
+	fmt.Println(statusLine(lang, "status_power", value))
 }
 
-func printIdleStatus() {
+func printIdleStatus(lang string) {
+	value := i18n.T(lang, "status_unknown")
 	if d, err := monitor.IdleDuration(); err == nil {
-		fmt.Printf("Idle time:    %s\n", d.Round(time.Second))
-	} else {
-		fmt.Println("Idle time:    unknown")
+		value = i18n.FormatDuration(lang, d)
 	}
+	fmt.Println(statusLine(lang, "status_idle_time", value))
 }
 
-func exitOnErr(err error) {
+func exitOnErr(lang string, err error) {
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		printError(lang, err.Error())
 		os.Exit(1)
 	}
+}
+
+func printError(lang, detail string) {
+	fmt.Fprintln(os.Stderr, fmt.Sprintf(i18n.T(lang, "cli_error_detail"), detail))
+}
+
+func statusLine(lang, labelKey, value string) string {
+	return fmt.Sprintf(i18n.T(lang, "status_line"), i18n.T(lang, labelKey), value)
 }
 
 func hasScreenFlag() bool {
@@ -219,9 +228,9 @@ func hasScreenFlag() bool {
 	return false
 }
 
-func onOff(b bool) string {
+func onOff(lang string, b bool) string {
 	if b {
-		return "ENABLED"
+		return i18n.T(lang, "status_enabled")
 	}
-	return "DISABLED"
+	return i18n.T(lang, "status_disabled")
 }

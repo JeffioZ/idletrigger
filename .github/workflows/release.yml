@@ -16,25 +16,48 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.25.x'
+
+      - name: Verify
+        run: |
+          go mod download
+          go test ./...
+          go vet ./...
 
       - name: Generate .syso
         run: |
-          go install github.com/akavel/rsrc@latest
+          go install github.com/akavel/rsrc@v0.10.2
           ~/go/bin/rsrc -arch 386 -ico assets/app.ico -manifest assets/manifest.xml -o rsrc_windows_386.syso
+          ~/go/bin/rsrc -arch amd64 -ico assets/app.ico -manifest assets/manifest.xml -o rsrc_windows_amd64.syso
 
       - name: Build
         run: |
           $env:CGO_ENABLED = "0"
+          $ldflags = "-s -w -H windowsgui -X github.com/JeffioZ/idletrigger/internal/version.Value=${{ github.ref_name }}"
           $env:GOARCH = "386"
-          go build -ldflags="-s -w -H windowsgui" -o IdleTrigger.exe .
+          go build -trimpath -ldflags=$ldflags -o IdleTrigger-x86.exe .
+          $env:GOARCH = "amd64"
+          go build -trimpath -ldflags=$ldflags -o IdleTrigger-x64.exe .
+
+      - name: Checksums
+        run: |
+          $lines = @()
+          foreach ($file in @("IdleTrigger-x86.exe", "IdleTrigger-x64.exe")) {
+            $hash = (Get-FileHash -Algorithm SHA256 $file).Hash.ToLower()
+            $lines += "$hash *$file"
+          }
+          Set-Content -Encoding ascii SHA256SUMS.txt $lines
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: IdleTrigger.exe
+          files: |
+            IdleTrigger-x86.exe
+            IdleTrigger-x64.exe
+            SHA256SUMS.txt
           body: |
-            Download `IdleTrigger.exe` and run it — no installation needed.
+            Download the native 64-bit build `IdleTrigger-x64.exe` (recommended) or
+            the 32-bit compatibility build `IdleTrigger-x86.exe` — no installation needed.
 
             See [README.md](https://github.com/JeffioZ/idletrigger/blob/master/README.md) for full documentation.
         env:

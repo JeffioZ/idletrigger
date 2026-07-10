@@ -10,8 +10,18 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func Info(title, heading, body string) { show(title, heading+"\n\n"+body, 0x40) }
-func Warn(title, heading, body string) { show(title, heading+"\n\n"+body, 0x30) }
+func Info(title, heading, body string) { show(title, compose(heading, body), 0x40) }
+func Warn(title, heading, body string) { show(title, compose(heading, body), 0x30) }
+
+func compose(heading, body string) string {
+	if heading == "" {
+		return body
+	}
+	if body == "" {
+		return heading
+	}
+	return heading + "\r\n\r\n" + body
+}
 
 func show(title, text string, icon uintptr) {
 	user32 := windows.NewLazySystemDLL("user32.dll")

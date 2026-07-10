@@ -14,13 +14,13 @@ func Enable() {
 	if err != nil {
 		return
 	}
+	defer syscall.FreeLibrary(uxtheme)
 
 	kernel32 := syscall.NewLazyDLL("kernel32.dll")
 	getProc := kernel32.NewProc("GetProcAddress")
 
 	// SetPreferredAppMode — ordinal 135.  ForceDark (2) is more
-	// aggressive than AllowDark (1) and works on more controls,
-	// including TaskDialog.
+	// aggressive than AllowDark (1) and works on more controls.
 	proc1, _, _ := getProc.Call(uintptr(uxtheme), uintptr(135))
 	if proc1 != 0 {
 		const forceDark = 2

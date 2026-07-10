@@ -21,14 +21,16 @@ type Binding struct {
 	VK       uint32
 	Modifier uint32
 	Action   Action
-	Label    string // "Win+Shift+S (Sleep)"
+	Label    string // "Win+Shift+S"
 }
 
 type Manager struct {
 	bindings  []Binding
 	hwnd      windows.Handle
 	mu        sync.Mutex
-	stopCh    chan struct{}
+	threadID  uint32
+	doneCh    chan struct{}
+	started   bool
 	callbacks Callbacks
 }
 
@@ -41,11 +43,12 @@ type Callbacks struct {
 type Failed []string
 
 const (
-	modAlt   = 0x0001
-	modCtrl  = 0x0002
-	modShift = 0x0004
-	modWin   = 0x0008
-	wmHotkey = 0x0312
+	modAlt    = 0x0001
+	modCtrl   = 0x0002
+	modShift  = 0x0004
+	modWin    = 0x0008
+	wmHotkey  = 0x0312
+	className = "IdleTriggerHotkey"
 )
 
 type wndClassExW struct {
@@ -74,9 +77,9 @@ type msg struct {
 
 func DefaultBindings() []Binding {
 	return []Binding{
-		{VK: 'S', Modifier: modWin | modShift, Action: ActionSleep, Label: "Win+Shift+S (Sleep)"},
-		{VK: 'L', Modifier: modWin | modShift, Action: ActionLock, Label: "Win+Shift+L (Lock)"},
-		{VK: 'N', Modifier: modWin | modShift, Action: ActionToggleNoSleep, Label: "Win+Shift+N (Toggle NoSleep)"},
+		{VK: 'S', Modifier: modWin | modShift, Action: ActionSleep, Label: "Win+Shift+S"},
+		{VK: 'L', Modifier: modWin | modShift, Action: ActionLock, Label: "Win+Shift+L"},
+		{VK: 'N', Modifier: modWin | modShift, Action: ActionToggleNoSleep, Label: "Win+Shift+N"},
 	}
 }
 
@@ -84,7 +87,6 @@ func NewManager(bindings []Binding, cbs Callbacks) *Manager {
 	return &Manager{
 		bindings:  bindings,
 		callbacks: cbs,
-		stopCh:    make(chan struct{}),
 	}
 }
 
@@ -93,7 +95,7 @@ func NewManager(bindings []Binding, cbs Callbacks) *Manager {
 func (m *Manager) Register() Failed {
 	user32 := windows.NewLazySystemDLL("user32.dll")
 
-	className, _ := syscall.UTF16PtrFromString("IdleTriggerHotkey")
+	classNamePtr, _ := syscall.UTF16PtrFromString(className)
 	kernel32 := windows.NewLazySystemDLL("kernel32.dll")
 	instance := kernel32.NewProc("GetModuleHandleW")
 	hInst, _, _ := instance.Call(0)
@@ -102,7 +104,7 @@ func (m *Manager) Register() Failed {
 	wc.Size = uint32(unsafe.Sizeof(wc))
 	wc.WndProc = windows.NewCallback(m.wndProc)
 	wc.Instance = windows.Handle(hInst)
-	wc.ClassName = className
+	wc.ClassName = classNamePtr
 
 	reg := user32.NewProc("RegisterClassExW")
 	reg.Call(uintptr(unsafe.Pointer(&wc)))
@@ -111,7 +113,7 @@ func (m *Manager) Register() Failed {
 	const wsOverlapped = 0
 	const hwndMessage = ^uintptr(0)
 	ret, _, _ := create.Call(
-		0, uintptr(unsafe.Pointer(className)), 0,
+		0, uintptr(unsafe.Pointer(classNamePtr)), 0,
 		uintptr(wsOverlapped), 0, 0, 0, 0,
 		hwndMessage, 0, hInst, 0,
 	)
@@ -141,11 +143,9 @@ func (m *Manager) Run() {
 	msg2 := &msg{}
 	getMsg := user32.NewProc("GetMessageW")
 	for {
-		// GetMessage blocks until a message arrives. To stop, we send
-		// WM_QUIT via PostMessage from Stop(), which makes GetMessage
+		// GetMessage blocks until a message arrives. Stop sends WM_QUIT
+		// to this thread via PostThreadMessage, which makes GetMessage
 		// return 0 and exit the loop naturally.
-		// GetMessage 阻塞等待消息。Stop() 通过 PostMessage(hwnd, WM_QUIT)
-		// 发送退出消息，GetMessage 返回 0 后自然退出循环。
 		r, _, _ := getMsg.Call(uintptr(unsafe.Pointer(msg2)), 0, 0, 0)
 		if r == 0 || r == ^uintptr(0) {
 			return
@@ -158,23 +158,38 @@ func (m *Manager) Run() {
 // Start launches the hotkey goroutine, which locks the OS thread and does
 // Register + message loop + cleanup all on the same thread. Returns the
 // Failed list from registration.
-// 在锁定 OS 线程的 goroutine 中完成 注册→消息循环→清理 全流程，返回注册失败列表。
 func (m *Manager) Start() Failed {
+	m.mu.Lock()
+	if m.started {
+		m.mu.Unlock()
+		return nil
+	}
+	m.started = true
+	m.doneCh = make(chan struct{})
+	doneCh := m.doneCh
+	m.mu.Unlock()
+
 	resultCh := make(chan Failed, 1)
 	go func() {
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
+		defer close(doneCh)
+
+		kernel32 := windows.NewLazySystemDLL("kernel32.dll")
+		getCurrentThreadID := kernel32.NewProc("GetCurrentThreadId")
+		tid, _, _ := getCurrentThreadID.Call()
+		m.mu.Lock()
+		m.threadID = uint32(tid)
+		m.mu.Unlock()
 
 		failed := m.Register()
 		resultCh <- failed
 
 		// Run message pump on this same thread, then clean up.
-		// 在同一线程运行消息循环，然后清理。
 		if m.hwnd != 0 {
 			m.Run()
 
 			// Unregister hotkeys and destroy window on this thread.
-			// 在本线程注销热键并销毁窗口。
 			user32 := windows.NewLazySystemDLL("user32.dll")
 			for i := range m.bindings {
 				unreg := user32.NewProc("UnregisterHotKey")
@@ -184,15 +199,38 @@ func (m *Manager) Start() Failed {
 			destroy.Call(uintptr(m.hwnd))
 			m.hwnd = 0
 		}
+		classNamePtr, _ := syscall.UTF16PtrFromString(className)
+		getModuleHandle := kernel32.NewProc("GetModuleHandleW")
+		hInst, _, _ := getModuleHandle.Call(0)
+		user32 := windows.NewLazySystemDLL("user32.dll")
+		unregisterClass := user32.NewProc("UnregisterClassW")
+		unregisterClass.Call(uintptr(unsafe.Pointer(classNamePtr)), hInst)
+		m.mu.Lock()
+		m.threadID = 0
+		m.started = false
+		m.mu.Unlock()
 	}()
 	return <-resultCh
 }
 
 // Stop signals the hotkey goroutine to exit. Cleanup is handled inside
 // Start()'s goroutine on the same OS thread.
-// 发送退出信号，清理由 Start() 的 goroutine 在同一线程处理。
 func (m *Manager) Stop() {
-	close(m.stopCh)
+	m.mu.Lock()
+	tid := m.threadID
+	doneCh := m.doneCh
+	started := m.started
+	m.mu.Unlock()
+	if !started || doneCh == nil {
+		return
+	}
+	if tid != 0 {
+		user32 := windows.NewLazySystemDLL("user32.dll")
+		postThreadMessage := user32.NewProc("PostThreadMessageW")
+		const wmQuit = 0x0012
+		postThreadMessage.Call(uintptr(tid), uintptr(wmQuit), 0, 0)
+	}
+	<-doneCh
 }
 
 func (m *Manager) wndProc(hwnd windows.Handle, msg2 uint32, wParam, lParam uintptr) uintptr {
@@ -221,5 +259,3 @@ func (m *Manager) wndProc(hwnd windows.Handle, msg2 uint32, wParam, lParam uintp
 	r, _, _ := defProc.Call(uintptr(hwnd), uintptr(msg2), wParam, lParam)
 	return r
 }
-
-var _ = unsafe.Sizeof(0)

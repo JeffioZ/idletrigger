@@ -15,11 +15,10 @@ var (
 	advapi32 = windows.NewLazySystemDLL("advapi32.dll")
 )
 
-// Sleep puts the system into sleep (S3 suspend).  If hibernation is enabled
-// by system policy, SetSuspendState may hibernate instead — use Hibernate()
-// for an explicit hibernation request.
+// Sleep requests the system suspend state. The exact hardware sleep state is
+// selected by Windows and the machine firmware.
 func Sleep() error {
-	// SetSuspendState(FALSE, FALSE, FALSE) → sleep
+	// FALSE requests suspend rather than hibernation.
 	proc := powrprof.NewProc("SetSuspendState")
 	r, _, err := proc.Call(0, 0, 0) // Hibernate=FALSE, ForceCritical=FALSE, DisableWakeEvent=FALSE
 	if r == 0 {
@@ -45,12 +44,13 @@ func Shutdown() error {
 	}
 	proc := user32.NewProc("ExitWindowsEx")
 	const (
-		EWX_SHUTDOWN = 0x00000008
-		EWX_POWEROFF = 0x00000010
-		EWX_FORCE    = 0x00000004
+		EWX_SHUTDOWN = 0x00000001
+		EWX_POWEROFF = 0x00000008
+		// Mark the shutdown as planned so Windows records it correctly.
+		SHTDN_REASON_FLAG_PLANNED = 0x80000000
 	)
-	flags := uintptr(EWX_SHUTDOWN | EWX_POWEROFF | EWX_FORCE)
-	r, _, err := proc.Call(flags, 0)
+	flags := uintptr(EWX_SHUTDOWN | EWX_POWEROFF)
+	r, _, err := proc.Call(flags, uintptr(SHTDN_REASON_FLAG_PLANNED))
 	if r == 0 {
 		return fmt.Errorf("ExitWindowsEx: %v", err)
 	}
@@ -89,9 +89,22 @@ func acquireShutdownPrivilege() error {
 			{Luid: luid, Attributes: windows.SE_PRIVILEGE_ENABLED},
 		},
 	}
-	err = windows.AdjustTokenPrivileges(token, false, &tp, uint32(unsafe.Sizeof(tp)), nil, nil)
-	if err != nil {
-		return fmt.Errorf("AdjustTokenPrivileges: %w", err)
+	setLastError := windows.NewLazySystemDLL("kernel32.dll").NewProc("SetLastError")
+	setLastError.Call(0)
+	adjust := advapi32.NewProc("AdjustTokenPrivileges")
+	r, _, callErr := adjust.Call(
+		uintptr(token),
+		0,
+		uintptr(unsafe.Pointer(&tp)),
+		uintptr(unsafe.Sizeof(tp)),
+		0,
+		0,
+	)
+	if r == 0 {
+		return fmt.Errorf("AdjustTokenPrivileges: %v", callErr)
+	}
+	if callErr == windows.ERROR_NOT_ALL_ASSIGNED {
+		return fmt.Errorf("AdjustTokenPrivileges: %w", windows.ERROR_NOT_ALL_ASSIGNED)
 	}
 	return nil
 }
