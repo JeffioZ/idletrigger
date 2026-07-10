@@ -621,18 +621,29 @@ func (s *trayState) updateActionChecks() {
 // ---- icon state -------------------------------------------------------
 
 func (s *trayState) updateIcon() {
+	// Build combined tooltip showing all active features.
+	nl := string(rune(10))
+	tip := "IdleTrigger"
 	if nosleep.IsEnabled() {
 		systray.SetIcon(assets.IconActive)
-		systray.SetTooltip(i18n.T(s.lang, "tooltip_nosleep"))
+		tip += nl + i18n.T(s.lang, "tooltip_nosleep")
 	} else if s.cfg.IdleTimeoutMinutes > 0 {
 		systray.SetIcon(assets.IconMonitor)
-		actName := i18n.T(s.lang, actionTranslationKey(s.cfg.IdleAction))
-		systray.SetTooltip(fmt.Sprintf(i18n.T(s.lang, "tooltip_monitor"),
-			s.cfg.IdleTimeoutMinutes, actName))
 	} else {
 		systray.SetIcon(assets.IconDefault)
-		systray.SetTooltip(i18n.T(s.lang, "tooltip_default"))
 	}
+	if s.cfg.IdleTimeoutMinutes > 0 {
+		act := i18n.T(s.lang, actionTranslationKey(s.cfg.IdleAction))
+		tip += nl + fmt.Sprintf(i18n.T(s.lang, "tooltip_monitor"),
+			s.cfg.IdleTimeoutMinutes, act)
+	}
+	if s.cfg.ThemeSwitchEnabled {
+		tip += nl + i18n.T(s.lang, "tooltip_theme")
+	}
+	if s.cfg.HotkeysEnabled {
+		tip += nl + i18n.T(s.lang, "tooltip_hotkeys")
+	}
+	systray.SetTooltip(tip)
 }
 
 // ---- idle monitor -----------------------------------------------------
