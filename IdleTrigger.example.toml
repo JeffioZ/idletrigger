@@ -1,26 +1,55 @@
-# IdleTrigger Configuration Example
+# IdleTrigger 配置示例 / Configuration Example
+# 复制为 IdleTrigger.toml 放在 EXE 同目录即可生效
+# Copy to IdleTrigger.toml next to the EXE to apply
 
+# 界面语言 / UI language: "auto"（跟随系统/follow OS）, "en", "zh-CN"
 language = "auto"
+
+# ── 空闲监测 / Idle Monitor ──
+# 无操作多少分钟后自动触发动作，设为 0 禁用 / Minutes of inactivity before trigger, 0 = disabled
 idle_timeout_minutes = 30
+# 触发动作 / Trigger action: "sleep", "hibernate", "shutdown", "lock"
 idle_action = "sleep"
+# 触发前多少秒弹出警告通知 / Warning notification seconds before trigger, 0 = off
 idle_warning_seconds = 30
 
+# ── 保持唤醒 / Stay Awake ──
+# 阻止系统自动休眠 / Prevent system from sleeping automatically
 nosleep_enabled = false
+# 同步保持屏幕常亮 / Also keep the display on
 keep_screen_on = false
+# 电池供电时仍允许保持唤醒 / Allow stay-awake when on battery
 nosleep_on_battery = false
+# 最低电量百分比，低于此值强制关闭保持唤醒 / Min battery % to force-disable stay-awake
 nosleep_battery_threshold = 20
 
+# ── 全局热键 / Global Hotkeys ──
+# 启用 Win+Shift+S / L / N / Enable global keyboard shortcuts
 hotkeys_enabled = false
+
+# ── 进程关联 / Process Watch ──
+# 检测到列表中任意程序运行时自动启用保持唤醒 / Auto-enable stay-awake when any listed app is running
 process_watch_enabled = false
+# 不区分大小写的 .exe 文件名 / Case-insensitive .exe names
 process_watch_list = []
 
+# ── 调试日志 / Debug Logging ──
+# 将运行日志写入 IdleTrigger.log / Write debug log to IdleTrigger.log
 logging_enabled = false
 
+# ── 昼夜主题 / Day/Night Theme ──
+# 启用自动主题切换 / Enable automatic theme switching
 theme_switch_enabled = false
+# 模式 / Mode: "fixed"（使用下方固定时间/use times below）, "sunrise"（日出日落/sunrise sunset）
 theme_mode = "sunrise"
+# 浅色时间（仅 fixed 模式） / Light theme time (fixed mode only)
 theme_light_time = "07:00"
+# 深色时间（仅 fixed 模式） / Dark theme time (fixed mode only)
 theme_dark_time = "19:00"
+# 经纬度，设为 0 则根据时区自动检测 / Latitude/Longitude, 0 = auto-detect from timezone
 theme_latitude = 0
 theme_longitude = 0
+# 电池供电时自动切换深色 / Auto-switch to dark on battery
 theme_dark_on_battery = true
+# 全屏/游戏时跳过切换 / Skip switching during fullscreen apps/games
 theme_skip_fullscreen = true
