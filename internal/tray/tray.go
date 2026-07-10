@@ -247,7 +247,7 @@ func (s *trayState) buildMenu() {
 	s.registerLabel(s.mThemeSwitch, "menu_theme_switch")
 
 	// Light time submenu
-	s.mThemeLightAt = s.mThemeSwitch.AddSubMenuItem(T("menu_theme_light_time"), "")
+	s.mThemeLightAt = s.mThemeSunrise.AddSubMenuItem(T("menu_theme_light_time"), "")
 	s.registerLabel(s.mThemeLightAt, "menu_theme_light_time")
 	s.themeLightItems = make([]*systray.MenuItem, 3)
 	lightKeys := []string{"theme_time_0600", "theme_time_0700", "theme_time_0800"}
@@ -259,7 +259,7 @@ func (s *trayState) buildMenu() {
 	}
 
 	// Dark time submenu
-	s.mThemeDarkAt = s.mThemeSwitch.AddSubMenuItem(T("menu_theme_dark_time"), "")
+	s.mThemeDarkAt = s.mThemeSunrise.AddSubMenuItem(T("menu_theme_dark_time"), "")
 	s.registerLabel(s.mThemeDarkAt, "menu_theme_dark_time")
 	s.themeDarkItems = make([]*systray.MenuItem, 4)
 	darkKeys := []string{"theme_time_1800", "theme_time_1900", "theme_time_2000", "theme_time_2100"}
@@ -276,9 +276,11 @@ func (s *trayState) buildMenu() {
 	s.mThemeRepair = s.mThemeSwitch.AddSubMenuItem(T("menu_theme_repair"), "")
 	s.registerLabel(s.mThemeRepair, "menu_theme_repair")
 
+
 	// Sunrise mode toggle
 	s.mThemeSunrise = s.mThemeSwitch.AddSubMenuItemCheckbox(T("menu_theme_sunrise"), "", s.cfg.ThemeMode == "sunrise")
 	s.registerLabel(s.mThemeSunrise, "menu_theme_sunrise")
+
 
 	// Battery dark toggle
 	s.mThemeBatteryDark = s.mThemeSwitch.AddSubMenuItemCheckbox(T("menu_theme_battery_dark"), "", s.cfg.ThemeDarkOnBattery)
