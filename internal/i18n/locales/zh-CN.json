@@ -36,8 +36,8 @@
   "msg_autostart_enabled": "开机时将自动启动。",
   "msg_autostart_disabled": "开机时不会自动启动。",
   "msg_hotkey_conflict": "以下热键注册失败（已被占用）：",
-  "tooltip_nosleep": "IdleTrigger — Stay Awake active",
-  "tooltip_monitor": "IdleTrigger — monitor: %d min → %s",
+  "tooltip_nosleep": "IdleTrigger — 保持唤醒中",
+  "tooltip_monitor": "IdleTrigger — 空闲监测：%d 分钟 → %s",
   "tooltip_default": "IdleTrigger",
   "cli_usage": "用法：IdleTrigger <命令>\n\n命令：\n  sleep        进入睡眠\n  hibernate    进入休眠\n  shutdown     关机\n  lock         锁屏\n  nosleep      保持唤醒（on|off|toggle|status）\n  monitor      空闲监测（on|off|status）\n  autostart    开机自启（enable|disable|status）\n  config:reload 重载托盘程序配置\n  status       查看当前状态\n  version      显示版本",
   "cli_usage_nosleep": "用法：IdleTrigger nosleep <on|off|toggle|status> [--screen]",
@@ -89,5 +89,6 @@
   "menu_theme_battery_dark": "使用电池深色",
   "menu_theme_skip_fullscreen": "全屏暂不切换",
   "menu_process_watch": "进程关联",
-  "about_body": "保持唤醒    阻止系统自动休眠\n空闲监测    N 分钟无操作后自动触发\n              睡眠/休眠/关机/锁屏\n全局热键    Win+Shift+S/L/N\n昼夜模式    定时或日出日落自动切换深浅色\n电池感知    使用电池时自动禁用保持唤醒\n进程关联    指定应用运行时自动启用保持唤醒\n\nhttps://github.com/JeffioZ/idletrigger"
+  "about_body": "保持唤醒    阻止系统自动休眠\n空闲监测    N 分钟无操作后自动触发\n              睡眠/休眠/关机/锁屏\n全局热键    Win+Shift+S/L/N\n昼夜模式    定时或日出日落自动切换深浅色\n电池感知    使用电池时自动禁用保持唤醒\n进程关联    指定应用运行时自动启用保持唤醒\n\nhttps://github.com/JeffioZ/idletrigger",
+  "tooltip_theme": "IdleTrigger — 昼夜模式：%s"
 }
