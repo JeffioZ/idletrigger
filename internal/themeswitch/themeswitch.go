@@ -129,14 +129,15 @@ type Scheduler struct {
 	lightTime string  // HH:MM
 	darkTime  string  // HH:MM
 	latitude  float64
-	longitude      float64
-	skipFullscreen bool
+	longitude       float64
+	skipFullscreen  bool
+	darkOnBattery   bool
 	stopCh         chan struct{}
 	mu        sync.Mutex
 }
 
 // NewScheduler creates a Scheduler.
-func NewScheduler(mode, lightTime, darkTime string, lat, lon float64, skipFullscreen bool) *Scheduler {
+func NewScheduler(mode, lightTime, darkTime string, lat, lon float64, skipFullscreen, darkOnBattery bool) *Scheduler {
 	return &Scheduler{
 		mode:      mode,
 		lightTime: lightTime,
@@ -144,6 +145,7 @@ func NewScheduler(mode, lightTime, darkTime string, lat, lon float64, skipFullsc
 		latitude:  lat,
 		longitude:      lon,
 		skipFullscreen: skipFullscreen,
+		darkOnBattery:  darkOnBattery,
 		stopCh:         make(chan struct{}),
 	}
 }
@@ -176,6 +178,14 @@ func (s *Scheduler) loop() {
 }
 
 func (s *Scheduler) check(now time.Time) {
+	// If dark-on-battery is enabled and running on battery, force dark.
+	// 电池深色模式：使用电池时强制深色。
+	if s.darkOnBattery && onBattery() && Current() != ModeDark {
+		if !s.skipFullscreen || !IsFullscreen() {
+			Switch(ModeDark)
+			return
+		}
+	}
 	var lightMin, darkMin int
 
 	if s.mode == "sunrise" {
@@ -301,6 +311,23 @@ func IsFullscreen() bool {
 	w := r.right - r.left
 	h := r.bottom - r.top
 	return int32(sw) <= w && int32(sh) <= h
+}
+
+
+func onBattery() bool {
+	kernel32 := windows.NewLazySystemDLL("kernel32.dll")
+	proc := kernel32.NewProc("GetSystemPowerStatus")
+	type sps struct {
+		ACLineStatus       byte
+		BatteryFlag        byte
+		BatteryLifePercent byte
+		_                  byte
+		_                  uint32
+		_                  uint32
+	}
+	var s sps
+	proc.Call(uintptr(unsafe.Pointer(&s)))
+	return s.ACLineStatus == 0 && s.BatteryFlag != 128
 }
 
 func parseTime(s string) int {
