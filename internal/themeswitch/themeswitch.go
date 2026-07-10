@@ -235,6 +235,16 @@ func (s *Scheduler) loop(stopCh <-chan struct{}, doneCh chan<- struct{}) {
 	}
 }
 
+// CheckNow evaluates the current power/time policy immediately. It is used
+// when Windows power state changes so dark-on-battery does not wait for the
+// regular scheduler tick.
+func (s *Scheduler) CheckNow() {
+	if s == nil {
+		return
+	}
+	s.check(time.Now())
+}
+
 func (s *Scheduler) check(now time.Time) {
 	// If dark-on-battery is enabled and running on battery, force dark.
 	if s.darkOnBattery && onBattery() {

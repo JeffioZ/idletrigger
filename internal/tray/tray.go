@@ -131,6 +131,9 @@ func Run(cfg config.Config, cbs Callbacks) {
 		go s.batteryLoop()
 
 		systray.OnLeftClick = func() { s.showPopup() }
+		systray.OnPowerChange = func() {
+			s.post(func() { s.refreshBatteryPolicy() })
+		}
 	}
 
 	onExit := func() {
@@ -434,8 +437,10 @@ func (s *trayState) stopProcessWatcher() {
 
 // batteryLoop periodically checks power state and auto-disables NoSleep
 // when the system switches to battery or drops below the configured threshold.
+// It also nudges the theme scheduler so dark-on-battery reacts within a few
+// seconds instead of waiting for the regular theme schedule tick.
 func (s *trayState) batteryLoop() {
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
 	for range ticker.C {
 		s.post(func() { s.refreshBatteryPolicy() })
@@ -445,6 +450,9 @@ func (s *trayState) batteryLoop() {
 func (s *trayState) refreshBatteryPolicy() {
 	ps := power.GetStatus()
 	blocked := batteryPolicyBlocks(s.cfg, ps)
+	if s.themeSched != nil {
+		s.themeSched.CheckNow()
+	}
 	if blocked == s.batteryBlocked {
 		return
 	}
@@ -782,12 +790,11 @@ func (s *trayState) showPopup() {
 				IdleTimeout:         s.cfg.IdleTimeoutMinutes,
 				IdleAction:          string(s.cfg.IdleAction),
 				ThemeSwitchEnabled:  s.cfg.ThemeSwitchEnabled,
-				SunriseMode:         s.cfg.ThemeMode == "sunrise",
 				DarkOnBattery:       s.cfg.ThemeDarkOnBattery,
 				SkipFullscreen:      s.cfg.ThemeSkipFullscreen,
 				HotkeysEnabled:      s.cfg.HotkeysEnabled,
 				AutostartEnabled:    s.cfg.AutostartEnabled,
-				IsChinese:           s.lang == "zh-CN",
+				IsChinese:           i18n.ResolveLanguage(s.lang) == "zh-CN",
 				ThemeSchedule:       s.themeScheduleText(),
 			},
 			lang: s.lang,
@@ -864,14 +871,6 @@ func (s *trayState) handlePopupAction(action popup.Action, value int) {
 			s.stopThemeScheduler()
 		}
 		s.updateIcon()
-		s.saveConfig()
-	case popup.ActSunriseToggle:
-		if s.cfg.ThemeMode == "sunrise" {
-			s.cfg.ThemeMode = "fixed"
-		} else {
-			s.cfg.ThemeMode = "sunrise"
-		}
-		s.restartThemeScheduler()
 		s.saveConfig()
 	case popup.ActBatteryToggle:
 		s.cfg.ThemeDarkOnBattery = !s.cfg.ThemeDarkOnBattery

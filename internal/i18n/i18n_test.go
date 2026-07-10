@@ -50,6 +50,15 @@ func TestVersionPlaceholder(t *testing.T) {
 	}
 }
 
+func TestResolveLanguageKeepsExplicitChoice(t *testing.T) {
+	if got := ResolveLanguage("en"); got != "en" {
+		t.Fatalf("ResolveLanguage(en) = %q", got)
+	}
+	if got := ResolveLanguage("zh-CN"); got != "zh-CN" {
+		t.Fatalf("ResolveLanguage(zh-CN) = %q", got)
+	}
+}
+
 func TestFormatDuration(t *testing.T) {
 	d := time.Hour + 2*time.Minute + 3*time.Second
 	if got := FormatDuration("en", d); got != "1h 2m 3s" {

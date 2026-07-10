@@ -56,8 +56,8 @@ func detectOSLanguage() string {
 	return "en"
 }
 
-// resolveLanguage maps "auto" to the detected OS language.
-func resolveLanguage(userLang string) string {
+// ResolveLanguage maps "auto" to the detected OS language.
+func ResolveLanguage(userLang string) string {
 	if userLang == "auto" {
 		return detectOSLanguage()
 	}
@@ -67,7 +67,7 @@ func resolveLanguage(userLang string) string {
 // T returns the translated string for key in the given language (or "auto").
 // Falls back to English if the key is missing in either language.
 func T(lang string, key string) string {
-	l := resolveLanguage(lang)
+	l := ResolveLanguage(lang)
 
 	m, ok := store[l]
 	if !ok {
@@ -99,7 +99,7 @@ func FormatDuration(lang string, d time.Duration) string {
 	minutes := seconds % 3600 / 60
 	seconds %= 60
 
-	zh := resolveLanguage(lang) == "zh-CN"
+	zh := ResolveLanguage(lang) == "zh-CN"
 	parts := make([]string, 0, 3)
 	if hours > 0 {
 		if zh {
