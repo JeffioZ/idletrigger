@@ -17,36 +17,38 @@ const (
 
 // IsEnabled returns true when the auto-start registry entry is present.
 func IsEnabled() (bool, error) {
-	k, err := registry.OpenKey(registry.CURRENT_USER, runKey, registry.QUERY_VALUE)
-	if err != nil {
-		if err == registry.ErrNotExist {
-			return false, nil
-		}
-		return false, err
-	}
-	defer k.Close()
+	enabled, _, err := read()
+	return enabled, err
+}
 
-	_, _, err = k.GetStringValue(valName)
-	if err == registry.ErrNotExist {
-		return false, nil
+// EnsureCurrent keeps an existing auto-start entry pointed at this executable.
+// It does not enable auto-start when the entry is absent.
+func EnsureCurrent() (enabled bool, updated bool, err error) {
+	enabled, current, err := read()
+	if err != nil || !enabled {
+		return enabled, false, err
 	}
-	return err == nil, err
+	want, err := currentCommandLine()
+	if err != nil {
+		return enabled, false, err
+	}
+	if current == want {
+		return enabled, false, nil
+	}
+	if err := write(want); err != nil {
+		return enabled, false, err
+	}
+	return enabled, true, nil
 }
 
 // Enable writes the auto-start registry entry pointing to the current
 // executable with a "--minimized" argument so it starts to tray.
 func Enable() error {
-	exe, err := exePath()
+	cmd, err := currentCommandLine()
 	if err != nil {
 		return err
 	}
-	k, _, err := registry.CreateKey(registry.CURRENT_USER, runKey, registry.SET_VALUE)
-	if err != nil {
-		return fmt.Errorf("create or open Run key: %w", err)
-	}
-	defer k.Close()
-
-	return k.SetStringValue(valName, commandLine(exe))
+	return write(cmd)
 }
 
 // Disable removes the auto-start registry entry.
@@ -65,6 +67,41 @@ func Disable() error {
 		return nil
 	}
 	return err
+}
+
+func read() (bool, string, error) {
+	k, err := registry.OpenKey(registry.CURRENT_USER, runKey, registry.QUERY_VALUE)
+	if err != nil {
+		if err == registry.ErrNotExist {
+			return false, "", nil
+		}
+		return false, "", err
+	}
+	defer k.Close()
+
+	value, _, err := k.GetStringValue(valName)
+	if err == registry.ErrNotExist {
+		return false, "", nil
+	}
+	return err == nil, value, err
+}
+
+func write(cmd string) error {
+	k, _, err := registry.CreateKey(registry.CURRENT_USER, runKey, registry.SET_VALUE)
+	if err != nil {
+		return fmt.Errorf("create or open Run key: %w", err)
+	}
+	defer k.Close()
+
+	return k.SetStringValue(valName, cmd)
+}
+
+func currentCommandLine() (string, error) {
+	exe, err := exePath()
+	if err != nil {
+		return "", err
+	}
+	return commandLine(exe), nil
 }
 
 func exePath() (string, error) {

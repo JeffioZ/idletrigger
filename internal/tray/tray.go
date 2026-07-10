@@ -90,8 +90,13 @@ func Run(cfg config.Config, cbs Callbacks) {
 	}
 
 	onReady := func() {
-		if enabled, err := autostart.IsEnabled(); err == nil {
+		if enabled, updated, err := autostart.EnsureCurrent(); err == nil {
 			s.cfg.AutostartEnabled = enabled
+			if updated {
+				mylog.Info("Autostart entry updated to current executable path")
+			}
+		} else {
+			mylog.Info("Autostart check failed: %v", err)
 		}
 
 		// Config compatibility: if both NoSleep and idle monitor are enabled,
@@ -169,29 +174,93 @@ func (s *trayState) call(fn func() string) string {
 // ---- icon state -------------------------------------------------------
 
 func (s *trayState) updateIcon() {
-	// Build combined tooltip showing all active features.
-	nl := string(rune(10))
-	tip := "IdleTrigger"
 	if nosleep.IsEnabled() {
 		systray.SetIcon(assets.IconActive)
-		tip += nl + i18n.T(s.lang, "tooltip_nosleep")
 	} else if s.cfg.IdleTimeoutMinutes > 0 {
 		systray.SetIcon(assets.IconMonitor)
 	} else {
 		systray.SetIcon(assets.IconDefault)
 	}
+
+	lines := []string{
+		"IdleTrigger",
+		s.tooltipStatus("status_nosleep", s.cfg.NoSleepEnabled),
+	}
 	if s.cfg.IdleTimeoutMinutes > 0 {
 		act := i18n.T(s.lang, actionTranslationKey(s.cfg.IdleAction))
-		tip += nl + fmt.Sprintf(i18n.T(s.lang, "tooltip_monitor"),
-			s.cfg.IdleTimeoutMinutes, act)
+		lines[1] += " · " + s.statusLine("status_monitor", fmt.Sprintf(i18n.T(s.lang, "status_monitor_active"), s.cfg.IdleTimeoutMinutes, act))
+	} else {
+		lines[1] += " · " + s.tooltipStatus("status_monitor", false)
 	}
-	if s.cfg.ThemeSwitchEnabled {
-		tip += nl + i18n.T(s.lang, "tooltip_theme")
+	lines = append(lines, s.statusLine("menu_theme_switch", s.themeTooltipValue()))
+	lines = append(lines, strings.Join([]string{
+		s.tooltipStatus("menu_process_watch", s.cfg.ProcessWatchEnabled),
+		s.tooltipStatus("status_hotkeys", s.cfg.HotkeysEnabled),
+		s.tooltipStatus("menu_autostart", s.cfg.AutostartEnabled),
+	}, " · "))
+	systray.SetTooltip(compactTooltip(tooltipText(lines)))
+}
+
+func (s *trayState) tooltipStatus(labelKey string, enabled bool) string {
+	value := i18n.T(s.lang, "status_disabled")
+	if enabled {
+		value = i18n.T(s.lang, "status_enabled")
 	}
-	if s.cfg.HotkeysEnabled {
-		tip += nl + i18n.T(s.lang, "tooltip_hotkeys")
+	return s.statusLine(labelKey, value)
+}
+
+func (s *trayState) themeTooltipValue() string {
+	if !s.cfg.ThemeSwitchEnabled {
+		return i18n.T(s.lang, "status_disabled")
 	}
-	systray.SetTooltip(tip)
+	parts := []string{i18n.T(s.lang, "status_enabled")}
+	if s.cfg.ThemeMode == "sunrise" {
+		parts = append(parts, i18n.T(s.lang, "menu_theme_sunrise"))
+	} else {
+		parts = append(parts, s.cfg.ThemeLightTime+"/"+s.cfg.ThemeDarkTime)
+	}
+	if schedule := s.themeScheduleText(); schedule != "" {
+		parts = append(parts, schedule)
+	}
+	if s.cfg.ThemeDarkOnBattery {
+		parts = append(parts, i18n.T(s.lang, "menu_theme_battery_dark"))
+	}
+	if s.cfg.ThemeSkipFullscreen {
+		parts = append(parts, i18n.T(s.lang, "menu_theme_skip_fullscreen"))
+	}
+	return strings.Join(parts, " ")
+}
+
+func (s *trayState) themeScheduleText() string {
+	lat, lon := s.cfg.ThemeLatitude, s.cfg.ThemeLongitude
+	if lat == 0 && lon == 0 {
+		lat, lon = themeswitch.AutoLocation()
+	}
+	light, dark, ok := themeswitch.ScheduleTimes(s.cfg.ThemeMode, s.cfg.ThemeLightTime, s.cfg.ThemeDarkTime, lat, lon, time.Now())
+	if !ok {
+		return i18n.T(s.lang, "theme_schedule_unavailable")
+	}
+	return fmt.Sprintf(i18n.T(s.lang, "theme_schedule_format"), light, dark)
+}
+
+func tooltipText(lines []string) string {
+	clean := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			clean = append(clean, line)
+		}
+	}
+	return strings.Join(clean, "\n")
+}
+
+func compactTooltip(value string) string {
+	const maxRunes = 120
+	runes := []rune(value)
+	if len(runes) <= maxRunes {
+		return strings.TrimSpace(value)
+	}
+	return strings.TrimSpace(string(runes[:maxRunes-1])) + "…"
 }
 
 // ---- idle monitor -----------------------------------------------------
@@ -241,15 +310,14 @@ func (s *trayState) stopMonitor() {
 func (s *trayState) reconcileRuntime() {
 	wantsNoSleep := noSleepRequested(s.cfg, s.processNoSleep)
 	if wantsNoSleep && !s.batteryBlocked {
+		s.stopMonitor()
 		nosleep.Enable(s.cfg.KeepScreenOn)
 		return
 	}
 
 	nosleep.Disable()
 	if s.cfg.IdleTimeoutMinutes > 0 {
-		if s.mon == nil {
-			s.startMonitor()
-		}
+		s.startMonitor()
 	} else {
 		s.stopMonitor()
 	}
@@ -311,6 +379,7 @@ func (s *trayState) toggleNoSleep() {
 		s.cfg.NoSleepEnabled = false
 	} else {
 		s.cfg.NoSleepEnabled = true
+		s.cfg.IdleTimeoutMinutes = 0
 	}
 	s.reconcileRuntime()
 	mylog.Info("NoSleep toggled: enabled=%v keep_screen_on=%v", nosleep.IsEnabled(), nosleep.IsKeepingScreenOn())
@@ -506,7 +575,14 @@ func (s *trayState) handleIPCState(cmd string) string {
 			return "err: " + err.Error()
 		}
 		s.cfg = newCfg
-		s.cfg.AutostartEnabled, _ = autostart.IsEnabled()
+		if enabled, updated, err := autostart.EnsureCurrent(); err == nil {
+			s.cfg.AutostartEnabled = enabled
+			if updated {
+				mylog.Info("Autostart entry updated to current executable path")
+			}
+		} else {
+			mylog.Info("Autostart check failed: %v", err)
+		}
 		s.stopMonitor()
 		s.stopHotkeys()
 		s.stopProcessWatcher()
@@ -624,7 +700,7 @@ func showAboutDialog(lang string) {
 	ver := version.Value
 	nl := string(rune(10))
 	text := "IdleTrigger " + ver + nl + nl + i18n.T(lang, "about_body")
-	dialog.Info(i18n.T(lang, "app_title"), i18n.T(lang, "app_title"), text)
+	dialog.Info(i18n.T(lang, "app_title"), "", text)
 }
 
 // registerLabel records a menu item so its text can be updated on language switch.
@@ -690,118 +766,186 @@ func (s *trayState) stopThemeScheduler() {
 	}
 }
 
+type popupSnapshot struct {
+	state popup.State
+	lang  string
+}
+
 func (s *trayState) showPopup() {
-	popup.Show(popup.State{
-		NoSleepEnabled:      s.cfg.NoSleepEnabled,
-		ProcessWatchEnabled: s.cfg.ProcessWatchEnabled,
-		IdleEnabled:         s.cfg.IdleTimeoutMinutes > 0,
-		IdleTimeout:         s.cfg.IdleTimeoutMinutes,
-		IdleAction:          string(s.cfg.IdleAction),
-		ThemeSwitchEnabled:  s.cfg.ThemeSwitchEnabled,
-		SunriseMode:         s.cfg.ThemeMode == "sunrise",
-		DarkOnBattery:       s.cfg.ThemeDarkOnBattery,
-		SkipFullscreen:      s.cfg.ThemeSkipFullscreen,
-		HotkeysEnabled:      s.cfg.HotkeysEnabled,
-		AutostartEnabled:    s.cfg.AutostartEnabled,
-		IsChinese:           s.lang == "zh-CN",
-	}, func(action popup.Action, value int) {
-		switch action {
-		case popup.ActSleep:
-			actions.Sleep()
-		case popup.ActHibernate:
-			actions.Hibernate()
-		case popup.ActShutdown:
-			actions.Shutdown()
-		case popup.ActLock:
-			actions.Lock()
-		case popup.ActNoSleepToggle:
-			s.toggleNoSleep()
-		case popup.ActProcessWatchToggle:
-			s.cfg.ProcessWatchEnabled = !s.cfg.ProcessWatchEnabled
-			s.reconcileRuntime()
-			s.saveConfig()
-		case popup.ActIdleToggle:
-			if s.cfg.IdleTimeoutMinutes > 0 {
-				s.cfg.IdleTimeoutMinutes = 0
-			} else {
-				s.cfg.IdleTimeoutMinutes = 30
-			}
-			s.reconcileRuntime()
-			s.updateIcon()
-			s.saveConfig()
-		case popup.ActIdleTimeout:
-			if value >= 0 {
-				times := []int{5, 10, 30, 60, 120}
-				s.cfg.IdleTimeoutMinutes = times[value]
-				s.reconcileRuntime()
-				s.saveConfig()
-			}
-		case popup.ActIdleAction:
-			if value >= 0 {
-				acts := []config.Action{config.ActionSleep, config.ActionHibernate, config.ActionShutdown, config.ActionLock}
-				s.cfg.IdleAction = acts[value]
-				s.saveConfig()
-			}
-		case popup.ActThemeToggle:
-			s.cfg.ThemeSwitchEnabled = !s.cfg.ThemeSwitchEnabled
-			if s.cfg.ThemeSwitchEnabled {
-				s.startThemeScheduler()
-			} else {
-				s.stopThemeScheduler()
-			}
-			s.updateIcon()
-			s.saveConfig()
-		case popup.ActSunriseToggle:
-			s.cfg.ThemeMode = map[bool]string{true: "fixed", false: "sunrise"}[s.cfg.ThemeMode == "sunrise"]
-			s.stopThemeScheduler()
-			if s.cfg.ThemeSwitchEnabled {
-				s.startThemeScheduler()
-			}
-			s.saveConfig()
-		case popup.ActBatteryToggle:
-			s.cfg.ThemeDarkOnBattery = !s.cfg.ThemeDarkOnBattery
-			s.saveConfig()
-		case popup.ActFullscreenToggle:
-			s.cfg.ThemeSkipFullscreen = !s.cfg.ThemeSkipFullscreen
-			s.saveConfig()
-		case popup.ActSwitchTheme:
-			cur := themeswitch.Current()
-			if cur == themeswitch.ModeDark {
-				themeswitch.Switch(themeswitch.ModeLight)
-			} else {
-				themeswitch.Switch(themeswitch.ModeDark)
-			}
-		case popup.ActRepairTheme:
-			themeswitch.Switch(themeswitch.Current())
-		case popup.ActHotkeyToggle:
-			s.cfg.HotkeysEnabled = !s.cfg.HotkeysEnabled
-			if s.cfg.HotkeysEnabled {
-				s.startHotkeys()
-			} else {
-				s.stopHotkeys()
-			}
-			s.saveConfig()
-		case popup.ActAutostartToggle:
-			s.cfg.AutostartEnabled = !s.cfg.AutostartEnabled
-			if s.cfg.AutostartEnabled {
-				autostart.Enable()
-			} else {
-				autostart.Disable()
-			}
-			s.saveConfig()
-		case popup.ActLanguage:
-			if value == 0 {
-				s.switchLanguage("en")
-			} else {
-				s.switchLanguage("zh-CN")
-			}
-		case popup.ActConfig:
-			p, _ := config.Path()
-			exec.Command("notepad.exe", p).Start()
-		case popup.ActAbout:
-			showAboutDialog(s.lang)
-		case popup.ActExit:
-			systray.Quit()
+	result := make(chan popupSnapshot, 1)
+	s.stateCh <- stateRequest{fn: func() string {
+		result <- popupSnapshot{
+			state: popup.State{
+				NoSleepEnabled:      s.cfg.NoSleepEnabled,
+				ProcessWatchEnabled: s.cfg.ProcessWatchEnabled,
+				IdleEnabled:         s.cfg.IdleTimeoutMinutes > 0,
+				IdleTimeout:         s.cfg.IdleTimeoutMinutes,
+				IdleAction:          string(s.cfg.IdleAction),
+				ThemeSwitchEnabled:  s.cfg.ThemeSwitchEnabled,
+				SunriseMode:         s.cfg.ThemeMode == "sunrise",
+				DarkOnBattery:       s.cfg.ThemeDarkOnBattery,
+				SkipFullscreen:      s.cfg.ThemeSkipFullscreen,
+				HotkeysEnabled:      s.cfg.HotkeysEnabled,
+				AutostartEnabled:    s.cfg.AutostartEnabled,
+				IsChinese:           s.lang == "zh-CN",
+				ThemeSchedule:       s.themeScheduleText(),
+			},
+			lang: s.lang,
 		}
-	}, func(key string) string { return i18n.T(s.lang, key) })
+		return ""
+	}}
+	snapshot := <-result
+	if err := popup.Show(snapshot.state, func(action popup.Action, value int) {
+		s.post(func() { s.handlePopupAction(action, value) })
+	}, func(key string) string { return i18n.T(snapshot.lang, key) }); err != nil {
+		mylog.Info("Popup open failed: %v", err)
+	}
+}
+
+func (s *trayState) handlePopupAction(action popup.Action, value int) {
+	switch action {
+	case popup.ActSleep, popup.ActHibernate, popup.ActShutdown, popup.ActLock:
+		a := map[popup.Action]config.Action{
+			popup.ActSleep:     config.ActionSleep,
+			popup.ActHibernate: config.ActionHibernate,
+			popup.ActShutdown:  config.ActionShutdown,
+			popup.ActLock:      config.ActionLock,
+		}[action]
+		if err := executeAction(a); err != nil {
+			s.showError(actionTranslationKey(a), err)
+		}
+	case popup.ActRestart:
+		if err := actions.Restart(); err != nil {
+			s.showError("menu_restart", err)
+		}
+	case popup.ActNoSleepToggle:
+		s.toggleNoSleep()
+	case popup.ActProcessWatchToggle:
+		s.cfg.ProcessWatchEnabled = !s.cfg.ProcessWatchEnabled
+		if s.cfg.ProcessWatchEnabled && len(s.cfg.ProcessWatchList) > 0 {
+			s.startProcessWatcher()
+		} else {
+			s.stopProcessWatcher()
+		}
+		s.reconcileRuntime()
+		s.updateIcon()
+		s.saveConfig()
+	case popup.ActIdleToggle:
+		if s.cfg.IdleTimeoutMinutes > 0 {
+			s.cfg.IdleTimeoutMinutes = 0
+		} else {
+			s.cfg.NoSleepEnabled = false
+			s.cfg.IdleTimeoutMinutes = 30
+		}
+		s.reconcileRuntime()
+		s.updateIcon()
+		s.saveConfig()
+	case popup.ActIdleTimeout:
+		times := []int{5, 10, 30, 60, 120}
+		if value >= 0 && value < len(times) {
+			s.cfg.NoSleepEnabled = false
+			s.cfg.IdleTimeoutMinutes = times[value]
+			s.reconcileRuntime()
+			s.updateIcon()
+			s.saveConfig()
+		}
+	case popup.ActIdleAction:
+		actions := []config.Action{config.ActionSleep, config.ActionHibernate, config.ActionShutdown, config.ActionLock}
+		if value >= 0 && value < len(actions) {
+			s.cfg.IdleAction = actions[value]
+			s.reconcileRuntime()
+			s.saveConfig()
+		}
+	case popup.ActThemeToggle:
+		s.cfg.ThemeSwitchEnabled = !s.cfg.ThemeSwitchEnabled
+		if s.cfg.ThemeSwitchEnabled {
+			s.startThemeScheduler()
+		} else {
+			s.stopThemeScheduler()
+		}
+		s.updateIcon()
+		s.saveConfig()
+	case popup.ActSunriseToggle:
+		if s.cfg.ThemeMode == "sunrise" {
+			s.cfg.ThemeMode = "fixed"
+		} else {
+			s.cfg.ThemeMode = "sunrise"
+		}
+		s.restartThemeScheduler()
+		s.saveConfig()
+	case popup.ActBatteryToggle:
+		s.cfg.ThemeDarkOnBattery = !s.cfg.ThemeDarkOnBattery
+		s.restartThemeScheduler()
+		s.saveConfig()
+	case popup.ActFullscreenToggle:
+		s.cfg.ThemeSkipFullscreen = !s.cfg.ThemeSkipFullscreen
+		s.restartThemeScheduler()
+		s.saveConfig()
+	case popup.ActSwitchTheme:
+		mode := themeswitch.ModeDark
+		if themeswitch.Current() == themeswitch.ModeDark {
+			mode = themeswitch.ModeLight
+		}
+		s.runThemeOperation("menu_theme_switch_now", func() error {
+			return themeswitch.Switch(mode)
+		})
+	case popup.ActRepairTheme:
+		s.runThemeOperation("menu_theme_repair", themeswitch.Refresh)
+	case popup.ActHotkeyToggle:
+		s.cfg.HotkeysEnabled = !s.cfg.HotkeysEnabled
+		if s.cfg.HotkeysEnabled {
+			s.startHotkeys()
+		} else {
+			s.stopHotkeys()
+		}
+		s.saveConfig()
+	case popup.ActAutostartToggle:
+		enabled := !s.cfg.AutostartEnabled
+		var err error
+		if enabled {
+			err = autostart.Enable()
+		} else {
+			err = autostart.Disable()
+		}
+		if err != nil {
+			s.showError("menu_autostart", err)
+			return
+		}
+		s.cfg.AutostartEnabled = enabled
+		s.saveConfig()
+	case popup.ActLanguage:
+		if value == 0 {
+			s.switchLanguage("en")
+		} else if value == 1 {
+			s.switchLanguage("zh-CN")
+		}
+	case popup.ActConfig:
+		path, err := config.Path()
+		if err != nil {
+			mylog.Info("Config path lookup failed: %v", err)
+			return
+		}
+		if err := exec.Command("notepad.exe", path).Start(); err != nil {
+			mylog.Info("Config editor launch failed: %v", err)
+		}
+	case popup.ActAbout:
+		showAboutDialog(s.lang)
+	case popup.ActExit:
+		systray.Quit()
+	}
+}
+
+func (s *trayState) restartThemeScheduler() {
+	if !s.cfg.ThemeSwitchEnabled {
+		return
+	}
+	s.startThemeScheduler()
+}
+
+func (s *trayState) runThemeOperation(actionKey string, fn func() error) {
+	go func() {
+		if err := fn(); err != nil {
+			s.post(func() { s.showError(actionKey, err) })
+		}
+	}()
 }
