@@ -62,7 +62,8 @@ Windows Server 2008 R2).
 
 ```powershell
 go mod vendor     # vendor all dependencies
-go build -mod=vendor -ldflags="-s -w" -o IdleTrigger.exe .
+$env:CGO_ENABLED = "0"
+go build -mod=vendor -ldflags="-s -w -H windowsgui" -o IdleTrigger.exe .
 ```
 
 ## Single EXE Guarantee
@@ -73,7 +74,7 @@ IdleTrigger is a **true single-file executable**:
 - **Static linking** — all Go packages and embedded assets are compiled into one `.exe`
 - **System DLLs only** — the binary only calls Windows built-in DLLs (kernel32.dll,
   user32.dll, powrprof.dll, advapi32.dll) which exist on every Windows since XP
-- **Embedded resources** — tray icon and locale files are bundled via `//go:embed`
+- **Embedded resources** — tray icons and locales via `//go:embed`; EXE icon and manifest via `.syso` resource
 
 ✅ Copy `IdleTrigger.exe` to any folder on any 32-bit or 64-bit Windows machine and it just works.
 No installer, no runtime, no extra files required.

@@ -59,7 +59,8 @@ Go 1.21+ 最低支持 Windows 7（或 Windows Server 2008 R2）。
 
 ```powershell
 go mod vendor     # 将依赖缓存到 vendor 目录
-go build -mod=vendor -ldflags="-s -w" -o IdleTrigger.exe .
+$env:CGO_ENABLED = "0"
+go build -mod=vendor -ldflags="-s -w -H windowsgui" -o IdleTrigger.exe .
 ```
 
 ## 单 EXE 保证
@@ -70,7 +71,7 @@ IdleTrigger 是**真正的单文件可执行程序**：
 - **静态链接** — 所有 Go 包和内嵌资源编译进同一个 `.exe`
 - **仅调用系统 DLL** — 二进制只调用 Windows 内置 DLL（kernel32.dll、
   user32.dll、powrprof.dll、advapi32.dll），从 XP 起每个 Windows 都自带
-- **资源内嵌** — 托盘图标和语言文件通过 `//go:embed` 编译进 EXE
+- **资源内嵌** — 托盘图标和语言文件通过 `//go:embed`；EXE 图标和清单通过 `.syso` 资源文件
 
 ✅ 把 `IdleTrigger.exe` 复制到任意 Windows 电脑的任意文件夹，双击即用。
 无需安装、无需运行时、无需额外文件。
