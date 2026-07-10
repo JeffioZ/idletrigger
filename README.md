@@ -161,13 +161,14 @@ IdleTrigger/
 Sleep / Hibernate / Shut Down / Lock
 ─────────────────
 Stay Awake
-Process Watch
+  Process Watch
 ─────────────────
 Idle Monitor
   Timeout ▸  5 / 10 / 30 / 60 / 120 min
   Trigger Action ▸  Sleep / Hibernate / Shut Down / Lock
 ─────────────────
 Day/Night
+  ☐ Auto Switch
   Switch
   Repair Theme
   ☐ Sunrise/Sunset
