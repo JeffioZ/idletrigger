@@ -161,7 +161,7 @@ IdleTrigger/
 Sleep / Hibernate / Shut Down / Lock
 ─────────────────
 Stay Awake
-  Process Watch
+Process Watch
 ─────────────────
 Idle Monitor
   Timeout ▸  5 / 10 / 30 / 60 / 120 min
