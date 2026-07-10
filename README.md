@@ -55,6 +55,7 @@ IdleTrigger autostart enable      Enable auto-start on login
 IdleTrigger autostart disable     Disable auto-start
 IdleTrigger autostart status      Show auto-start state
 
+IdleTrigger config:reload         Reload config (via IPC)
 IdleTrigger status                Show full system state
 IdleTrigger version               Print version
 ```
@@ -90,7 +91,7 @@ start_minimized = true
 logging_enabled = false            # debug log to IdleTrigger.log
 
 theme_switch_enabled = false       # auto theme switch
-theme_mode = "sunrise"             # "fixed" or "sunrise"
+theme_mode = "fixed"               # "fixed" or "sunrise"
 theme_light_time = "07:00"
 theme_dark_time = "19:00"
 theme_latitude = 0                 # 0 = auto-detect from timezone
@@ -113,7 +114,6 @@ IdleTrigger/
 │   ├── icon_monitor.ico             # Tray: monitor active (amber)
 │   ├── icon_active.ico              # Tray: stay-awake active (green)
 │   ├── manifest.xml                 # DPI & dark mode manifest
-│   └── resource.rc                  # Windows resource script
 ├── scripts/
 │   └── gen_icon.py                  # Icon generator (dev-only)
 ├── internal/
@@ -122,7 +122,7 @@ IdleTrigger/
 │   ├── cli/cli.go                   # CLI dispatch + IPC client
 │   ├── config/config.go             # TOML config load/save
 │   ├── darkmode/darkmode.go         # uxtheme ordinal 135/136
-│   ├── dialog/dialog.go             # TaskDialog (dark-mode aware)
+│   ├── dialog/dialog.go             # MessageBox dialogs
 │   ├── dpi/dpi.go                   # Per-Monitor V2
 │   ├── hotkey/hotkey.go             # Global hotkeys (Win+Shift+S/L/N)
 │   ├── i18n/                        # Multi-language (en, zh-CN)
@@ -135,7 +135,7 @@ IdleTrigger/
 │   ├── power/power.go               # Battery status + sleep capabilities
 │   ├── processwatcher/processwatcher.go  # Process-list watcher
 │   └── tray/tray.go                 # System-tray menu + IPC server
-├── rsrc_windows_amd64.syso          # Compiled resource (icon + manifest)
+├── rsrc_windows_386.syso            # Compiled resource (icon + manifest)
 ├── go.mod  go.sum  LICENSE  .gitattributes  .gitignore
 ├── README.md  README.zh-CN.md  BUILD.md  BUILD.zh-CN.md
 ```
