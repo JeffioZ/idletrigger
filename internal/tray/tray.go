@@ -573,7 +573,7 @@ func (s *trayState) stopHotkeys() {
 func (s *trayState) showHotkeyConflict(failed hotkey.Failed) {
 	body := ""
 	for _, f := range failed {
-		body += "â¢ " + f + "\n"
+		body += "• " + f + "\n"
 	}
 	dialog.Warn(
 		i18n.T(s.lang, "app_title"),

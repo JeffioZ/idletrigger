@@ -198,7 +198,8 @@ func (s *Scheduler) check(now time.Time) {
 		return
 	}
 
-	today := now.Truncate(24 * time.Hour)
+	y, m, d := now.Date()
+	today := time.Date(y, m, d, 0, 0, 0, 0, now.Location())
 	lightToday := today.Add(time.Duration(lightMin) * time.Minute)
 	darkToday := today.Add(time.Duration(darkMin) * time.Minute)
 
