@@ -1,6 +1,7 @@
 package tray
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/JeffioZ/idletrigger/internal/config"
@@ -45,5 +46,28 @@ func TestStatusLineUsesLocalizedPunctuation(t *testing.T) {
 	state := trayState{lang: "zh-CN"}
 	if got := state.statusLine("status_power", "交流电源"); got != "电源：交流电源" {
 		t.Fatalf("localized status line = %q", got)
+	}
+}
+
+func TestTooltipStaysWithinTrayLimit(t *testing.T) {
+	for _, lang := range []string{"zh-CN", "en"} {
+		cfg := config.DefaultConfig()
+		cfg.Language = lang
+		cfg.IdleTimeoutMinutes = 30
+		cfg.IdleAction = config.ActionSleep
+		cfg.ThemeSwitchEnabled = true
+		cfg.ThemeMode = "sunrise"
+		cfg.HotkeysEnabled = true
+		cfg.AutostartEnabled = true
+		cfg.LoggingEnabled = true
+		state := trayState{cfg: cfg, lang: lang}
+
+		got := state.buildTooltip()
+		if strings.Contains(got, "…") {
+			t.Fatalf("tooltip should not be hard-truncated for %s: %q", lang, got)
+		}
+		if length := len([]rune(got)); length > 127 {
+			t.Fatalf("tooltip is too long for %s: %d %q", lang, length, got)
+		}
 	}
 }

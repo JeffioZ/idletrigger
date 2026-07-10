@@ -38,6 +38,18 @@ type drawItem struct {
 	ItemData                                      uintptr
 }
 
+type toolInfo struct {
+	Size     uint32
+	Flags    uint32
+	Hwnd     windows.Handle
+	ID       uintptr
+	Rect     rect
+	Instance windows.Handle
+	Text     *uint16
+	LParam   uintptr
+	Reserved uintptr
+}
+
 type Action int
 
 const (
@@ -58,9 +70,9 @@ const (
 	ActRepairTheme
 	ActHotkeyToggle
 	ActAutostartToggle
+	ActLoggingToggle
 	ActLanguage
 	ActConfig
-	ActAbout
 	ActExit
 )
 
@@ -69,9 +81,10 @@ type State struct {
 	IdleTimeout                                       int
 	IdleAction                                        string
 	ThemeSwitchEnabled, DarkOnBattery, SkipFullscreen bool
-	HotkeysEnabled, AutostartEnabled                  bool
+	HotkeysEnabled, AutostartEnabled, LoggingEnabled  bool
 	IsChinese                                         bool
 	ThemeSchedule                                     string
+	AppVersion                                        string
 }
 
 type LangFunc func(key string) string
@@ -109,6 +122,7 @@ const (
 	wsVisible      = 0x10000000
 	bsOwnerDraw    = 0x0000000B
 	ssLeft         = 0x00000000
+	ssRight        = 0x00000002
 
 	wsExToolWindow = 0x00000080
 	wsExTopmost    = 0x00000008
@@ -128,6 +142,13 @@ const (
 	transparent = 1
 	waInactive  = 0
 	tmeLeave    = 0x00000002
+
+	ttsAlwaysTip      = 0x0001
+	ttsNoPrefix       = 0x0002
+	ttfIDIsHwnd       = 0x0001
+	ttfSubclass       = 0x0010
+	ttmAddTool        = 0x0432
+	ttmSetMaxTipWidth = 0x0418
 )
 
 const (
@@ -149,6 +170,7 @@ const (
 	idThemeRepair     = 35
 	idHotkeys         = 40
 	idAutostart       = 41
+	idLogging         = 42
 	idTime5           = 121
 	idTime10          = 122
 	idTime30          = 123
@@ -161,42 +183,43 @@ const (
 	idLangEN          = 151
 	idLangZH          = 152
 	idConfig          = 500
-	idAbout           = 501
 	idExit            = 502
 )
 
 var (
 	user32 = windows.NewLazySystemDLL("user32.dll")
 	gdi32  = windows.NewLazySystemDLL("gdi32.dll")
+	comctl = windows.NewLazySystemDLL("comctl32.dll")
 
-	pCreateWindowEx    = user32.NewProc("CreateWindowExW")
-	pRegisterClassEx   = user32.NewProc("RegisterClassExW")
-	pDestroyWindow     = user32.NewProc("DestroyWindow")
-	pDefWindowProc     = user32.NewProc("DefWindowProcW")
-	pCallWindowProc    = user32.NewProc("CallWindowProcW")
-	pSendMessage       = user32.NewProc("SendMessageW")
-	pSetWindowLong     = user32.NewProc("SetWindowLongW")
-	pSetWindowLongPtr  = user32.NewProc("SetWindowLongPtrW")
-	pSetWindowPos      = user32.NewProc("SetWindowPos")
-	pGetCursorPos      = user32.NewProc("GetCursorPos")
-	pMonitorFromWindow = user32.NewProc("MonitorFromWindow")
-	pGetMonitorInfo    = user32.NewProc("GetMonitorInfoW")
-	pAdjustWindowRect  = user32.NewProc("AdjustWindowRectEx")
-	pGetDpiForWindow   = user32.NewProc("GetDpiForWindow")
-	pGetDpiForSystem   = user32.NewProc("GetDpiForSystem")
-	pSetForeground     = user32.NewProc("SetForegroundWindow")
-	pFillRect          = user32.NewProc("FillRect")
-	pFrameRect         = user32.NewProc("FrameRect")
-	pDrawText          = user32.NewProc("DrawTextW")
-	pInvalidateRect    = user32.NewProc("InvalidateRect")
-	pGetClientRect     = user32.NewProc("GetClientRect")
-	pTrackMouseEvent   = user32.NewProc("TrackMouseEvent")
-	pDeleteObject      = gdi32.NewProc("DeleteObject")
-	pCreateFont        = gdi32.NewProc("CreateFontIndirectW")
-	pCreateBrush       = gdi32.NewProc("CreateSolidBrush")
-	pSetTextColor      = gdi32.NewProc("SetTextColor")
-	pSetBkMode         = gdi32.NewProc("SetBkMode")
-	pSelectObject      = gdi32.NewProc("SelectObject")
+	pCreateWindowEx       = user32.NewProc("CreateWindowExW")
+	pRegisterClassEx      = user32.NewProc("RegisterClassExW")
+	pDestroyWindow        = user32.NewProc("DestroyWindow")
+	pDefWindowProc        = user32.NewProc("DefWindowProcW")
+	pCallWindowProc       = user32.NewProc("CallWindowProcW")
+	pSendMessage          = user32.NewProc("SendMessageW")
+	pSetWindowLong        = user32.NewProc("SetWindowLongW")
+	pSetWindowLongPtr     = user32.NewProc("SetWindowLongPtrW")
+	pSetWindowPos         = user32.NewProc("SetWindowPos")
+	pGetCursorPos         = user32.NewProc("GetCursorPos")
+	pMonitorFromWindow    = user32.NewProc("MonitorFromWindow")
+	pGetMonitorInfo       = user32.NewProc("GetMonitorInfoW")
+	pAdjustWindowRect     = user32.NewProc("AdjustWindowRectEx")
+	pGetDpiForWindow      = user32.NewProc("GetDpiForWindow")
+	pGetDpiForSystem      = user32.NewProc("GetDpiForSystem")
+	pSetForeground        = user32.NewProc("SetForegroundWindow")
+	pFillRect             = user32.NewProc("FillRect")
+	pFrameRect            = user32.NewProc("FrameRect")
+	pDrawText             = user32.NewProc("DrawTextW")
+	pInvalidateRect       = user32.NewProc("InvalidateRect")
+	pGetClientRect        = user32.NewProc("GetClientRect")
+	pTrackMouseEvent      = user32.NewProc("TrackMouseEvent")
+	pDeleteObject         = gdi32.NewProc("DeleteObject")
+	pCreateFont           = gdi32.NewProc("CreateFontIndirectW")
+	pCreateBrush          = gdi32.NewProc("CreateSolidBrush")
+	pSetTextColor         = gdi32.NewProc("SetTextColor")
+	pSetBkMode            = gdi32.NewProc("SetBkMode")
+	pSelectObject         = gdi32.NewProc("SelectObject")
+	pInitCommonControlsEx = comctl.NewProc("InitCommonControlsEx")
 
 	classOnce sync.Once
 	classErr  error
@@ -218,6 +241,11 @@ type trackMouseEvent struct {
 	HoverTime uint32
 }
 
+type initCommonControlsEx struct {
+	Size uint32
+	ICC  uint32
+}
+
 type panel struct {
 	hwnd                            windows.Handle
 	font, sectionFont, subtitleFont windows.Handle
@@ -235,9 +263,12 @@ type panel struct {
 	lang                            LangFunc
 	scale                           float64
 	clientH                         int
+	appVersion                      string
+	tooltip                         windows.Handle
 	palette                         colors
 	controls                        map[uint16]windows.Handle
 	labels                          map[uint16]string
+	tooltips                        map[uint16][]uint16
 	toggles, selected               map[uint16]bool
 	disabled                        map[uint16]bool
 	oldButtonProc                   map[windows.Handle]uintptr
@@ -260,14 +291,16 @@ func Show(state State, onAction OnAction, langFn LangFunc) error {
 		lang:          langFn,
 		scale:         1,
 		themeSchedule: state.ThemeSchedule,
+		appVersion:    state.AppVersion,
 		controls:      make(map[uint16]windows.Handle),
 		labels:        make(map[uint16]string),
+		tooltips:      make(map[uint16][]uint16),
 		toggles: map[uint16]bool{
 			idNoSleep: state.NoSleepEnabled, idProcess: state.ProcessWatchEnabled,
 			idIdle: state.IdleEnabled, idTheme: state.ThemeSwitchEnabled,
 			idBattery:    state.DarkOnBattery,
 			idFullscreen: state.SkipFullscreen, idHotkeys: state.HotkeysEnabled,
-			idAutostart: state.AutostartEnabled,
+			idAutostart: state.AutostartEnabled, idLogging: state.LoggingEnabled,
 		},
 		selected:      make(map[uint16]bool),
 		disabled:      make(map[uint16]bool),
@@ -335,6 +368,7 @@ func (p *panel) create() error {
 	p.font = makeFont(p.scale, 13, 400)
 	p.sectionFont = makeFont(p.scale, 13, 700)
 	p.subtitleFont = makeFont(p.scale, 12, 600)
+	p.createTooltip()
 	p.refreshTheme(false)
 	if err := p.build(); err != nil {
 		pDestroyWindow.Call(uintptr(p.hwnd))
@@ -343,6 +377,22 @@ func (p *panel) create() error {
 	p.position(style, exStyle, cursor)
 	pSetForeground.Call(uintptr(p.hwnd))
 	return nil
+}
+
+func (p *panel) createTooltip() {
+	icc := initCommonControlsEx{Size: uint32(unsafe.Sizeof(initCommonControlsEx{})), ICC: 0x000000FF}
+	pInitCommonControlsEx.Call(uintptr(unsafe.Pointer(&icc)))
+	class, err := windows.UTF16PtrFromString("tooltips_class32")
+	if err != nil {
+		return
+	}
+	hwnd, _, callErr := pCreateWindowEx.Call(0, uintptr(unsafe.Pointer(class)), 0, uintptr(wsPopup|ttsAlwaysTip|ttsNoPrefix), 0, 0, 0, 0, uintptr(p.hwnd), 0, 0, 0)
+	if hwnd == 0 {
+		_ = callErr
+		return
+	}
+	p.tooltip = windows.Handle(hwnd)
+	pSendMessage.Call(hwnd, ttmSetMaxTipWidth, 0, uintptr(p.sc(360)))
 }
 
 func dpiForWindow(hwnd windows.Handle) float64 {
@@ -396,8 +446,80 @@ func (p *panel) child(className, text string, style uint32, x, y, width, height 
 	if id != 0 {
 		p.controls[id] = windows.Handle(hwnd)
 		p.labels[id] = text
+		p.addTooltip(id, windows.Handle(hwnd))
 	}
 	return windows.Handle(hwnd), nil
+}
+
+func (p *panel) addTooltip(id uint16, hwnd windows.Handle) {
+	if p.tooltip == 0 || hwnd == 0 {
+		return
+	}
+	text := p.tooltipText(id)
+	if text == "" {
+		return
+	}
+	p.tooltips[id] = windows.StringToUTF16(text)
+	ti := toolInfo{
+		Size:  uint32(unsafe.Sizeof(toolInfo{})),
+		Flags: ttfIDIsHwnd | ttfSubclass,
+		Hwnd:  p.hwnd,
+		ID:    uintptr(hwnd),
+		Text:  &p.tooltips[id][0],
+	}
+	pSendMessage.Call(uintptr(p.tooltip), ttmAddTool, 0, uintptr(unsafe.Pointer(&ti)))
+}
+
+func (p *panel) tooltipText(id uint16) string {
+	key := ""
+	switch id {
+	case idLock:
+		key = "tip_lock"
+	case idSleep:
+		key = "tip_sleep"
+	case idHibernate:
+		key = "tip_hibernate"
+	case idShutdown:
+		key = "tip_shutdown"
+	case idRestart:
+		key = "tip_restart"
+	case idNoSleep:
+		key = "tip_nosleep"
+	case idProcess:
+		key = "tip_process_watch"
+	case idIdle:
+		key = "tip_idle"
+	case idTime5, idTime10, idTime30, idTime60, idTime120:
+		key = "tip_idle_timeout"
+	case idActionSleep, idActionHibernate, idActionShutdown, idActionLock:
+		key = "tip_idle_action"
+	case idTheme:
+		key = "tip_theme"
+	case idFullscreen:
+		key = "tip_fullscreen"
+	case idBattery:
+		key = "tip_battery_theme"
+	case idThemeSwitch:
+		key = "tip_theme_switch"
+	case idThemeRepair:
+		key = "tip_theme_repair"
+	case idHotkeys:
+		key = "tip_hotkeys"
+	case idAutostart:
+		key = "tip_autostart"
+	case idLogging:
+		key = "tip_logging"
+	case idLangEN, idLangZH:
+		key = "tip_language"
+	case idConfig:
+		key = "tip_config"
+	case idExit:
+		key = "tip_exit"
+	}
+	if key == "" {
+		return ""
+	}
+	return p.text(key)
 }
 
 func (p *panel) build() error {
@@ -503,7 +625,7 @@ func (p *panel) build() error {
 		return err
 	}
 	y += sectionH + gap
-	height, err = choiceRow(pad, y, baseW-2*pad, []string{p.text("menu_hotkeys"), p.text("menu_autostart")}, []uint16{idHotkeys, idAutostart})
+	height, err = choiceRow(pad, y, baseW-2*pad, []string{p.text("menu_hotkeys"), p.text("menu_autostart"), p.text("menu_logging")}, []uint16{idHotkeys, idAutostart, idLogging})
 	if err != nil {
 		return err
 	}
@@ -521,10 +643,15 @@ func (p *panel) build() error {
 		return err
 	}
 	y += subtitleH
-	bottomLabels := []string{p.text("menu_open_config"), p.text("menu_about"), p.text("menu_exit")}
-	bottomH := p.rowHeight(bottomLabels, (baseW-2*pad-2*gap)/3)
+	versionText := "IdleTrigger " + p.appVersion
+	if _, err := p.child("STATIC", versionText, wsChild|wsVisible|ssRight, pad, y, baseW-2*pad, subtitleH, 0, p.subtitleFont); err != nil {
+		return err
+	}
+	y += subtitleH + gap
+	bottomLabels := []string{p.text("menu_open_config"), p.text("menu_exit")}
+	bottomH := p.rowHeight(bottomLabels, (baseW-2*pad-gap)/2)
 	p.clientH = y + bottomH + pad
-	_, err = choiceRow(pad, y, baseW-2*pad, bottomLabels, []uint16{idConfig, idAbout, idExit})
+	_, err = choiceRow(pad, y, baseW-2*pad, bottomLabels, []uint16{idConfig, idExit})
 	return err
 }
 
@@ -811,6 +938,9 @@ func (p *panel) handleCommand(id uint16) {
 	case id == idAutostart:
 		p.toggle(id)
 		action = ActAutostartToggle
+	case id == idLogging:
+		p.toggle(id)
+		action = ActLoggingToggle
 	case id == idLangEN:
 		p.choose(languageIDs(), id)
 		action = ActLanguage
@@ -821,14 +951,12 @@ func (p *panel) handleCommand(id uint16) {
 		value = 1
 	case id == idConfig:
 		action = ActConfig
-	case id == idAbout:
-		action = ActAbout
 	case id == idExit:
 		action = ActExit
 	default:
 		return
 	}
-	if action <= ActRestart || action == ActLanguage || action == ActConfig || action == ActAbout || action == ActExit || action == ActSwitchTheme || action == ActRepairTheme {
+	if action <= ActRestart || action == ActLanguage || action == ActConfig || action == ActExit || action == ActSwitchTheme || action == ActRepairTheme {
 		Hide()
 	}
 	if p.onAction != nil {
