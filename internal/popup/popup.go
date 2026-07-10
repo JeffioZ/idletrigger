@@ -41,7 +41,7 @@ type OnAction func(action Action, value int)
 
 var (onAction OnAction; lang LangFunc; hwndPanel windows.Handle; sysFont windows.Handle; scale float64)
 
-const baseW, baseH = 360, 580
+const baseW, baseH = 360, 640
 const pad, indent, rowH, btnH, gap = 12, 18, 24, 32, 8
 const wndName = "IdleTriggerPopup"
 
