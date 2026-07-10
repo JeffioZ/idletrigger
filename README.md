@@ -161,16 +161,20 @@ IdleTrigger/
 Sleep / Hibernate / Shut Down / Lock
 ─────────────────
 Stay Awake
+Process Watch
 ─────────────────
 Idle Monitor
   Timeout ▸  5 / 10 / 30 / 60 / 120 min
-  Idle Action ▸  Sleep / Hibernate / Shut Down / Lock
+  Trigger Action ▸  Sleep / Hibernate / Shut Down / Lock
 ─────────────────
-Auto Theme
+Day/Night
   Light at ▸  06:00 / 07:00 / 08:00
   Dark at ▸  18:00 / 19:00 / 20:00 / 21:00
-  Toggle Light/Dark
-  Refresh Theme
+  Switch
+  Repair Theme
+  ☐ Sunrise/Sunset
+  ☐ Dark on Battery
+  ☐ Pause Fullscreen
 ─────────────────
 Global Hotkeys
 Start with Windows
