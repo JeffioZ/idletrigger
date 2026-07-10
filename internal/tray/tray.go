@@ -1245,31 +1245,42 @@ func (s *trayState) wireThemeSubmenus() {
 	}
 }
 
+
 func (s *trayState) showPopup() {
 	popup.Show(popup.State{
 		NoSleepEnabled:      s.cfg.NoSleepEnabled,
 		ProcessWatchEnabled: s.cfg.ProcessWatchEnabled,
 		IdleEnabled:         s.cfg.IdleTimeoutMinutes > 0,
+		IdleTimeout:         s.cfg.IdleTimeoutMinutes,
+		IdleAction:          string(s.cfg.IdleAction),
 		ThemeSwitchEnabled:  s.cfg.ThemeSwitchEnabled,
 		SunriseMode:         s.cfg.ThemeMode == "sunrise",
 		DarkOnBattery:       s.cfg.ThemeDarkOnBattery,
 		SkipFullscreen:      s.cfg.ThemeSkipFullscreen,
 		HotkeysEnabled:      s.cfg.HotkeysEnabled,
 		AutostartEnabled:    s.cfg.AutostartEnabled,
-	}, func(action popup.Action) {
+		IsChinese:           s.lang == "zh-CN",
+	}, func(action popup.Action, value int) {
 		switch action {
+		case popup.ActSleep:               actions.Sleep()
+		case popup.ActHibernate:           actions.Hibernate()
+		case popup.ActShutdown:            actions.Shutdown()
+		case popup.ActLock:                actions.Lock()
 		case popup.ActNoSleepToggle:       s.toggleNoSleep()
-		case popup.ActProcessWatchToggle:  s.cfg.ProcessWatchEnabled = !s.cfg.ProcessWatchEnabled; s.reconcileRuntime(); s.syncChecks(); s.saveConfig()
-		case popup.ActIdleToggle:          s.cfg.IdleTimeoutMinutes = 30; if s.cfg.IdleTimeoutMinutes > 0 { s.cfg.IdleTimeoutMinutes = 0 } else { s.cfg.IdleTimeoutMinutes = 30 }; s.reconcileRuntime(); s.syncChecks(); s.updateIcon(); s.saveConfig()
-		case popup.ActThemeToggle:         s.cfg.ThemeSwitchEnabled = !s.cfg.ThemeSwitchEnabled; if s.cfg.ThemeSwitchEnabled { s.startThemeScheduler() } else { s.stopThemeScheduler() }; s.syncChecks(); s.updateIcon(); s.saveConfig()
+		case popup.ActProcessWatchToggle:  s.cfg.ProcessWatchEnabled = !s.cfg.ProcessWatchEnabled; s.reconcileRuntime(); s.saveConfig()
+		case popup.ActIdleToggle:          if s.cfg.IdleTimeoutMinutes > 0 { s.cfg.IdleTimeoutMinutes = 0 } else { s.cfg.IdleTimeoutMinutes = 30 }; s.reconcileRuntime(); s.updateIcon(); s.saveConfig()
+		case popup.ActIdleTimeout:         if value >= 0 { times := []int{5,10,30,60,120}; s.cfg.IdleTimeoutMinutes = times[value]; s.reconcileRuntime(); s.saveConfig() }
+		case popup.ActIdleAction:          if value >= 0 { acts := []config.Action{config.ActionSleep,config.ActionHibernate,config.ActionShutdown,config.ActionLock}; s.cfg.IdleAction = acts[value]; s.saveConfig() }
+		case popup.ActThemeToggle:         s.cfg.ThemeSwitchEnabled = !s.cfg.ThemeSwitchEnabled; if s.cfg.ThemeSwitchEnabled { s.startThemeScheduler() } else { s.stopThemeScheduler() }; s.updateIcon(); s.saveConfig()
 		case popup.ActSunriseToggle:       s.cfg.ThemeMode = map[bool]string{true:"fixed",false:"sunrise"}[s.cfg.ThemeMode=="sunrise"]; s.stopThemeScheduler(); if s.cfg.ThemeSwitchEnabled { s.startThemeScheduler() }; s.saveConfig()
 		case popup.ActBatteryToggle:       s.cfg.ThemeDarkOnBattery = !s.cfg.ThemeDarkOnBattery; s.saveConfig()
 		case popup.ActFullscreenToggle:    s.cfg.ThemeSkipFullscreen = !s.cfg.ThemeSkipFullscreen; s.saveConfig()
-		case popup.ActHotkeyToggle:        s.cfg.HotkeysEnabled = !s.cfg.HotkeysEnabled; if s.cfg.HotkeysEnabled { s.startHotkeys() } else { s.stopHotkeys() }; s.syncChecks(); s.saveConfig()
-		case popup.ActAutostartToggle:     s.cfg.AutostartEnabled = !s.cfg.AutostartEnabled; if s.cfg.AutostartEnabled { autostart.Enable() } else { autostart.Disable() }; s.saveConfig()
-		case popup.ActSwitchTheme:         themeswitch.Switch(themeswitch.ModeDark); themeswitch.Switch(themeswitch.Current())
+		case popup.ActSwitchTheme:         cur := themeswitch.Current(); if cur == themeswitch.ModeDark { themeswitch.Switch(themeswitch.ModeLight) } else { themeswitch.Switch(themeswitch.ModeDark) }
 		case popup.ActRepairTheme:         themeswitch.Switch(themeswitch.Current())
-		case popup.ActConfig:              exec.Command("notepad.exe", func() string { p, _ := config.Path(); return p }()).Start()
+		case popup.ActHotkeyToggle:        s.cfg.HotkeysEnabled = !s.cfg.HotkeysEnabled; if s.cfg.HotkeysEnabled { s.startHotkeys() } else { s.stopHotkeys() }; s.saveConfig()
+		case popup.ActAutostartToggle:     s.cfg.AutostartEnabled = !s.cfg.AutostartEnabled; if s.cfg.AutostartEnabled { autostart.Enable() } else { autostart.Disable() }; s.saveConfig()
+		case popup.ActLanguage:            if value == 0 { s.switchLanguage("en") } else { s.switchLanguage("zh-CN") }
+		case popup.ActConfig:              p, _ := config.Path(); exec.Command("notepad.exe", p).Start()
 		case popup.ActAbout:               showAboutDialog(s.lang)
 		case popup.ActExit:                systray.Quit()
 		}
