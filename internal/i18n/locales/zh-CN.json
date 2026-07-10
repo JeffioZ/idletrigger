@@ -91,5 +91,6 @@
   "menu_process_watch": "进程关联",
   "about_body": "保持唤醒    阻止系统自动休眠\n空闲监测    N 分钟无操作后自动触发\n              睡眠/休眠/关机/锁屏\n全局热键    Win+Shift+S/L/N\n昼夜模式    定时或日出日落自动切换深浅色\n电池感知    使用电池时自动禁用保持唤醒\n进程关联    指定应用运行时自动启用保持唤醒\n\nhttps://github.com/JeffioZ/idletrigger",
   "tooltip_theme": "昼夜模式",
-  "tooltip_hotkeys": "全局热键启用"
+  "tooltip_hotkeys": "全局热键启用",
+  "menu_theme_enable": "启用自动切换"
 }

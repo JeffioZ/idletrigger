@@ -81,6 +81,7 @@ type trayState struct {
 	mHotkeys        *systray.MenuItem
 	mAutostart      *systray.MenuItem
 	mThemeSwitch    *systray.MenuItem
+	mThemeEnable    *systray.MenuItem
 	mThemeLightAt   *systray.MenuItem
 	mThemeDarkAt    *systray.MenuItem
 	mThemeSwitchNow      *systray.MenuItem
@@ -243,8 +244,12 @@ func (s *trayState) buildMenu() {
 
 	// Auto Theme Switch submenu
 	systray.AddSeparator()
-	s.mThemeSwitch = systray.AddMenuItemCheckbox(T("menu_theme_switch"), "", s.cfg.ThemeSwitchEnabled)
+	s.mThemeSwitch = systray.AddMenuItem(T("menu_theme_switch"), "")
 	s.registerLabel(s.mThemeSwitch, "menu_theme_switch")
+
+	// Enable toggle as first submenu item
+	s.mThemeEnable = s.mThemeSwitch.AddSubMenuItemCheckbox(T("menu_theme_enable"), "", s.cfg.ThemeSwitchEnabled)
+	s.registerLabel(s.mThemeEnable, "menu_theme_enable")
 
 	// Light time submenu
 	s.mThemeLightAt = s.mThemeSunrise.AddSubMenuItem(T("menu_theme_light_time"), "")
@@ -454,7 +459,7 @@ func (s *trayState) buildMenu() {
 					}
 				})
 
-			case <-s.mThemeSwitch.ClickedCh:
+			case <-s.mThemeEnable.ClickedCh:
 				s.post(func() {
 					s.cfg.ThemeSwitchEnabled = !s.cfg.ThemeSwitchEnabled
 					if s.cfg.ThemeSwitchEnabled {
@@ -581,7 +586,7 @@ func (s *trayState) syncChecks() {
 		s.mHotkeys.Uncheck()
 	}
 	if s.cfg.ThemeSwitchEnabled {
-		s.mThemeSwitch.Check()
+		s.mThemeEnable.Check()
 	} else {
 		s.mThemeSwitch.Uncheck()
 	}
