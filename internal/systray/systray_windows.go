@@ -258,12 +258,13 @@ var wt winTray
 // https://msdn.microsoft.com/en-us/library/windows/desktop/ms633573(v=vs.85).aspx
 func (t *winTray) wndProc(hWnd windows.Handle, message uint32, wParam, lParam uintptr) (lResult uintptr) {
 	const (
-		WM_RBUTTONUP  = 0x0205
-		WM_LBUTTONUP  = 0x0202
-		WM_COMMAND    = 0x0111
-		WM_ENDSESSION = 0x0016
-		WM_CLOSE      = 0x0010
-		WM_DESTROY    = 0x0002
+		WM_RBUTTONUP      = 0x0205
+		WM_LBUTTONUP      = 0x0202
+		WM_COMMAND        = 0x0111
+		WM_ENDSESSION     = 0x0016
+		WM_POWERBROADCAST = 0x0218
+		WM_CLOSE          = 0x0010
+		WM_DESTROY        = 0x0002
 	)
 	switch message {
 	case WM_COMMAND:
@@ -271,6 +272,10 @@ func (t *winTray) wndProc(hWnd windows.Handle, message uint32, wParam, lParam ui
 		// https://docs.microsoft.com/en-us/windows/win32/menurc/wm-command#menus
 		if menuItemId != -1 {
 			systrayMenuItemSelected(uint32(wParam))
+		}
+	case WM_POWERBROADCAST:
+		if OnPowerChange != nil {
+			go OnPowerChange()
 		}
 	case WM_CLOSE:
 		pDestroyWindow.Call(uintptr(t.window))

@@ -253,3 +253,6 @@ func systrayMenuItemSelected(id uint32) {
 
 // OnLeftClick is called when the user left-clicks the tray icon.
 var OnLeftClick func()
+
+// OnPowerChange is called when Windows broadcasts a power-state change.
+var OnPowerChange func()
