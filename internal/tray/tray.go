@@ -693,7 +693,6 @@ func (s *trayState) stopMonitor() {
 func (s *trayState) reconcileRuntime() {
 	wantsNoSleep := noSleepRequested(s.cfg, s.processNoSleep)
 	if wantsNoSleep && !s.batteryBlocked {
-		s.stopMonitor()
 		nosleep.Enable(s.cfg.KeepScreenOn)
 		return
 	}
