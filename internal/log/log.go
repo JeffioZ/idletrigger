@@ -25,6 +25,11 @@ const maxLogSize = 5 << 20
 func Init(enabled bool, exeDir string) {
 	mu.Lock()
 	defer mu.Unlock()
+	if w != nil {
+		writeLocked("=== IdleTrigger session ended ===")
+		w.Close()
+		w = nil
+	}
 	on = enabled
 	if !on {
 		return

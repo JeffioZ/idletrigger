@@ -3,7 +3,9 @@ package tray
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -184,24 +186,27 @@ func (s *trayState) updateIcon() {
 	} else {
 		systray.SetIcon(assets.IconDefault)
 	}
+	systray.SetTooltip(s.buildTooltip())
+}
 
-	lines := []string{
-		"IdleTrigger",
-		s.tooltipStatus("status_nosleep", s.cfg.NoSleepEnabled),
-	}
+func (s *trayState) buildTooltip() string {
+	lines := []string{"IdleTrigger"}
+	coreLine := s.tooltipStatusShort("tooltip_nosleep", s.cfg.NoSleepEnabled)
 	if s.cfg.IdleTimeoutMinutes > 0 {
 		act := i18n.T(s.lang, actionTranslationKey(s.cfg.IdleAction))
-		lines[1] += " · " + s.statusLine("status_monitor", fmt.Sprintf(i18n.T(s.lang, "status_monitor_active"), s.cfg.IdleTimeoutMinutes, act))
+		coreLine += " · " + s.tooltipPair("tooltip_idle", fmt.Sprintf(i18n.T(s.lang, "status_monitor_active"), s.cfg.IdleTimeoutMinutes, act))
 	} else {
-		lines[1] += " · " + s.tooltipStatus("status_monitor", false)
+		coreLine += " · " + s.tooltipStatusShort("tooltip_idle", false)
 	}
-	lines = append(lines, s.statusLine("menu_theme_switch", s.themeTooltipValue()))
+	lines = append(lines, coreLine)
+	lines = append(lines, s.tooltipPair("tooltip_theme", s.themeTooltipValueShort()))
 	lines = append(lines, strings.Join([]string{
-		s.tooltipStatus("menu_process_watch", s.cfg.ProcessWatchEnabled),
-		s.tooltipStatus("status_hotkeys", s.cfg.HotkeysEnabled),
-		s.tooltipStatus("menu_autostart", s.cfg.AutostartEnabled),
+		s.tooltipStatusShort("tooltip_process", s.cfg.ProcessWatchEnabled),
+		s.tooltipStatusShort("tooltip_hotkeys", s.cfg.HotkeysEnabled),
+		s.tooltipStatusShort("tooltip_autostart", s.cfg.AutostartEnabled),
+		s.tooltipStatusShort("tooltip_logging", s.cfg.LoggingEnabled),
 	}, " · "))
-	systray.SetTooltip(compactTooltip(tooltipText(lines)))
+	return tooltipText(lines)
 }
 
 func (s *trayState) tooltipStatus(labelKey string, enabled bool) string {
@@ -210,6 +215,18 @@ func (s *trayState) tooltipStatus(labelKey string, enabled bool) string {
 		value = i18n.T(s.lang, "status_enabled")
 	}
 	return s.statusLine(labelKey, value)
+}
+
+func (s *trayState) tooltipStatusShort(labelKey string, enabled bool) string {
+	value := i18n.T(s.lang, "status_short_off")
+	if enabled {
+		value = i18n.T(s.lang, "status_short_on")
+	}
+	return s.tooltipPair(labelKey, value)
+}
+
+func (s *trayState) tooltipPair(labelKey, value string) string {
+	return fmt.Sprintf("%s %s", i18n.T(s.lang, labelKey), value)
 }
 
 func (s *trayState) themeTooltipValue() string {
@@ -234,6 +251,17 @@ func (s *trayState) themeTooltipValue() string {
 	return strings.Join(parts, " ")
 }
 
+func (s *trayState) themeTooltipValueShort() string {
+	if !s.cfg.ThemeSwitchEnabled {
+		return i18n.T(s.lang, "status_short_off")
+	}
+	parts := []string{i18n.T(s.lang, "status_short_on")}
+	if schedule := s.themeScheduleText(); schedule != "" {
+		parts = append(parts, schedule)
+	}
+	return strings.Join(parts, " · ")
+}
+
 func (s *trayState) themeScheduleText() string {
 	lat, lon := s.cfg.ThemeLatitude, s.cfg.ThemeLongitude
 	if lat == 0 && lon == 0 {
@@ -255,15 +283,6 @@ func tooltipText(lines []string) string {
 		}
 	}
 	return strings.Join(clean, "\n")
-}
-
-func compactTooltip(value string) string {
-	const maxRunes = 120
-	runes := []rune(value)
-	if len(runes) <= maxRunes {
-		return strings.TrimSpace(value)
-	}
-	return strings.TrimSpace(string(runes[:maxRunes-1])) + "…"
 }
 
 // ---- idle monitor -----------------------------------------------------
@@ -704,15 +723,6 @@ func actionTranslationKey(a config.Action) string {
 	return "menu_action_" + string(a)
 }
 
-func showAboutDialog(lang string) {
-	ver := version.Value
-	nl := string(rune(10))
-	text := "IdleTrigger " + ver + nl + nl + i18n.T(lang, "about_body")
-	dialog.Info(i18n.T(lang, "app_title"), "", text)
-}
-
-// registerLabel records a menu item so its text can be updated on language switch.
-
 // switchLanguage updates the active language, refreshes all menu text,
 // and persists the choice.
 func (s *trayState) switchLanguage(lang string) {
@@ -794,8 +804,10 @@ func (s *trayState) showPopup() {
 				SkipFullscreen:      s.cfg.ThemeSkipFullscreen,
 				HotkeysEnabled:      s.cfg.HotkeysEnabled,
 				AutostartEnabled:    s.cfg.AutostartEnabled,
+				LoggingEnabled:      s.cfg.LoggingEnabled,
 				IsChinese:           i18n.ResolveLanguage(s.lang) == "zh-CN",
 				ThemeSchedule:       s.themeScheduleText(),
+				AppVersion:          version.Value,
 			},
 			lang: s.lang,
 		}
@@ -912,6 +924,11 @@ func (s *trayState) handlePopupAction(action popup.Action, value int) {
 		}
 		s.cfg.AutostartEnabled = enabled
 		s.saveConfig()
+	case popup.ActLoggingToggle:
+		s.cfg.LoggingEnabled = !s.cfg.LoggingEnabled
+		s.applyLogging()
+		s.updateIcon()
+		s.saveConfig()
 	case popup.ActLanguage:
 		if value == 0 {
 			s.switchLanguage("en")
@@ -927,8 +944,6 @@ func (s *trayState) handlePopupAction(action popup.Action, value int) {
 		if err := exec.Command("notepad.exe", path).Start(); err != nil {
 			mylog.Info("Config editor launch failed: %v", err)
 		}
-	case popup.ActAbout:
-		showAboutDialog(s.lang)
 	case popup.ActExit:
 		systray.Quit()
 	}
@@ -947,4 +962,15 @@ func (s *trayState) runThemeOperation(actionKey string, fn func() error) {
 			s.post(func() { s.showError(actionKey, err) })
 		}
 	}()
+}
+
+func (s *trayState) applyLogging() {
+	if s.cfg.LoggingEnabled {
+		exePath, _ := os.Executable()
+		mylog.Init(true, filepath.Dir(exePath))
+		mylog.Info("Debug logging enabled from control panel")
+		return
+	}
+	mylog.Info("Debug logging disabled from control panel")
+	mylog.Close()
 }
