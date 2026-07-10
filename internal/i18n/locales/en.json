@@ -36,8 +36,8 @@
   "msg_autostart_enabled": "Will start with Windows.",
   "msg_autostart_disabled": "Will not start with Windows.",
   "msg_hotkey_conflict": "Could not register (already in use):",
-  "tooltip_nosleep": "IdleTrigger — Stay Awake",
-  "tooltip_monitor": "IdleTrigger — Idle Monitor: %d min → %s",
+  "tooltip_nosleep": "Stay Awake",
+  "tooltip_monitor": "Idle: %d min → %s",
   "tooltip_default": "IdleTrigger",
   "cli_usage": "Usage: IdleTrigger <command>\n\nCommands:\n  sleep        Enter sleep\n  hibernate    Enter hibernation\n  shutdown     Shut down Windows\n  lock         Lock the workstation\n  nosleep      Stay Awake (on|off|toggle|status)\n  monitor      Idle monitor (on|off|status)\n  autostart    Start with Windows (enable|disable|status)\n  config:reload Reload the running tray configuration\n  status       Show current status\n  version      Show version",
   "cli_usage_nosleep": "Usage: IdleTrigger nosleep <on|off|toggle|status> [--screen]",
@@ -90,5 +90,6 @@
   "menu_theme_skip_fullscreen": "Pause Fullscreen",
   "menu_process_watch": "Process Watch",
   "about_body": "Stay Awake     Prevent system sleep\nIdle Monitor   Auto-trigger after N min of inactivity\nGlobal Hotkeys Win+Shift+S/L/N\nDay/Night      Auto-switch theme by time or sunrise\nBattery Aware  Auto-disable on battery\nProcess Watch  Auto-enable for specific apps\n\nhttps://github.com/JeffioZ/idletrigger",
-  "tooltip_theme": "IdleTrigger — Day/Night: %s"
+  "tooltip_theme": "Day/Night: %s",
+  "tooltip_hotkeys": "Hotkeys active"
 }
