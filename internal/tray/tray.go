@@ -215,7 +215,7 @@ func (s *trayState) buildMenu() {
 
 	s.mNoSleep = systray.AddMenuItemCheckbox(T("menu_nosleep"), "", s.cfg.NoSleepEnabled)
 	s.registerLabel(s.mNoSleep, "menu_nosleep")
-	s.mProcessWatch = systray.AddMenuItemCheckbox(T("menu_process_watch"), "", s.cfg.ProcessWatchEnabled)
+	s.mProcessWatch = s.mNoSleep.AddSubMenuItemCheckbox(T("menu_process_watch"), "", s.cfg.ProcessWatchEnabled)
 	s.registerLabel(s.mProcessWatch, "menu_process_watch")
 
 
@@ -599,6 +599,15 @@ func (s *trayState) syncChecks() {
 		s.mThemeSwitch.Check()
 	} else {
 		s.mThemeSwitch.Uncheck()
+	}
+	// Hide time submenus when sunrise mode is active
+	// 日出日落模式开启时隐藏时间子菜单
+	if s.cfg.ThemeMode == "sunrise" {
+		s.mThemeLightAt.Hide()
+		s.mThemeDarkAt.Hide()
+	} else {
+		s.mThemeLightAt.Show()
+		s.mThemeDarkAt.Show()
 	}
 	s.updateTimeoutChecks()
 	s.updateActionChecks()
