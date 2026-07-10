@@ -86,6 +86,17 @@ process_watch_enabled = false      # 进程关联自动唤醒
 process_watch_list = []            # 例如 ["chrome.exe", "powerpnt.exe"]
 
 start_minimized = true
+logging_enabled = false            # 调试日志输出
+
+theme_switch_enabled = false       # 自动主题切换
+theme_mode = "sunrise"             # "fixed" 或 "sunrise"
+theme_light_time = "07:00"
+theme_dark_time = "19:00"
+theme_latitude = 0                 # 0 = 根据时区自动检测
+theme_longitude = 0
+theme_dark_on_battery = true
+theme_skip_fullscreen = true
+
 autostart_enabled = false
 ```
 
