@@ -27,7 +27,7 @@
   "menu_exit": "退出",
   "about_title": "关于 IdleTrigger",
   "about_heading": "IdleTrigger {{version}}",
-  "about_text": "轻量级 Windows 托盘电源与空闲管理工具。\n\n• 保持系统唤醒，可选屏幕常亮\n• 空闲超时后执行睡眠、休眠、关机或锁屏\n• 按固定时间或日出日落自动切换浅色/深色主题\n• 使用电池时调整保持唤醒与深色模式\n• 指定应用运行时自动启用保持唤醒\n• 通过命令行控制正在运行的托盘程序\n\n全局热键\nWin+Shift+S：睡眠\nWin+Shift+L：锁屏\nWin+Shift+N：切换保持唤醒\n\n支持 Windows 10 / Server 2016 及以上系统\nMIT License\nhttps://github.com/JeffioZ/idletrigger",
+  "about_text": "IdleTrigger\n\n保持唤醒    阻止系统自动休眠\n空闲监测    N 分钟无操作后自动触发睡眠/休眠/关机/锁屏\n全局热键    Win+Shift+S 睡眠 / L 锁屏 / N 保持唤醒\n昼夜模式    定时或日出日落自动切换深浅色主题\n电池感知    使用电池时自动禁用保持唤醒\n进程关联    指定应用运行时自动启用保持唤醒\n\nhttps://github.com/JeffioZ/idletrigger",
   "msg_sleeping": "正在进入睡眠...",
   "msg_hibernating": "正在进入休眠...",
   "msg_shutting_down": "正在关机...",
@@ -85,7 +85,8 @@
   "theme_time_1900": "19:00",
   "theme_time_2000": "20:00",
   "theme_time_2100": "21:00",
-  "menu_theme_sunrise": "日出日落",
-  "menu_theme_battery_dark": "电池深色",
-  "menu_theme_skip_fullscreen": "跳过全屏"
+  "menu_theme_sunrise": "日出日落模式",
+  "menu_theme_battery_dark": "使用电池深色",
+  "menu_theme_skip_fullscreen": "全屏暂不切换",
+  "menu_process_watch": "进程关联"
 }

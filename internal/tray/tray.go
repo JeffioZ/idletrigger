@@ -73,6 +73,7 @@ type trayState struct {
 	mShutdown       *systray.MenuItem
 	mLock           *systray.MenuItem
 	mNoSleep        *systray.MenuItem
+	mProcessWatch  *systray.MenuItem
 	mIdleEnable     *systray.MenuItem
 	mIdleTimeout    *systray.MenuItem
 	mIdleAction     *systray.MenuItem
@@ -335,7 +336,19 @@ func (s *trayState) buildMenu() {
 					}
 				})
 
-			case <-s.mNoSleep.ClickedCh:
+			case <-s.mProcessWatch.ClickedCh:
+			if s.mProcessWatch.Checked() {
+				s.mProcessWatch.Uncheck()
+				s.cfg.ProcessWatchEnabled = false
+				s.stopProcessWatcher()
+			} else {
+				s.mProcessWatch.Check()
+				s.cfg.ProcessWatchEnabled = true
+				s.startProcessWatcher()
+			}
+			config.Save(s.cfg)
+
+		case <-s.mNoSleep.ClickedCh:
 				s.post(func() { s.toggleNoSleep() })
 
 			case <-s.mIdleEnable.ClickedCh:
@@ -559,6 +572,11 @@ func (s *trayState) syncChecks() {
 	} else {
 		s.mIdleEnable.Uncheck()
 		s.mNoSleep.Enable()
+	}
+	if s.cfg.ProcessWatchEnabled {
+		s.mProcessWatch.Check()
+	} else {
+		s.mProcessWatch.Uncheck()
 	}
 	if s.cfg.HotkeysEnabled {
 		s.mHotkeys.Check()
