@@ -408,9 +408,13 @@ func (s *trayState) buildMenu() {
 			if s.mThemeSunrise.Checked() {
 				s.mThemeSunrise.Uncheck()
 				s.cfg.ThemeMode = "fixed"
+				s.mThemeLightAt.Show()
+				s.mThemeDarkAt.Show()
 			} else {
 				s.mThemeSunrise.Check()
 				s.cfg.ThemeMode = "sunrise"
+				s.mThemeLightAt.Hide()
+				s.mThemeDarkAt.Hide()
 			}
 			s.stopThemeScheduler()
 			if s.cfg.ThemeSwitchEnabled { s.startThemeScheduler() }
