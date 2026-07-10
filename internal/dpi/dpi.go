@@ -8,20 +8,33 @@ import "golang.org/x/sys/windows"
 // Enable declares this process as DPI-aware.  Call once at startup before
 // any UI is created.
 func Enable() {
-	// Per-Monitor DPI Awareness v2 — best for Windows 10+.
+	// Per-Monitor DPI Awareness v2 is available on Windows 10 1703+.
 	// The context values are negative handles: -4, -3, -2, -1.
 	const perMonitorV2 = ^uintptr(3) // -4
 
 	user32 := windows.NewLazySystemDLL("user32.dll")
 	setCtx := user32.NewProc("SetProcessDpiAwarenessContext")
-	ret, _, _ := setCtx.Call(perMonitorV2)
-	if ret != 0 {
-		return
+	if err := setCtx.Find(); err == nil {
+		ret, _, _ := setCtx.Call(perMonitorV2)
+		if ret != 0 {
+			return
+		}
 	}
 
 	// Fallback: SetProcessDpiAwareness (Windows 8.1+).
 	shcore := windows.NewLazySystemDLL("shcore.dll")
 	setAware := shcore.NewProc("SetProcessDpiAwareness")
 	const perMonitor = 2
-	setAware.Call(uintptr(perMonitor))
+	if err := setAware.Find(); err == nil {
+		ret, _, _ := setAware.Call(uintptr(perMonitor))
+		if ret == 0 { // S_OK
+			return
+		}
+	}
+
+	// Final fallback for systems that only expose legacy system DPI awareness.
+	setLegacy := user32.NewProc("SetProcessDPIAware")
+	if err := setLegacy.Find(); err == nil {
+		setLegacy.Call()
+	}
 }

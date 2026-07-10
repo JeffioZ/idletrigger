@@ -1,9 +1,12 @@
 # Build artifacts
-IdleTrigger.exe
+/IdleTrigger*.exe
 
 
 # Runtime config (generated next to the EXE)
 IdleTrigger.toml
+IdleTrigger.log
+IdleTrigger.log.1
+.IdleTrigger-*.toml.tmp
 
 # IDE
 .vscode/
@@ -15,4 +18,3 @@ IdleTrigger.toml
 # OS
 .DS_Store
 Thumbs.db
-ROADMAP.md

@@ -8,8 +8,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/JeffioZ/idletrigger/internal/i18n"
 )
 
 // Action is a system power action.
@@ -87,11 +90,9 @@ type Config struct {
 	// ThemeSkipFullscreen prevents switching during fullscreen apps/games.
 	ThemeSkipFullscreen bool `toml:"theme_skip_fullscreen"`
 
-	// StartMinimized: when true the tray icon starts without showing any window.
-	StartMinimized bool `toml:"start_minimized"`
-
-	// AutostartEnabled: when true a registry Run entry starts IdleTrigger on boot.
-	AutostartEnabled bool `toml:"autostart_enabled"`
+	// AutostartEnabled mirrors the current user's registry Run entry. It is
+	// runtime state rather than a TOML setting.
+	AutostartEnabled bool `toml:"-"`
 }
 
 // DefaultConfig returns the factory-default configuration.
@@ -117,7 +118,6 @@ func DefaultConfig() Config {
 		ThemeLongitude:          0,
 		ThemeDarkOnBattery:      true,
 		ThemeSkipFullscreen:     true,
-		StartMinimized:          true,
 		AutostartEnabled:        false,
 	}
 }
@@ -153,27 +153,97 @@ func Load() (Config, error) {
 	if err := toml.Unmarshal(data, &cfg); err != nil {
 		return cfg, fmt.Errorf("parse config: %w", err)
 	}
+	if err := cfg.Validate(); err != nil {
+		return cfg, fmt.Errorf("validate config: %w", err)
+	}
 	return cfg, nil
 }
 
-// Save writes the configuration to disk.
+// Validate checks values that can otherwise lead to unsafe or surprising
+// runtime behavior.
+func (cfg Config) Validate() error {
+	switch cfg.Language {
+	case "auto", "en", "zh-CN":
+	default:
+		return fmt.Errorf("language must be auto, en, or zh-CN")
+	}
+	switch cfg.IdleAction {
+	case ActionSleep, ActionHibernate, ActionShutdown, ActionLock:
+	default:
+		return fmt.Errorf("invalid idle_action %q", cfg.IdleAction)
+	}
+	if cfg.IdleTimeoutMinutes < 0 || cfg.IdleTimeoutMinutes > 7*24*60 {
+		return fmt.Errorf("idle_timeout_minutes must be between 0 and 10080")
+	}
+	if cfg.IdleWarningSeconds < 0 || cfg.IdleWarningSeconds > 3600 {
+		return fmt.Errorf("idle_warning_seconds must be between 0 and 3600")
+	}
+	if cfg.NoSleepBatteryThreshold < 0 || cfg.NoSleepBatteryThreshold > 100 {
+		return fmt.Errorf("nosleep_battery_threshold must be between 0 and 100")
+	}
+	if cfg.ThemeMode != "fixed" && cfg.ThemeMode != "sunrise" {
+		return fmt.Errorf("theme_mode must be fixed or sunrise")
+	}
+	if _, err := time.Parse("15:04", cfg.ThemeLightTime); err != nil {
+		return fmt.Errorf("invalid theme_light_time: %w", err)
+	}
+	if _, err := time.Parse("15:04", cfg.ThemeDarkTime); err != nil {
+		return fmt.Errorf("invalid theme_dark_time: %w", err)
+	}
+	if cfg.ThemeLatitude < -90 || cfg.ThemeLatitude > 90 {
+		return fmt.Errorf("theme_latitude must be between -90 and 90")
+	}
+	if cfg.ThemeLongitude < -180 || cfg.ThemeLongitude > 180 {
+		return fmt.Errorf("theme_longitude must be between -180 and 180")
+	}
+	return nil
+}
+
+// Save atomically writes the configuration to disk.
 func Save(cfg Config) error {
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
 	p, err := Path()
 	if err != nil {
 		return err
 	}
-	f, err := os.Create(p)
-	if err != nil {
-		return fmt.Errorf("create config file: %w", err)
-	}
-	defer f.Close()
+	return saveTo(p, cfg)
+}
 
-	// Write a human-readable header.
-	f.WriteString("# IdleTrigger Configuration\n")
-	f.WriteString("# Edit this file directly and restart IdleTrigger to apply changes.\n\n")
+func saveTo(p string, cfg Config) error {
+	f, err := os.CreateTemp(filepath.Dir(p), ".IdleTrigger-*.toml.tmp")
+	if err != nil {
+		return fmt.Errorf("create temporary config file: %w", err)
+	}
+	tmpPath := f.Name()
+	ok := false
+	defer func() {
+		f.Close()
+		if !ok {
+			os.Remove(tmpPath)
+		}
+	}()
+
+	if _, err := fmt.Fprintf(f, "# %s\n", i18n.T(cfg.Language, "config_header")); err != nil {
+		return fmt.Errorf("write config header: %w", err)
+	}
+	if _, err := fmt.Fprintf(f, "# %s\n\n", i18n.T(cfg.Language, "config_edit_hint")); err != nil {
+		return fmt.Errorf("write config header: %w", err)
+	}
 
 	if err := toml.NewEncoder(f).Encode(cfg); err != nil {
 		return fmt.Errorf("encode config: %w", err)
 	}
+	if err := f.Sync(); err != nil {
+		return fmt.Errorf("sync config: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close config: %w", err)
+	}
+	if err := os.Rename(tmpPath, p); err != nil {
+		return fmt.Errorf("replace config: %w", err)
+	}
+	ok = true
 	return nil
 }

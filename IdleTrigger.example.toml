@@ -1,0 +1,26 @@
+# IdleTrigger Configuration Example
+
+language = "auto"
+idle_timeout_minutes = 30
+idle_action = "sleep"
+idle_warning_seconds = 30
+
+nosleep_enabled = false
+keep_screen_on = false
+nosleep_on_battery = false
+nosleep_battery_threshold = 20
+
+hotkeys_enabled = false
+process_watch_enabled = false
+process_watch_list = []
+
+logging_enabled = false
+
+theme_switch_enabled = false
+theme_mode = "fixed"
+theme_light_time = "07:00"
+theme_dark_time = "19:00"
+theme_latitude = 0
+theme_longitude = 0
+theme_dark_on_battery = true
+theme_skip_fullscreen = true

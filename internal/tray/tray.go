@@ -4,10 +4,8 @@ package tray
 import (
 	"fmt"
 	"os/exec"
-	"sync"
+	"strings"
 	"time"
-
-	"github.com/getlantern/systray"
 
 	"github.com/JeffioZ/idletrigger/assets"
 	"github.com/JeffioZ/idletrigger/internal/actions"
@@ -23,6 +21,7 @@ import (
 	"github.com/JeffioZ/idletrigger/internal/notify"
 	"github.com/JeffioZ/idletrigger/internal/power"
 	"github.com/JeffioZ/idletrigger/internal/processwatcher"
+	"github.com/JeffioZ/idletrigger/internal/systray"
 	"github.com/JeffioZ/idletrigger/internal/themeswitch"
 )
 
@@ -52,16 +51,18 @@ var actionOptions = []struct {
 }
 
 type trayState struct {
-	cfg   config.Config
-	cfgMu sync.RWMutex
-	lang  string
+	cfg       config.Config
+	lang      string
+	callbacks Callbacks
+	stateCh   chan stateRequest
 
-	mon   *monitor.Monitor
-	monMu sync.Mutex
+	mon *monitor.Monitor
 
-	hotkeyMgr  *hotkey.Manager
-	procWatch  *processwatcher.Watcher
-	themeSched *themeswitch.Scheduler
+	hotkeyMgr      *hotkey.Manager
+	procWatch      *processwatcher.Watcher
+	themeSched     *themeswitch.Scheduler
+	processNoSleep bool
+	batteryBlocked bool
 
 	// All menu items that display localised text — updated on language switch.
 	labelItems []labelItem
@@ -76,6 +77,7 @@ type trayState struct {
 	mIdleTimeout    *systray.MenuItem
 	mIdleAction     *systray.MenuItem
 	mHotkeys        *systray.MenuItem
+	mAutostart      *systray.MenuItem
 	mThemeSwitch    *systray.MenuItem
 	mThemeLightAt   *systray.MenuItem
 	mThemeDarkAt    *systray.MenuItem
@@ -87,6 +89,11 @@ type trayState struct {
 	actionItems     []*systray.MenuItem
 }
 
+type stateRequest struct {
+	fn     func() string
+	result chan string
+}
+
 type labelItem struct {
 	item *systray.MenuItem
 	key  string
@@ -94,30 +101,32 @@ type labelItem struct {
 
 // Run starts the system-tray loop. Blocks until Exit.
 func Run(cfg config.Config, cbs Callbacks) {
-	s := &trayState{cfg: cfg, lang: cfg.Language}
+	systray.SetErrorHandler(func(format string, args ...interface{}) {
+		mylog.Info("Systray: "+format, args...)
+	})
 
-	go ipc.Server(s.handleIPC)
-
-	// Start battery-awareness goroutine.
-	go s.batteryLoop()
+	s := &trayState{
+		cfg:       cfg,
+		lang:      cfg.Language,
+		callbacks: cbs,
+		stateCh:   make(chan stateRequest, 64),
+	}
 
 	onReady := func() {
+		if enabled, err := autostart.IsEnabled(); err == nil {
+			s.cfg.AutostartEnabled = enabled
+		}
 		s.buildMenu()
-		s.syncChecks()
-		s.updateIcon()
 
 		// Config compatibility: if both NoSleep and idle monitor are enabled,
 		// resolve the conflict — NoSleep takes priority.
-		// 配置兼容：若两者均启用，NoSleep 优先，自动禁用空闲监测。
 		if s.cfg.NoSleepEnabled && s.cfg.IdleTimeoutMinutes > 0 {
 			s.cfg.IdleTimeoutMinutes = 0
 		}
-		if s.cfg.IdleTimeoutMinutes > 0 {
-			s.startMonitor()
-		}
-		if s.cfg.NoSleepEnabled {
-			nosleep.Enable(true)
-		}
+		s.batteryBlocked = batteryPolicyBlocks(s.cfg, power.GetStatus())
+		s.reconcileRuntime()
+		s.syncChecks()
+		s.updateIcon()
 
 		// Hotkeys
 		if s.cfg.HotkeysEnabled {
@@ -132,18 +141,49 @@ func Run(cfg config.Config, cbs Callbacks) {
 			s.startThemeScheduler()
 		}
 
-		s.eventLoop()
+		go s.stateLoop()
+		go func() {
+			if err := ipc.Server(s.handleIPC); err != nil {
+				mylog.Info("IPC server stopped: %v", err)
+			}
+		}()
+		go s.batteryLoop()
 	}
 
 	onExit := func() {
-		s.stopMonitor()
-		s.stopHotkeys()
-		s.stopProcessWatcher()
-		s.stopThemeScheduler()
-		nosleep.Disable()
+		s.call(func() string {
+			s.stopMonitor()
+			s.stopHotkeys()
+			s.stopProcessWatcher()
+			s.stopThemeScheduler()
+			nosleep.Disable()
+			return ""
+		})
 	}
 
 	systray.Run(onReady, onExit)
+}
+
+func (s *trayState) stateLoop() {
+	for req := range s.stateCh {
+		result := req.fn()
+		if req.result != nil {
+			req.result <- result
+		}
+	}
+}
+
+func (s *trayState) post(fn func()) {
+	s.stateCh <- stateRequest{fn: func() string {
+		fn()
+		return ""
+	}}
+}
+
+func (s *trayState) call(fn func() string) string {
+	result := make(chan string, 1)
+	s.stateCh <- stateRequest{fn: fn, result: result}
+	return <-result
 }
 
 // ---- menu construction -------------------------------------------------
@@ -231,8 +271,8 @@ func (s *trayState) buildMenu() {
 	systray.AddSeparator()
 	s.mHotkeys = systray.AddMenuItemCheckbox(T("menu_hotkeys"), "", s.cfg.HotkeysEnabled)
 	s.registerLabel(s.mHotkeys, "menu_hotkeys")
-	mAutostart := systray.AddMenuItemCheckbox(T("menu_autostart"), "", s.cfg.AutostartEnabled)
-	s.registerLabel(mAutostart, "menu_autostart")
+	s.mAutostart = systray.AddMenuItemCheckbox(T("menu_autostart"), "", s.cfg.AutostartEnabled)
+	s.registerLabel(s.mAutostart, "menu_autostart")
 
 	// Language submenu
 	mLang := systray.AddMenuItem(T("menu_language"), "")
@@ -255,125 +295,141 @@ func (s *trayState) buildMenu() {
 		for {
 			select {
 			case <-s.mSleep.ClickedCh:
-				if err := actions.Sleep(); err != nil {
-					s.showError("menu_sleep", err)
-				}
+				s.post(func() {
+					if err := actions.Sleep(); err != nil {
+						s.showError("menu_sleep", err)
+					}
+				})
 			case <-s.mHibernate.ClickedCh:
-				if err := actions.Hibernate(); err != nil {
-					s.showError("menu_hibernate", err)
-				}
+				s.post(func() {
+					if err := actions.Hibernate(); err != nil {
+						s.showError("menu_hibernate", err)
+					}
+				})
 			case <-s.mShutdown.ClickedCh:
-				if err := actions.Shutdown(); err != nil {
-					s.showError("menu_shutdown", err)
-				}
+				s.post(func() {
+					if err := actions.Shutdown(); err != nil {
+						s.showError("menu_shutdown", err)
+					}
+				})
 			case <-s.mLock.ClickedCh:
-				if err := actions.Lock(); err != nil {
-					s.showError("menu_lock", err)
-				}
+				s.post(func() {
+					if err := actions.Lock(); err != nil {
+						s.showError("menu_lock", err)
+					}
+				})
 
 			case <-s.mNoSleep.ClickedCh:
-				if nosleep.IsEnabled() {
-					nosleep.Disable()
-					s.cfg.NoSleepEnabled = false
-				} else {
-					nosleep.Enable(true)
-					s.cfg.NoSleepEnabled = true
-					// NoSleep and idle monitor are mutually exclusive — auto-disable idle monitor.
-					s.cfg.IdleTimeoutMinutes = 0
-					s.stopMonitor()
-				}
-				s.syncChecks()
-				config.Save(s.cfg)
+				s.post(func() { s.toggleNoSleep() })
 
 			case <-s.mIdleEnable.ClickedCh:
-				if s.mIdleEnable.Checked() {
-					s.mIdleEnable.Uncheck()
-					s.cfg.IdleTimeoutMinutes = 0
-					s.stopMonitor()
-				} else {
-					if nosleep.IsEnabled() {
-						nosleep.Disable()
+				s.post(func() {
+					if s.cfg.IdleTimeoutMinutes > 0 {
+						s.cfg.IdleTimeoutMinutes = 0
+					} else {
 						s.cfg.NoSleepEnabled = false
-					}
-					s.mIdleEnable.Check()
-					if s.cfg.IdleTimeoutMinutes <= 0 {
 						s.cfg.IdleTimeoutMinutes = 30
 					}
-					s.startMonitor()
-				}
-				s.syncChecks()
-				s.updateIcon()
-				config.Save(s.cfg)
+					s.reconcileRuntime()
+					s.syncChecks()
+					s.updateIcon()
+					s.saveConfig()
+				})
 
-			case <-mAutostart.ClickedCh:
-				if mAutostart.Checked() {
-					mAutostart.Uncheck()
-					autostart.Disable()
-					s.cfg.AutostartEnabled = false
-				} else {
-					mAutostart.Check()
-					autostart.Enable()
-					s.cfg.AutostartEnabled = true
-				}
-				config.Save(s.cfg)
+			case <-s.mAutostart.ClickedCh:
+				s.post(func() {
+					enable := !s.cfg.AutostartEnabled
+					var err error
+					if enable {
+						err = autostart.Enable()
+					} else {
+						err = autostart.Disable()
+					}
+					if err != nil {
+						s.showError("menu_autostart", err)
+						return
+					}
+					s.cfg.AutostartEnabled = enable
+					if enable {
+						s.mAutostart.Check()
+					} else {
+						s.mAutostart.Uncheck()
+					}
+					s.saveConfig()
+				})
 
 			case <-s.mThemeSwitchNow.ClickedCh:
-				cur := themeswitch.Current()
-				if cur == themeswitch.ModeDark {
-					themeswitch.Switch(themeswitch.ModeLight)
-				} else {
-					themeswitch.Switch(themeswitch.ModeDark)
-				}
+				s.post(func() {
+					cur := themeswitch.Current()
+					target := themeswitch.ModeDark
+					if cur == themeswitch.ModeDark {
+						target = themeswitch.ModeLight
+					}
+					if err := themeswitch.Switch(target); err != nil {
+						s.showError("menu_theme_switch_now", err)
+					}
+				})
 
 			case <-s.mThemeRepair.ClickedCh:
-				themeswitch.Switch(themeswitch.Current())
+				s.post(func() {
+					if err := themeswitch.Switch(themeswitch.Current()); err != nil {
+						s.showError("menu_theme_repair", err)
+					}
+				})
 
 			case <-s.mThemeSwitch.ClickedCh:
-				if s.mThemeSwitch.Checked() {
-					s.mThemeSwitch.Uncheck()
-					s.cfg.ThemeSwitchEnabled = false
-					s.stopThemeScheduler()
-				} else {
-					s.mThemeSwitch.Check()
-					s.cfg.ThemeSwitchEnabled = true
-					s.startThemeScheduler()
-				}
-				config.Save(s.cfg)
+				s.post(func() {
+					s.cfg.ThemeSwitchEnabled = !s.cfg.ThemeSwitchEnabled
+					if s.cfg.ThemeSwitchEnabled {
+						s.startThemeScheduler()
+					} else {
+						s.stopThemeScheduler()
+					}
+					s.syncChecks()
+					s.saveConfig()
+				})
 
 			case <-s.mHotkeys.ClickedCh:
-				if s.mHotkeys.Checked() {
-					s.mHotkeys.Uncheck()
-					s.cfg.HotkeysEnabled = false
-					s.stopHotkeys()
-				} else {
-					s.mHotkeys.Check()
-					s.cfg.HotkeysEnabled = true
-					s.startHotkeys()
-				}
-				config.Save(s.cfg)
+				s.post(func() {
+					s.cfg.HotkeysEnabled = !s.cfg.HotkeysEnabled
+					if s.cfg.HotkeysEnabled {
+						s.startHotkeys()
+					} else {
+						s.stopHotkeys()
+					}
+					s.syncChecks()
+					s.saveConfig()
+				})
 
 			case <-mLangEn.ClickedCh:
-				s.switchLanguage("en")
-				mLangEn.Check()
-				mLangZh.Uncheck()
+				s.post(func() {
+					s.switchLanguage("en")
+					mLangEn.Check()
+					mLangZh.Uncheck()
+				})
 
 			case <-mLangZh.ClickedCh:
-				s.switchLanguage("zh-CN")
-				mLangZh.Check()
-				mLangEn.Uncheck()
+				s.post(func() {
+					s.switchLanguage("zh-CN")
+					mLangZh.Check()
+					mLangEn.Uncheck()
+				})
 
 			case <-mOpenCfg.ClickedCh:
-				p, _ := config.Path()
-				exec.Command("notepad.exe", p).Start()
+				s.post(func() {
+					p, err := config.Path()
+					if err == nil {
+						err = exec.Command("notepad.exe", p).Start()
+					}
+					if err != nil {
+						s.showError("menu_open_config", err)
+					}
+				})
 
 			case <-mAbout.ClickedCh:
-				showAboutDialog(s.lang)
+				s.post(func() { showAboutDialog(s.lang) })
 
 			case <-mExit.ClickedCh:
-				s.stopMonitor()
-				s.stopHotkeys()
-				s.stopProcessWatcher()
-				nosleep.Disable()
 				systray.Quit()
 				return
 			}
@@ -384,22 +440,21 @@ func (s *trayState) buildMenu() {
 	s.wireThemeSubmenus()
 }
 
-func (s *trayState) eventLoop() {
-	// Block forever — the goroutines above handle events.
-	select {}
-}
-
 func (s *trayState) wireSubmenus() {
 	for i, item := range s.timeoutItems {
 		idx := i
 		it := item
 		go func() {
 			for range it.ClickedCh {
-				s.cfg.IdleTimeoutMinutes = timeoutOptions[idx].minutes
-				s.updateTimeoutChecks()
-				s.startMonitor()
-				s.updateIcon()
-				config.Save(s.cfg)
+				s.post(func() {
+					s.cfg.IdleTimeoutMinutes = timeoutOptions[idx].minutes
+					s.cfg.NoSleepEnabled = false
+					s.updateTimeoutChecks()
+					s.reconcileRuntime()
+					s.syncChecks()
+					s.updateIcon()
+					s.saveConfig()
+				})
 			}
 		}()
 	}
@@ -408,10 +463,14 @@ func (s *trayState) wireSubmenus() {
 		it := item
 		go func() {
 			for range it.ClickedCh {
-				s.cfg.IdleAction = actionOptions[idx].action
-				s.updateActionChecks()
-				s.startMonitor()
-				config.Save(s.cfg)
+				s.post(func() {
+					s.cfg.IdleAction = actionOptions[idx].action
+					s.updateActionChecks()
+					if s.mon != nil {
+						s.startMonitor()
+					}
+					s.saveConfig()
+				})
 			}
 		}()
 	}
@@ -422,23 +481,29 @@ func (s *trayState) wireSubmenus() {
 func (s *trayState) syncChecks() {
 	// NoSleep and idle monitor are mutually exclusive — when one is active,
 	// the other is visually disabled (grayed out) in the menu.
-	// NoSleep 与空闲监测互斥，一方启用时另一方菜单变灰禁用。
 	if s.cfg.NoSleepEnabled {
 		s.mNoSleep.Check()
 		s.mIdleEnable.Disable()
 	} else {
 		s.mNoSleep.Uncheck()
-		s.mIdleEnable.Enable()
+		if s.processNoSleep {
+			s.mIdleEnable.Disable()
+		} else {
+			s.mIdleEnable.Enable()
+		}
 	}
 	// Config compatibility: if both NoSleep and idle monitor are enabled,
 	// resolve the conflict — NoSleep takes priority.
-	// 配置兼容：若两者均启用，NoSleep 优先，自动禁用空闲监测。
 	if s.cfg.NoSleepEnabled && s.cfg.IdleTimeoutMinutes > 0 {
 		s.cfg.IdleTimeoutMinutes = 0
 	}
 	if s.cfg.IdleTimeoutMinutes > 0 {
 		s.mIdleEnable.Check()
-		s.mNoSleep.Disable()
+		if s.processNoSleep {
+			s.mNoSleep.Enable()
+		} else {
+			s.mNoSleep.Disable()
+		}
 	} else {
 		s.mIdleEnable.Uncheck()
 		s.mNoSleep.Enable()
@@ -483,15 +548,9 @@ func (s *trayState) updateIcon() {
 	if nosleep.IsEnabled() {
 		systray.SetIcon(assets.IconActive)
 		systray.SetTooltip(i18n.T(s.lang, "tooltip_nosleep"))
-		// Config compatibility: if both NoSleep and idle monitor are enabled,
-		// resolve the conflict — NoSleep takes priority.
-		// 配置兼容：若两者均启用，NoSleep 优先，自动禁用空闲监测。
-		if s.cfg.NoSleepEnabled && s.cfg.IdleTimeoutMinutes > 0 {
-			s.cfg.IdleTimeoutMinutes = 0
-		}
 	} else if s.cfg.IdleTimeoutMinutes > 0 {
 		systray.SetIcon(assets.IconMonitor)
-		actName := string(s.cfg.IdleAction)
+		actName := i18n.T(s.lang, actionTranslationKey(s.cfg.IdleAction))
 		systray.SetTooltip(fmt.Sprintf(i18n.T(s.lang, "tooltip_monitor"),
 			s.cfg.IdleTimeoutMinutes, actName))
 	} else {
@@ -504,9 +563,7 @@ func (s *trayState) updateIcon() {
 
 func (s *trayState) startMonitor() {
 	s.stopMonitor()
-	s.cfgMu.RLock()
 	if s.cfg.IdleTimeoutMinutes <= 0 {
-		s.cfgMu.RUnlock()
 		return
 	}
 	threshold := time.Duration(s.cfg.IdleTimeoutMinutes) * time.Minute
@@ -514,35 +571,58 @@ func (s *trayState) startMonitor() {
 	mylog.Info("Idle monitor started: %d min -> %s", s.cfg.IdleTimeoutMinutes, string(s.cfg.IdleAction))
 	action := s.cfg.IdleAction
 	lang := s.lang
+	warningSeconds := s.cfg.IdleWarningSeconds
 
-	s.monMu.Lock()
 	s.mon = monitor.New(threshold, warnOffset,
 		// onWarning — show balloon notification
 		func() {
-			actName := string(action)
-			msg := fmt.Sprintf(i18n.T(lang, "msg_idle_warning"), actName, s.cfg.IdleWarningSeconds)
+			actName := i18n.T(lang, actionTranslationKey(action))
+			msg := fmt.Sprintf(i18n.T(lang, "msg_idle_warning"), actName, warningSeconds)
 			title := i18n.T(lang, "app_title")
-			// Use a short timeout so it disappears if user comes back.
-			notify.Show(0, title, msg, s.cfg.IdleWarningSeconds)
+			if err := notify.Show(title, msg, warningSeconds); err != nil {
+				mylog.Info("Idle warning notification failed: %v", err)
+			}
 		},
 		// onTrigger
 		func() {
-			executeAction(action, lang)
+			s.post(func() {
+				if err := executeAction(action); err != nil {
+					s.showError(actionTranslationKey(action), err)
+				}
+			})
 		},
 		0, // default poll interval
 	)
 	s.mon.Start()
-	s.monMu.Unlock()
-	s.cfgMu.RUnlock()
 }
 
 func (s *trayState) stopMonitor() {
-	s.monMu.Lock()
-	defer s.monMu.Unlock()
 	if s.mon != nil {
 		s.mon.Stop()
 		s.mon = nil
 	}
+}
+
+func (s *trayState) reconcileRuntime() {
+	wantsNoSleep := noSleepRequested(s.cfg, s.processNoSleep)
+	if wantsNoSleep && !s.batteryBlocked {
+		s.stopMonitor()
+		nosleep.Enable(s.cfg.KeepScreenOn)
+		return
+	}
+
+	nosleep.Disable()
+	if s.cfg.IdleTimeoutMinutes > 0 {
+		if s.mon == nil {
+			s.startMonitor()
+		}
+	} else {
+		s.stopMonitor()
+	}
+}
+
+func noSleepRequested(cfg config.Config, processRequested bool) bool {
+	return cfg.NoSleepEnabled || processRequested
 }
 
 // ---- hotkeys ----------------------------------------------------------
@@ -550,17 +630,27 @@ func (s *trayState) stopMonitor() {
 func (s *trayState) startHotkeys() {
 	s.stopHotkeys()
 	mgr := hotkey.NewManager(hotkey.DefaultBindings(), hotkey.Callbacks{
-		OnSleep:         func() { actions.Sleep() },
-		OnLock:          func() { actions.Lock() },
-		OnToggleNoSleep: s.toggleNoSleep,
+		OnSleep: func() {
+			s.post(func() {
+				if err := actions.Sleep(); err != nil {
+					s.showError("menu_sleep", err)
+				}
+			})
+		},
+		OnLock: func() {
+			s.post(func() {
+				if err := actions.Lock(); err != nil {
+					s.showError("menu_lock", err)
+				}
+			})
+		},
+		OnToggleNoSleep: func() { s.post(func() { s.toggleNoSleep() }) },
 	})
 	s.hotkeyMgr = mgr
-	go func() {
-		failed := mgr.Start()
-		if len(failed) > 0 {
-			s.showHotkeyConflict(failed)
-		}
-	}()
+	failed := mgr.Start()
+	if len(failed) > 0 {
+		s.showHotkeyConflict(failed)
+	}
 }
 
 func (s *trayState) stopHotkeys() {
@@ -583,17 +673,17 @@ func (s *trayState) showHotkeyConflict(failed hotkey.Failed) {
 }
 
 func (s *trayState) toggleNoSleep() {
-	if nosleep.IsEnabled() {
-		nosleep.Disable()
+	if s.cfg.NoSleepEnabled {
 		s.cfg.NoSleepEnabled = false
 	} else {
-		nosleep.Enable(true)
 		s.cfg.NoSleepEnabled = true
-		mylog.Info("NoSleep toggled: enabled=%v screen=%v", nosleep.IsEnabled(), nosleep.IsKeepingScreenOn())
+		s.cfg.IdleTimeoutMinutes = 0
 	}
+	s.reconcileRuntime()
+	mylog.Info("NoSleep toggled: enabled=%v keep_screen_on=%v", nosleep.IsEnabled(), nosleep.IsKeepingScreenOn())
 	s.syncChecks()
 	s.updateIcon()
-	config.Save(s.cfg)
+	s.saveConfig()
 }
 
 // applyCapabilities disables menu items for sleep/hibernate if the
@@ -637,24 +727,22 @@ func (s *trayState) startProcessWatcher() {
 	s.procWatch = processwatcher.New(s.cfg.ProcessWatchList,
 		processwatcher.Callbacks{
 			OnEnable: func() {
-				mylog.Info("ProcessWatch: watched app detected, enabling NoSleep")
-				if !nosleep.IsEnabled() {
-					nosleep.Enable(true)
-					s.cfg.NoSleepEnabled = true
-					s.cfg.IdleTimeoutMinutes = 0
-					s.stopMonitor()
+				s.post(func() {
+					mylog.Info("Process watcher: watched app detected, requesting NoSleep")
+					s.processNoSleep = true
+					s.reconcileRuntime()
 					s.syncChecks()
 					s.updateIcon()
-				}
+				})
 			},
 			OnDisable: func() {
-				mylog.Info("ProcessWatch: no watched apps running, disabling NoSleep")
-				if nosleep.IsEnabled() {
-					nosleep.Disable()
-					s.cfg.NoSleepEnabled = false
+				s.post(func() {
+					mylog.Info("Process watcher: no watched apps running, releasing NoSleep")
+					s.processNoSleep = false
+					s.reconcileRuntime()
 					s.syncChecks()
 					s.updateIcon()
-				}
+				})
 			},
 		}, 0)
 	s.procWatch.Start()
@@ -665,77 +753,102 @@ func (s *trayState) stopProcessWatcher() {
 		s.procWatch.Stop()
 		s.procWatch = nil
 	}
+	s.processNoSleep = false
 }
 
 // ---- battery awareness ------------------------------------------------
 
 // batteryLoop periodically checks power state and auto-disables NoSleep
 // when the system switches to battery or drops below the configured threshold.
-// 定期检查电源状态，在切换到电池供电或低于阈值时自动禁用 NoSleep。
 func (s *trayState) batteryLoop() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	for range ticker.C {
-		s.cfgMu.RLock()
-		onBattery := !s.cfg.NoSleepOnBattery && power.OnBattery() && nosleep.IsEnabled()
-		ps := power.GetStatus()
-		lowBattery := ps.Battery && ps.Percent > 0 && ps.Percent < s.cfg.NoSleepBatteryThreshold && nosleep.IsEnabled()
-		s.cfgMu.RUnlock()
-
-		if onBattery || lowBattery {
-			mylog.Info("Battery: auto-disabling NoSleep (onBattery=%v lowBattery=%v)", onBattery, lowBattery)
-			nosleep.Disable()
-			s.cfg.NoSleepEnabled = false
-			s.syncChecks()
-			s.updateIcon()
-		}
+		s.post(func() { s.refreshBatteryPolicy() })
 	}
+}
+
+func (s *trayState) refreshBatteryPolicy() {
+	ps := power.GetStatus()
+	blocked := batteryPolicyBlocks(s.cfg, ps)
+	if blocked == s.batteryBlocked {
+		return
+	}
+	s.batteryBlocked = blocked
+	mylog.Info("Battery policy changed: nosleep_blocked=%v", blocked)
+	s.reconcileRuntime()
+	s.syncChecks()
+	s.updateIcon()
+}
+
+func batteryPolicyBlocks(cfg config.Config, status power.Status) bool {
+	if !status.Valid || !status.Battery || status.ACLine {
+		return false
+	}
+	return !cfg.NoSleepOnBattery ||
+		(status.Percent > 0 && status.Percent < cfg.NoSleepBatteryThreshold)
 }
 
 // ---- IPC handler ------------------------------------------------------
 
 func (s *trayState) handleIPC(cmd string) string {
+	return s.call(func() string { return s.handleIPCState(cmd) })
+}
+
+func (s *trayState) handleIPCState(cmd string) string {
 	mylog.Info("IPC command received: %s", cmd)
 	switch cmd {
 	case "sleep":
-		actions.Sleep()
+		if err := actions.Sleep(); err != nil {
+			return "err: " + err.Error()
+		}
 		return "ok"
 	case "hibernate":
-		actions.Hibernate()
+		if err := actions.Hibernate(); err != nil {
+			return "err: " + err.Error()
+		}
 		return "ok"
 	case "shutdown":
-		actions.Shutdown()
+		if err := actions.Shutdown(); err != nil {
+			return "err: " + err.Error()
+		}
 		return "ok"
 	case "lock":
-		actions.Lock()
+		if err := actions.Lock(); err != nil {
+			return "err: " + err.Error()
+		}
 		return "ok"
 
 	case "nosleep:on":
-		nosleep.Enable(false)
 		s.cfg.NoSleepEnabled = true
 		s.cfg.KeepScreenOn = false
 		s.cfg.IdleTimeoutMinutes = 0
-		s.stopMonitor()
+		s.reconcileRuntime()
 		s.syncChecks()
 		s.updateIcon()
-		config.Save(s.cfg)
+		if err := s.saveConfigErr(); err != nil {
+			return "err: " + err.Error()
+		}
 		return "ok"
 	case "nosleep:on:screen":
-		nosleep.Enable(true)
 		s.cfg.NoSleepEnabled = true
 		s.cfg.KeepScreenOn = true
 		s.cfg.IdleTimeoutMinutes = 0
-		s.stopMonitor()
+		s.reconcileRuntime()
 		s.syncChecks()
 		s.updateIcon()
-		config.Save(s.cfg)
+		if err := s.saveConfigErr(); err != nil {
+			return "err: " + err.Error()
+		}
 		return "ok"
 	case "nosleep:off":
-		nosleep.Disable()
 		s.cfg.NoSleepEnabled = false
+		s.reconcileRuntime()
 		s.syncChecks()
 		s.updateIcon()
-		config.Save(s.cfg)
+		if err := s.saveConfigErr(); err != nil {
+			return "err: " + err.Error()
+		}
 		return "ok"
 	case "nosleep:toggle":
 		s.toggleNoSleep()
@@ -747,27 +860,33 @@ func (s *trayState) handleIPC(cmd string) string {
 		if s.cfg.IdleTimeoutMinutes <= 0 {
 			s.cfg.IdleTimeoutMinutes = 30
 		}
-		if nosleep.IsEnabled() {
-			nosleep.Disable()
-			s.cfg.NoSleepEnabled = false
-		}
-		s.startMonitor()
+		s.cfg.NoSleepEnabled = false
+		s.reconcileRuntime()
 		s.syncChecks()
 		s.updateIcon()
-		config.Save(s.cfg)
+		if err := s.saveConfigErr(); err != nil {
+			return "err: " + err.Error()
+		}
 		return "ok"
 	case "monitor:off":
 		s.cfg.IdleTimeoutMinutes = 0
-		s.stopMonitor()
+		s.reconcileRuntime()
 		s.syncChecks()
 		s.updateIcon()
-		config.Save(s.cfg)
+		if err := s.saveConfigErr(); err != nil {
+			return "err: " + err.Error()
+		}
 		return "ok"
 	case "monitor:status":
 		if s.mon != nil {
-			return fmt.Sprintf("monitor: %d min → %s", s.cfg.IdleTimeoutMinutes, string(s.cfg.IdleAction))
+			value := fmt.Sprintf(
+				i18n.T(s.lang, "status_monitor_active"),
+				s.cfg.IdleTimeoutMinutes,
+				i18n.T(s.lang, actionTranslationKey(s.cfg.IdleAction)),
+			)
+			return s.statusLine("status_monitor", value)
 		}
-		return "monitor: disabled"
+		return s.statusLine("status_monitor", i18n.T(s.lang, "status_disabled"))
 
 	case "status":
 		return s.fmtStatus()
@@ -776,34 +895,44 @@ func (s *trayState) handleIPC(cmd string) string {
 		return "pong"
 
 	case "config:reload":
-		mylog.Info("IPC: config reload requested")
+		mylog.Info("IPC config reload requested")
 		newCfg, err := config.Load()
 		if err != nil {
 			return "err: " + err.Error()
 		}
 		s.cfg = newCfg
+		if enabled, statusErr := autostart.IsEnabled(); statusErr == nil {
+			s.cfg.AutostartEnabled = enabled
+			if enabled {
+				s.mAutostart.Check()
+			} else {
+				s.mAutostart.Uncheck()
+			}
+		}
 		s.stopMonitor()
 		s.stopHotkeys()
 		s.stopProcessWatcher()
+		s.stopThemeScheduler()
 		nosleep.Disable()
 		// Config compatibility: if both NoSleep and idle monitor are enabled,
 		// resolve the conflict — NoSleep takes priority.
-		// 配置兼容：若两者均启用，NoSleep 优先，自动禁用空闲监测。
 		if s.cfg.NoSleepEnabled && s.cfg.IdleTimeoutMinutes > 0 {
 			s.cfg.IdleTimeoutMinutes = 0
 		}
-		if s.cfg.IdleTimeoutMinutes > 0 {
-			s.startMonitor()
-		}
-		if s.cfg.NoSleepEnabled {
-			nosleep.Enable(true)
-		}
+		s.lang = s.cfg.Language
+		s.applyLanguage()
+		s.batteryBlocked = false
+		s.refreshBatteryPolicy()
 		if s.cfg.HotkeysEnabled {
 			s.startHotkeys()
 		}
 		if s.cfg.ProcessWatchEnabled && len(s.cfg.ProcessWatchList) > 0 {
 			s.startProcessWatcher()
 		}
+		if s.cfg.ThemeSwitchEnabled {
+			s.startThemeScheduler()
+		}
+		s.reconcileRuntime()
 		s.syncChecks()
 		s.updateIcon()
 		return "ok"
@@ -815,68 +944,88 @@ func (s *trayState) handleIPC(cmd string) string {
 
 func (s *trayState) fmtNoSleepStatus() string {
 	if nosleep.IsEnabled() {
-		scr := ""
+		value := i18n.T(s.lang, "status_enabled")
 		if nosleep.IsKeepingScreenOn() {
-			scr = " (keep screen on)"
+			value = i18n.T(s.lang, "status_enabled_keep_screen")
 		}
-		return "nosleep: enabled" + scr
+		return s.statusLine("status_nosleep", value)
 	}
-	return "nosleep: disabled"
+	return s.statusLine("status_nosleep", i18n.T(s.lang, "status_disabled"))
 }
 
 func (s *trayState) fmtStatus() string {
-	ns := "disabled"
+	ns := i18n.T(s.lang, "status_disabled")
 	if nosleep.IsEnabled() {
-		ns = "enabled"
+		ns = i18n.T(s.lang, "status_enabled")
 		if nosleep.IsKeepingScreenOn() {
-			ns += " (keep screen on)"
+			ns = i18n.T(s.lang, "status_enabled_keep_screen")
 		}
 	}
-	mon := "disabled"
+	mon := i18n.T(s.lang, "status_disabled")
 	if s.mon != nil {
-		mon = fmt.Sprintf("%d min → %s", s.cfg.IdleTimeoutMinutes, string(s.cfg.IdleAction))
+		mon = fmt.Sprintf(
+			i18n.T(s.lang, "status_monitor_active"),
+			s.cfg.IdleTimeoutMinutes,
+			i18n.T(s.lang, actionTranslationKey(s.cfg.IdleAction)),
+		)
 	}
 	ps := power.GetStatus()
-	pow := "AC"
-	if ps.Battery {
-		pow = fmt.Sprintf("Battery %d%%", ps.Percent)
+	pow := i18n.T(s.lang, "status_unknown")
+	if ps.Valid && ps.ACLine {
+		pow = i18n.T(s.lang, "status_ac_power")
+	} else if ps.Valid && ps.Battery && ps.Percent >= 0 {
+		pow = fmt.Sprintf(i18n.T(s.lang, "status_battery"), ps.Percent)
 	}
 
-	idle := "unknown"
+	idle := i18n.T(s.lang, "status_unknown")
 	if d, err := monitor.IdleDuration(); err == nil {
-		idle = d.Round(time.Second).String()
+		idle = i18n.FormatDuration(s.lang, d)
 	}
 
-	hk := "disabled"
+	hk := i18n.T(s.lang, "status_disabled")
 	if s.cfg.HotkeysEnabled {
-		hk = "enabled"
+		hk = i18n.T(s.lang, "status_enabled")
 	}
 
-	return fmt.Sprintf(
-		"NoSleep:      %s\nIdle Monitor: %s\nPower:        %s\nIdle time:    %s\nHotkeys:      %s",
-		ns, mon, pow, idle, hk,
-	)
+	return strings.Join([]string{
+		s.statusLine("status_tray", i18n.T(s.lang, "status_running")),
+		s.statusLine("status_nosleep", ns),
+		s.statusLine("status_monitor", mon),
+		s.statusLine("status_power", pow),
+		s.statusLine("status_idle_time", idle),
+		s.statusLine("status_hotkeys", hk),
+	}, "\n")
+}
+
+func (s *trayState) statusLine(labelKey, value string) string {
+	return fmt.Sprintf(i18n.T(s.lang, "status_line"), i18n.T(s.lang, labelKey), value)
 }
 
 // ---- helpers ----------------------------------------------------------
 
-func executeAction(a config.Action, lang string) {
+func executeAction(a config.Action) error {
 	switch a {
 	case config.ActionSleep:
-		actions.Sleep()
+		return actions.Sleep()
 	case config.ActionHibernate:
-		actions.Hibernate()
+		return actions.Hibernate()
 	case config.ActionShutdown:
-		actions.Shutdown()
+		return actions.Shutdown()
 	case config.ActionLock:
-		actions.Lock()
+		return actions.Lock()
+	default:
+		return fmt.Errorf("unsupported action %q", a)
 	}
+}
+
+func actionTranslationKey(a config.Action) string {
+	return "menu_action_" + string(a)
 }
 
 func showAboutDialog(lang string) {
 	dialog.Info(
-		i18n.T(lang, "app_title"),
-		i18n.T(lang, "app_title"),
+		i18n.T(lang, "about_title"),
+		i18n.T(lang, "about_heading"),
 		i18n.T(lang, "about_text"),
 	)
 }
@@ -891,19 +1040,41 @@ func (s *trayState) registerLabel(item *systray.MenuItem, key string) {
 func (s *trayState) switchLanguage(lang string) {
 	s.lang = lang
 	s.cfg.Language = lang
+	s.applyLanguage()
+	mylog.Info("Language switched: %s", lang)
+	s.saveConfig()
+}
+
+func (s *trayState) applyLanguage() {
 	T := func(key string) string { return i18n.T(s.lang, key) }
 	for _, li := range s.labelItems {
 		li.item.SetTitle(T(li.key))
-		mylog.Info("Language switched: %s", lang)
 	}
 	systray.SetTitle(T("app_title"))
 	s.updateIcon()
-	config.Save(s.cfg)
+}
+
+func (s *trayState) saveConfigErr() error {
+	if err := config.Save(s.cfg); err != nil {
+		mylog.Info("Config save failed: %v", err)
+		return err
+	}
+	if s.callbacks.OnConfigChanged != nil {
+		s.callbacks.OnConfigChanged(s.cfg)
+	}
+	return nil
+}
+
+func (s *trayState) saveConfig() {
+	if err := s.saveConfigErr(); err != nil {
+		msg := fmt.Sprintf(i18n.T(s.lang, "msg_config_save_failed"), err.Error())
+		dialog.Warn(i18n.T(s.lang, "app_title"), "", msg)
+	}
 }
 
 func (s *trayState) showError(actionKey string, err error) {
 	actionName := i18n.T(s.lang, actionKey)
-	msg := fmt.Sprintf(i18n.T(s.lang, "msg_action_failed"), actionName+": "+err.Error())
+	msg := fmt.Sprintf(i18n.T(s.lang, "msg_action_failed"), actionName, err.Error())
 	dialog.Warn(i18n.T(s.lang, "app_title"), "", msg)
 }
 
@@ -936,19 +1107,20 @@ func (s *trayState) wireThemeSubmenus() {
 		it := item
 		go func() {
 			for range it.ClickedCh {
-				s.cfg.ThemeLightTime = lightVals[idx]
-				for j, ti := range s.themeLightItems {
-					if j == idx {
-						ti.Check()
-					} else {
-						ti.Uncheck()
+				s.post(func() {
+					s.cfg.ThemeLightTime = lightVals[idx]
+					for j, ti := range s.themeLightItems {
+						if j == idx {
+							ti.Check()
+						} else {
+							ti.Uncheck()
+						}
 					}
-				}
-				s.stopThemeScheduler()
-				if s.cfg.ThemeSwitchEnabled {
-					s.startThemeScheduler()
-				}
-				config.Save(s.cfg)
+					if s.cfg.ThemeSwitchEnabled {
+						s.startThemeScheduler()
+					}
+					s.saveConfig()
+				})
 			}
 		}()
 	}
@@ -959,19 +1131,20 @@ func (s *trayState) wireThemeSubmenus() {
 		it := item
 		go func() {
 			for range it.ClickedCh {
-				s.cfg.ThemeDarkTime = darkVals[idx]
-				for j, ti := range s.themeDarkItems {
-					if j == idx {
-						ti.Check()
-					} else {
-						ti.Uncheck()
+				s.post(func() {
+					s.cfg.ThemeDarkTime = darkVals[idx]
+					for j, ti := range s.themeDarkItems {
+						if j == idx {
+							ti.Check()
+						} else {
+							ti.Uncheck()
+						}
 					}
-				}
-				s.stopThemeScheduler()
-				if s.cfg.ThemeSwitchEnabled {
-					s.startThemeScheduler()
-				}
-				config.Save(s.cfg)
+					if s.cfg.ThemeSwitchEnabled {
+						s.startThemeScheduler()
+					}
+					s.saveConfig()
+				})
 			}
 		}()
 	}

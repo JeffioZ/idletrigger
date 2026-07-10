@@ -11,8 +11,10 @@ import (
 	"github.com/JeffioZ/idletrigger/internal/config"
 	"github.com/JeffioZ/idletrigger/internal/darkmode"
 	"github.com/JeffioZ/idletrigger/internal/dpi"
+	"github.com/JeffioZ/idletrigger/internal/i18n"
 	mylog "github.com/JeffioZ/idletrigger/internal/log"
 	"github.com/JeffioZ/idletrigger/internal/tray"
+	"github.com/JeffioZ/idletrigger/internal/version"
 )
 
 func main() {
@@ -30,7 +32,7 @@ func main() {
 
 	cfg, err := config.Load()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "warning: config load failed, using defaults:", err)
+		fmt.Fprintln(os.Stderr, i18n.T("auto", "warning_config_defaults"), err)
 		cfg = config.DefaultConfig()
 	}
 
@@ -44,7 +46,7 @@ func main() {
 	exePath, _ := os.Executable()
 	mylog.Init(cfg.LoggingEnabled, filepath.Dir(exePath))
 	defer mylog.Close()
-	mylog.Info("IdleTrigger starting (GUI mode)")
+	mylog.Info("IdleTrigger starting: version=%s mode=GUI", version.Value)
 
 	tray.Run(cfg, tray.Callbacks{})
 }

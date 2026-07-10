@@ -13,6 +13,3 @@ var (
 	//go:embed icon_active.ico
 	IconActive []byte
 )
-
-// IconDefault is also kept for backwards-compatibility as the legacy name.
-var IconData = IconDefault

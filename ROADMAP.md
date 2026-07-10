@@ -1,0 +1,48 @@
+# Roadmap / 开发计划
+
+## 发布检查清单
+
+- [ ] `gofmt -l .` 无输出
+- [ ] `go test ./...` 通过
+- [ ] `go vet ./...` 无警告
+- [ ] 386 / amd64 Windows GUI 构建通过
+- [ ] 两种架构 EXE 均包含应用图标和 manifest
+- [ ] CLI、托盘菜单、IPC、热键、空闲预警做一次人工冒烟测试
+
+## v1.3.x 稳定性整理
+
+- [x] 安全关机：移除 `EWX_FORCE`，保留应用保存/取消机会
+- [x] NoSleep 固定 OS 线程设置与清理
+- [x] 托盘气泡通知使用真实 HWND 与 icon ID
+- [x] tray 状态事件串行化，消除配置并发写入
+- [x] 用户与进程监测的 NoSleep 请求分离
+- [x] 电池策略阻断后可自动恢复原请求
+- [x] IPC 限定当前登录会话并返回真实动作错误
+- [x] 热键窗口类和 Stop 清理生命周期修复
+- [x] 主题电池模式振荡、配置重载和多显示器全屏修复
+- [x] 配置校验、原子保存和日志轮转
+- [x] 内置最小 Windows systray 实现，内部错误统一接入应用日志
+- [x] 386 / amd64 双资源和发布构建
+- [x] 核心配置、主题、IPC、monitor、NoSleep 状态测试
+
+## 后续计划
+
+### 高优先级
+
+- [ ] Windows 实机自动化冒烟测试：托盘、通知、热键、IPC
+- [ ] CI 增加 race detector（需配置 MinGW-w64）和 `govulncheck`
+- [ ] 用 `PowerCreateRequest/PowerSetRequest` 替换旧的线程执行状态 API
+
+### 中优先级
+
+- [ ] CLI `status --json` 结构化输出
+- [ ] 空闲动作预警支持明确的取消入口
+- [ ] 日出日落偏移量配置
+- [ ] 发布制品签名、Winget / Scoop 分发
+
+### 低优先级
+
+- [ ] 有明确用户需求时评估独立的 Windows 7 legacy 构建
+- [ ] 托盘左键快捷动作
+- [ ] 更多语言
+- [ ] 安装包（NSIS / WiX）

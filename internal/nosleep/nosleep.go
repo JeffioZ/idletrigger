@@ -1,18 +1,11 @@
 // Package nosleep prevents Windows from automatically activating sleep mode
 // or turning off the display via the Win32 SetThreadExecutionState API.
-//
-// Usage:
-//
-//	nosleep.Enable(true)   // prevent sleep + keep screen on
-//	nosleep.Enable(false)  // prevent sleep only, screen may turn off
-//	nosleep.Disable()      // restore normal power behaviour
 package nosleep
 
 import (
+	"runtime"
 	"sync"
 	"sync/atomic"
-	"time"
-	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -22,87 +15,99 @@ var (
 	enabled  atomic.Bool
 	keepScr  atomic.Bool
 
-	stopCh chan struct{}
 	mu     sync.Mutex
+	worker *executionWorker
 )
 
+type executionWorker struct {
+	updates chan updateRequest
+	stop    chan chan struct{}
+}
+
+type updateRequest struct {
+	keepScreen bool
+	done       chan struct{}
+}
+
 const (
-	// win32 execution-state flags
 	esContinuous      = 0x80000000
 	esSystemRequired  = 0x00000001
 	esDisplayRequired = 0x00000002
 )
 
-// Enable activates NoSleep.  keepScreenOn controls whether the display is
-// also kept awake.  Safe to call multiple times — subsequent calls update
-// the screen setting.
+// Enable activates NoSleep. Calls are serialized onto one locked OS thread,
+// because Windows tracks continuous execution requests per calling thread.
 func Enable(keepScreenOn bool) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	keepScr.Store(keepScreenOn)
-
-	if enabled.Swap(true) {
-		// Already running — just update the flags at the next tick.
-		return
+	if worker == nil {
+		worker = &executionWorker{
+			updates: make(chan updateRequest),
+			stop:    make(chan chan struct{}),
+		}
+		ready := make(chan struct{})
+		go worker.loop(keepScreenOn, ready)
+		<-ready
+	} else {
+		done := make(chan struct{})
+		worker.updates <- updateRequest{keepScreen: keepScreenOn, done: done}
+		<-done
 	}
 
-	stopCh = make(chan struct{})
-	go loop()
+	keepScr.Store(keepScreenOn)
+	enabled.Store(true)
 }
 
-// Disable deactivates NoSleep and restores normal system power behaviour.
+// Disable clears the request on the same OS thread that created it.
 func Disable() {
 	mu.Lock()
 	defer mu.Unlock()
 
-	if !enabled.Swap(false) {
-		return // already disabled
+	if worker == nil {
+		enabled.Store(false)
+		keepScr.Store(false)
+		return
 	}
 
-	close(stopCh)
-	stopCh = nil
-
-	// Reset execution state — allow sleep again.
-	proc := kernel32.NewProc("SetThreadExecutionState")
-	proc.Call(uintptr(esContinuous))
+	done := make(chan struct{})
+	worker.stop <- done
+	<-done
+	worker = nil
+	enabled.Store(false)
+	keepScr.Store(false)
 }
 
-// IsEnabled reports whether NoSleep is currently active.
-func IsEnabled() bool {
-	return enabled.Load()
-}
+func IsEnabled() bool { return enabled.Load() }
 
-// IsKeepingScreenOn reports whether the display is being kept on.
-func IsKeepingScreenOn() bool {
-	return keepScr.Load()
-}
+func IsKeepingScreenOn() bool { return keepScr.Load() }
 
-func loop() {
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
+func (w *executionWorker) loop(initialKeepScreen bool, ready chan struct{}) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 
-	// Fire immediately on start.
-	tick()
+	setExecutionState(initialKeepScreen)
+	close(ready)
 
 	for {
 		select {
-		case <-stopCh:
+		case req := <-w.updates:
+			setExecutionState(req.keepScreen)
+			close(req.done)
+		case done := <-w.stop:
+			proc := kernel32.NewProc("SetThreadExecutionState")
+			proc.Call(uintptr(esContinuous))
+			close(done)
 			return
-		case <-ticker.C:
-			tick()
 		}
 	}
 }
 
-func tick() {
+func setExecutionState(keepScreen bool) {
 	flags := uintptr(esContinuous | esSystemRequired)
-	if keepScr.Load() {
+	if keepScreen {
 		flags |= esDisplayRequired
 	}
 	proc := kernel32.NewProc("SetThreadExecutionState")
 	proc.Call(flags)
-
-	// Keep Go's GC from collecting the callback while the call is in flight.
-	_ = unsafe.Sizeof(0)
 }

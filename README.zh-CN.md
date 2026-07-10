@@ -22,17 +22,20 @@
 - **进程关联** — 检测到指定应用运行时自动启用保持唤醒
 - **IPC 命名管道** — CLI 与运行中的托盘实例通信
 - **能力检测** — 不可用的功能（如休眠）自动禁用
-- **单文件 EXE** — 全静态链接；复制即用，免安装
+- **单文件 EXE** — 自包含，仅依赖 Windows 系统 DLL；复制即用，免安装
 - **明文配置** — `IdleTrigger.toml` 位于 EXE 同目录
 - **多语言** — 中文 / English。默认跟随系统语言（中文 Windows 显示中文，其余显示英文），托盘菜单可手动切换
 - **DPI 和深色模式** — Per-Monitor V2，原生深色菜单和对话框
-- **系统支持**：Windows 7 及以上，32 位 / 64 位。32 位 EXE 可在两种架构上运行
+- **系统支持**：Windows 10 / Server 2016 及以上，提供 32 位和 64 位构建
 
 ## 快速开始
 
-1. 从 [Releases](https://github.com/JeffioZ/idletrigger/releases) 下载 `IdleTrigger.exe`
-2. 双击运行 → 托盘出现石板蓝色电源图标
+1. 从 [Releases](https://github.com/JeffioZ/idletrigger/releases) 下载 `IdleTrigger-x64.exe`
+2. 双击运行 → 托盘出现蓝色待命状态图标
 3. 右键配置；或直接编辑 `IdleTrigger.toml`
+
+`IdleTrigger-x64.exe` 是原生 64 位构建，推荐大多数用户使用；
+`IdleTrigger-x86.exe` 是 32 位兼容构建。两者功能一致。
 
 ## CLI 命令行用法
 
@@ -63,7 +66,9 @@ IdleTrigger version               显示版本
 不带参数运行即启动系统托盘 GUI 模式。
 
 **AI agent / 脚本集成**：托盘运行时，`nosleep` 和 `monitor` 命令
-通过命名管道（`\\.\pipe\IdleTrigger`）转发。一次性动作直接执行。
+通过当前登录会话专用的命名管道（`\\.\pipe\IdleTrigger-<session>`）转发。
+`nosleep` 和 `monitor` 属于持续状态控制，执行时需要托盘进程正在运行。
+一次性动作直接执行。
 
 ## 配置文件 (`IdleTrigger.toml`)
 
@@ -86,11 +91,10 @@ hotkeys_enabled = false            # Win+Shift+S/L/N
 process_watch_enabled = false      # 进程关联自动唤醒
 process_watch_list = []            # 例如 ["chrome.exe", "powerpnt.exe"]
 
-start_minimized = true
 logging_enabled = false            # 调试日志输出
 
 theme_switch_enabled = false       # 自动主题切换
-theme_mode = "sunrise"             # "fixed" 或 "sunrise"
+theme_mode = "fixed"               # "fixed" 或 "sunrise"
 theme_light_time = "07:00"
 theme_dark_time = "19:00"
 theme_latitude = 0                 # 0 = 根据时区自动检测
@@ -98,20 +102,25 @@ theme_longitude = 0
 theme_dark_on_battery = true
 theme_skip_fullscreen = true
 
-autostart_enabled = false
 ```
+
+开机自启保存在当前用户的 Windows Run 注册表项中，仅通过托盘菜单或 CLI
+管理，不属于 TOML 配置。启用日志后，程序优先在 EXE 同目录写入
+`IdleTrigger.log`，目录不可写时回退到 `%TEMP%`；达到 5 MiB 后轮转，并保留
+一份 `IdleTrigger.log.1`。
 
 ## 项目结构
 
 ```
 IdleTrigger/
 ├── main.go                          # 入口：CLI / GUI 双模式调度
+├── IdleTrigger.example.toml         # 完整配置示例
 ├── assets/
-│   ├── app.ico                      # EXE 图标（16/32/48/256）
+│   ├── app.ico                      # EXE 图标（16–256，共 9 个原生尺寸）
 │   ├── icon.go                      # go:embed 内嵌桥接
-│   ├── icon_default.ico             # 托盘：待命状态（石板蓝）
-│   ├── icon_monitor.ico             # 托盘：监测中（琥珀色）
-│   ├── icon_active.ico              # 托盘：保持唤醒中（绿色）
+│   ├── icon_default.ico             # 托盘：待命闪电（蓝色）
+│   ├── icon_monitor.ico             # 托盘：监测闪电（琥珀色）
+│   ├── icon_active.ico              # 托盘：保持唤醒闪电（绿色）
 │   ├── manifest.xml                 # DPI 和深色模式清单
 ├── scripts/
 │   └── gen_icon.py                  # 图标生成脚本（仅开发用）
@@ -133,8 +142,13 @@ IdleTrigger/
 │   ├── notify/notify.go             # 气泡通知
 │   ├── power/power.go               # 电池状态 + 睡眠能力检测
 │   ├── processwatcher/processwatcher.go  # 进程列表监测
+│   ├── systray/                      # 本地 Windows 托盘实现（MIT）
+│   ├── themeswitch/themeswitch.go   # 固定时间/日出日落主题调度
 │   └── tray/tray.go                 # 系统托盘菜单 + IPC 服务端
 ├── rsrc_windows_386.syso            # 编译后的资源文件
+├── rsrc_windows_amd64.syso          # 64 位编译资源
+├── .github/workflows/release.yml    # 双架构验证与发布
+├── ROADMAP.md                       # 发布清单与后续计划
 ├── go.mod  go.sum  LICENSE  .gitattributes  .gitignore
 ├── README.md  README.zh-CN.md  BUILD.md  BUILD.zh-CN.md
 ```
@@ -148,21 +162,27 @@ IdleTrigger/
 ─────────────────
 空闲监测
   超时时间 ▸  5 / 10 / 30 / 60 / 120 分钟
-  触发动作 ▸  睡眠 / 休眠 / 关机 / 锁屏
+  超时动作 ▸  睡眠 / 休眠 / 关机 / 锁屏
+─────────────────
+自动主题
+  浅色时间 ▸  06:00 / 07:00 / 08:00
+  深色时间 ▸  18:00 / 19:00 / 20:00 / 21:00
+  切换深浅色
+  刷新主题
 ─────────────────
 全局热键
 开机自启
 语言切换 ▸  English / 简体中文
 ─────────────────
 编辑配置
-软件信息
+关于 IdleTrigger
 ─────────────────
 退出
 ```
 
 ## 致谢
 
-- [getlantern/systray](https://github.com/getlantern/systray) — 跨平台系统托盘库
+- [getlantern/systray](https://github.com/getlantern/systray) — Windows 托盘实现基于 v1.2.2（MIT）调整，并将内部错误接入 IdleTrigger 日志
 - [BurntSushi/toml](https://github.com/BurntSushi/toml) — Go 语言 TOML 解析器
 - [golang.org/x/sys](https://golang.org/x/sys) — Windows API 绑定
 

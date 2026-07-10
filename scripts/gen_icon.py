@@ -1,108 +1,204 @@
 #!/usr/bin/env python3
-"""Generate IdleTrigger application and tray icons."""
-import struct, sys, os, math
+"""Generate the IdleTrigger application and high-contrast tray icons."""
+
+import binascii
+import math
+import os
+import struct
+import sys
+import zlib
+
 
 OUT = sys.argv[1] if len(sys.argv) > 1 else "assets"
+APP_SIZES = [16, 20, 24, 32, 40, 48, 64, 128, 256]
+TRAY_SIZES = [16, 20, 24, 32]
 
-def make_icon(filename, r, g, b, sizes=[16, 32, 48, 256]):
-    """Generate a multi-resolution .ico file."""
-    images = []
-    for sz in sizes:
-        pixels, and_mask = render_icon(sz, r, g, b)
-        bmp_sz = 40 + len(pixels) + len(and_mask)
-        images.append((sz, bmp_sz, pixels, and_mask))
 
-    # ICO header
-    data = struct.pack('<HHH', 0, 1, len(images))
-    # Entries
-    offset = 6 + 16 * len(images)
-    for sz, bmp_sz, _, _ in images:
-        h = sz if sz < 256 else 0
-        w = sz if sz < 256 else 0
-        data += struct.pack('<BBBBHHII', w, h, 0, 0, 1, 32, bmp_sz, offset)
-        offset += bmp_sz
-    # Image data
-    for sz, _, pixels, and_mask in images:
-        bmp_h = sz * 2  # ICO stores double height
-        data += struct.pack('<IiiHHIIiiii', 40, sz, bmp_h, 1, 32, 0, len(pixels), 0, 0, 0, 0)
-        data += pixels + and_mask
+def inside_rounded_rect(x, y, left, top, right, bottom, radius):
+    """Return whether a normalized point is inside a rounded rectangle."""
+    px = min(max(x, left + radius), right - radius)
+    py = min(max(y, top + radius), bottom - radius)
+    return (x - px) ** 2 + (y - py) ** 2 <= radius**2
+
+
+def inside_polygon(x, y, points):
+    """Even-odd point-in-polygon test."""
+    inside = False
+    previous = points[-1]
+    for current in points:
+        x1, y1 = previous
+        x2, y2 = current
+        if (y1 > y) != (y2 > y):
+            crossing = (x2 - x1) * (y - y1) / (y2 - y1) + x1
+            if x < crossing:
+                inside = not inside
+        previous = current
+    return inside
+
+
+def mix(a, b, amount):
+    return tuple(round(a[i] * (1 - amount) + b[i] * amount) for i in range(3))
+
+
+def render(size, sampler):
+    """Render one antialiased frame as top-down RGBA pixels."""
+    supersample = 4 if size <= 64 else 3
+    pixels = bytearray()
+
+    for py in range(size):
+        for px in range(size):
+            alpha_sum = 0
+            red_sum = green_sum = blue_sum = 0
+            for sy in range(supersample):
+                for sx in range(supersample):
+                    x = (px + (sx + 0.5) / supersample) / size
+                    y = (py + (sy + 0.5) / supersample) / size
+                    red, green, blue, alpha = sampler(x, y)
+                    alpha_sum += alpha
+                    red_sum += red * alpha
+                    green_sum += green * alpha
+                    blue_sum += blue * alpha
+
+            count = supersample * supersample
+            alpha = round(alpha_sum / count)
+            if alpha_sum:
+                red = round(red_sum / alpha_sum)
+                green = round(green_sum / alpha_sum)
+                blue = round(blue_sum / alpha_sum)
+            else:
+                red = green = blue = 0
+            pixels.extend(struct.pack("BBBB", red, green, blue, alpha))
+
+    return bytes(pixels)
+
+
+def png_chunk(kind, payload):
+    """Encode one PNG chunk."""
+    checksum = binascii.crc32(kind + payload) & 0xFFFFFFFF
+    return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", checksum)
+
+
+def encode_png(size, pixels):
+    """Encode RGBA pixels as a compact PNG icon frame."""
+    stride = size * 4
+    scanlines = bytearray()
+    for row in range(size):
+        scanlines.append(0)
+        start = row * stride
+        scanlines.extend(pixels[start : start + stride])
+
+    header = struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + png_chunk(b"IHDR", header)
+        + png_chunk(b"IDAT", zlib.compress(bytes(scanlines), 9))
+        + png_chunk(b"IEND", b"")
+    )
+
+
+def make_icon(filename, sizes, sampler):
+    """Write a multi-resolution Windows ICO with PNG-compressed frames."""
+    frames = []
+    for size in sizes:
+        frame = encode_png(size, render(size, sampler))
+        frames.append((size, frame))
+
+    data = bytearray(struct.pack("<HHH", 0, 1, len(frames)))
+    offset = 6 + 16 * len(frames)
+    for size, frame in frames:
+        dimension = size if size < 256 else 0
+        data.extend(
+            struct.pack(
+                "<BBBBHHII",
+                dimension,
+                dimension,
+                0,
+                0,
+                1,
+                32,
+                len(frame),
+                offset,
+            )
+        )
+        offset += len(frame)
+
+    for _, frame in frames:
+        data.extend(frame)
 
     path = os.path.join(OUT, filename)
-    with open(path, 'wb') as f:
-        f.write(data)
-    print(f"  {path} ({len(data)} bytes, {len(sizes)} sizes)")
+    with open(path, "wb") as icon_file:
+        icon_file.write(data)
+    print(f"  {path} ({len(data)} bytes, sizes: {', '.join(map(str, sizes))})")
 
-def render_icon(size, r, g, b):
-    """Render a single resolution frame. Returns (pixels_bgra, and_mask)."""
-    cx = cy = (size - 1) / 2
-    r_outer = size * 0.38
-    r_inner = size * 0.27
-    stem_w = max(1, size * 0.06)
 
-    def alpha(x, y):
-        # Distance from center
-        d = math.sqrt((x - cx)**2 + (y - cy)**2)
-        # Outer ring
-        if r_inner < d <= r_outer:
-            # Anti-alias edge
-            outer_aa = 1.0 - max(0, min(1, (d - r_outer) / 1.5 + 0.5))
-            inner_aa = max(0, min(1, (d - r_inner) / 1.5 + 0.5))
-            return int(255 * min(outer_aa, inner_aa))
-        # Inner fill
-        if d <= r_inner:
-            edge = min(1, (d - (r_inner - 2)) / 1.5 + 0.5) if r_inner > 2 else 1
-            return int(255 * 0.8 * edge)
-        # Power stem
-        stem_top = cy - size * 0.37
-        stem_bot = cy - size * 0.08
-        if abs(x - cx) <= stem_w and stem_top <= y <= stem_bot and d > r_outer:
-            edge_x = 1.0 - max(0, min(1, (abs(x - cx) - stem_w + 1)))
-            edge_y = min(
-                max(0, min(1, (y - stem_top + 1))),
-                max(0, min(1, (stem_bot - y + 1)))
-            )
-            return int(255 * min(edge_x, edge_y))
-        return 0
+def app_sample(x, y):
+    """Full application mark: a single wake-up bolt."""
+    if not inside_rounded_rect(x, y, 0.055, 0.055, 0.945, 0.945, 0.205):
+        return 0, 0, 0, 0
 
-    # Build BGRA pixels (bottom-up for BMP)
-    pixels = bytearray()
-    for y in range(size - 1, -1, -1):
-        for x in range(size):
-            a = alpha(x, y)
-            if a > 0:
-                # Premultiplied-ish: scale color by alpha for smooth edges
-                factor = a / 255
-                pixels.extend(struct.pack('BBBB',
-                    int(b * factor), int(g * factor), int(r * factor), a))
-            else:
-                pixels.extend(b'\x00\x00\x00\x00')
+    # A restrained cool backdrop keeps the mark legible in Explorer at 16px.
+    amount = min(1, max(0, (x + y) * 0.5))
+    background = mix((31, 57, 79), (13, 26, 39), amount)
+    color = (*background, 255)
 
-    # AND mask (1-bit transparency, row-padded to 4 bytes)
-    and_mask = bytearray()
-    for y in range(size - 1, -1, -1):
-        row_bits = []
-        for x in range(size):
-            row_bits.append(0 if alpha(x, y) > 128 else 1)
-        for i in range(0, size, 8):
-            v = 0
-            for bi in range(8):
-                if i + bi < size and row_bits[i + bi]:
-                    v |= 1 << (7 - bi)
-            and_mask.append(v)
-        rb = (size + 7) // 8
-        while rb % 4:
-            and_mask.append(0)
-            rb += 1
+    if inside_rounded_rect(x, y, 0.075, 0.075, 0.925, 0.925, 0.185) and not inside_rounded_rect(
+        x, y, 0.095, 0.095, 0.905, 0.905, 0.165
+    ):
+        color = (55, 82, 100, 255)
 
-    return bytes(pixels), bytes(and_mask)
+    bolt = [
+        (0.555, 0.185),
+        (0.325, 0.535),
+        (0.49, 0.535),
+        (0.42, 0.815),
+        (0.69, 0.425),
+        (0.52, 0.425),
+    ]
+    if inside_polygon(x, y, bolt):
+        color = (81, 225, 211, 255)
+    return color
 
-# ---- generate ----
-print("Generating EXE icon...")
-make_icon("app.ico", 0, 180, 80)  # green, multi-res for Windows Explorer
 
-print("Generating tray icons...")
-# Colors chosen to be visible on both light and dark taskbars:
-make_icon("icon_default.ico", 110, 130, 155, sizes=[32])  # slate blue
-make_icon("icon_monitor.ico", 235, 160, 20, sizes=[32])   # amber
-make_icon("icon_active.ico",  0, 200, 90, sizes=[32])     # green
+def tray_sampler(accent):
+    """Return the shared tiny-icon mark with a state-specific accent color."""
+    dark_outline = (19, 27, 34, 255)
+    light_outline = (236, 244, 245, 255)
+    white = (255, 255, 255, 255)
+
+    def sample(x, y):
+        dx = x - 0.5
+        dy = y - 0.515
+        distance = math.hypot(dx, dy)
+        if distance > 0.455:
+            return 0, 0, 0, 0
+        if distance > 0.405:
+            return dark_outline
+        if distance > 0.345:
+            return light_outline
+        color = (*accent, 255)
+
+        bolt = [
+            (0.535, 0.255),
+            (0.35, 0.545),
+            (0.485, 0.545),
+            (0.435, 0.765),
+            (0.66, 0.445),
+            (0.52, 0.445),
+        ]
+        if inside_polygon(x, y, bolt):
+            color = white
+        return color
+
+    return sample
+
+
+os.makedirs(OUT, exist_ok=True)
+
+print("Generating application icon...")
+make_icon("app.ico", APP_SIZES, app_sample)
+
+print("Generating high-contrast tray icons...")
+make_icon("icon_default.ico", TRAY_SIZES, tray_sampler((67, 139, 202)))
+make_icon("icon_monitor.ico", TRAY_SIZES, tray_sampler((224, 143, 24)))
+make_icon("icon_active.ico", TRAY_SIZES, tray_sampler((20, 166, 116)))
 print("Done.")

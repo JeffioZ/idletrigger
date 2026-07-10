@@ -6,8 +6,12 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"strings"
+	"time"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/JeffioZ/idletrigger/internal/version"
 )
 
 //go:embed locales/*.json
@@ -70,13 +74,53 @@ func T(lang string, key string) string {
 		m = store["en"]
 	}
 	if s, ok := m[key]; ok {
-		return s
+		return expand(s)
 	}
 	// Fallback to English.
 	if en, ok := store["en"]; ok {
 		if s, ok := en[key]; ok {
-			return s
+			return expand(s)
 		}
 	}
 	return key
+}
+
+func expand(s string) string {
+	return strings.ReplaceAll(s, "{{version}}", version.Value)
+}
+
+// FormatDuration formats a duration for compact user-facing status output.
+func FormatDuration(lang string, d time.Duration) string {
+	seconds := int64(d.Round(time.Second) / time.Second)
+	if seconds < 0 {
+		seconds = 0
+	}
+	hours := seconds / 3600
+	minutes := seconds % 3600 / 60
+	seconds %= 60
+
+	zh := resolveLanguage(lang) == "zh-CN"
+	parts := make([]string, 0, 3)
+	if hours > 0 {
+		if zh {
+			parts = append(parts, fmt.Sprintf("%d 小时", hours))
+		} else {
+			parts = append(parts, fmt.Sprintf("%dh", hours))
+		}
+	}
+	if minutes > 0 {
+		if zh {
+			parts = append(parts, fmt.Sprintf("%d 分钟", minutes))
+		} else {
+			parts = append(parts, fmt.Sprintf("%dm", minutes))
+		}
+	}
+	if seconds > 0 || len(parts) == 0 {
+		if zh {
+			parts = append(parts, fmt.Sprintf("%d 秒", seconds))
+		} else {
+			parts = append(parts, fmt.Sprintf("%ds", seconds))
+		}
+	}
+	return strings.Join(parts, " ")
 }

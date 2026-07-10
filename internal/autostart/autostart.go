@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	runKey  = `Software\Microsoft\Windows\CurrentVersion\Run`
+	runKey  = "Software\\Microsoft\\Windows\\CurrentVersion\\Run"
 	valName = "IdleTrigger"
 )
 
@@ -40,21 +40,19 @@ func Enable() error {
 	if err != nil {
 		return err
 	}
-	k, err := registry.OpenKey(registry.CURRENT_USER, runKey, registry.SET_VALUE)
+	k, _, err := registry.CreateKey(registry.CURRENT_USER, runKey, registry.SET_VALUE)
 	if err != nil {
-		return fmt.Errorf("open Run key: %w", err)
+		return fmt.Errorf("create or open Run key: %w", err)
 	}
 	defer k.Close()
 
-	cmd := fmt.Sprintf(`"%s" --minimized`, exe)
-	return k.SetStringValue(valName, cmd)
+	return k.SetStringValue(valName, commandLine(exe))
 }
 
 // Disable removes the auto-start registry entry.
 func Disable() error {
 	k, err := registry.OpenKey(registry.CURRENT_USER, runKey, registry.SET_VALUE)
 	if err != nil {
-		// If the key doesn't exist there's nothing to delete — success.
 		if err == registry.ErrNotExist {
 			return nil
 		}
@@ -75,4 +73,8 @@ func exePath() (string, error) {
 		return "", err
 	}
 	return filepath.Clean(p), nil
+}
+
+func commandLine(exe string) string {
+	return fmt.Sprintf("\"%s\" --minimized", exe)
 }
