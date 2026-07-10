@@ -563,8 +563,12 @@ func (s *trayState) syncChecks() {
 	}
 	if s.cfg.IdleTimeoutMinutes > 0 {
 		s.mIdleEnable.Check()
+		s.mIdleTimeout.Show()
+		s.mIdleAction.Show()
 	} else {
 		s.mIdleEnable.Uncheck()
+		s.mIdleTimeout.Hide()
+		s.mIdleAction.Hide()
 	}
 	if s.cfg.ProcessWatchEnabled {
 		s.mProcessWatch.Check()
