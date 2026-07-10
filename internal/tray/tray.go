@@ -74,6 +74,7 @@ type trayState struct {
 	mShutdown       *systray.MenuItem
 	mLock           *systray.MenuItem
 	mNoSleep        *systray.MenuItem
+	mNoSleepEnable  *systray.MenuItem
 	mProcessWatch  *systray.MenuItem
 	mIdleEnable     *systray.MenuItem
 	mIdleTimeout    *systray.MenuItem
@@ -361,8 +362,8 @@ func (s *trayState) buildMenu() {
 
 			config.Save(s.cfg)
 
-			case <-s.mNoSleep.ClickedCh:
-					s.post(func() { s.toggleNoSleep() })
+			case <-s.mNoSleepEnable.ClickedCh:
+					s.toggleNoSleep()
 
 			case <-s.mIdleEnable.ClickedCh:
 				s.post(func() {
@@ -562,9 +563,9 @@ func (s *trayState) wireSubmenus() {
 
 func (s *trayState) syncChecks() {
 	if s.cfg.NoSleepEnabled {
-		s.mNoSleep.Check()
+		s.mNoSleepEnable.Check()
 	} else {
-		s.mNoSleep.Uncheck()
+		s.mNoSleepEnable.Uncheck()
 	}
 	if s.cfg.IdleTimeoutMinutes > 0 {
 		s.mIdleEnable.Check()
