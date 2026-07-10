@@ -59,32 +59,32 @@ type trayState struct {
 	mon   *monitor.Monitor
 	monMu sync.Mutex
 
-	hotkeyMgr *hotkey.Manager
-	procWatch   *processwatcher.Watcher
-	themeSched  *themeswitch.Scheduler
+	hotkeyMgr  *hotkey.Manager
+	procWatch  *processwatcher.Watcher
+	themeSched *themeswitch.Scheduler
 
 	// All menu items that display localised text — updated on language switch.
 	labelItems []labelItem
 
 	// menu items (action items for capability checking)
-	mSleep     *systray.MenuItem
-	mHibernate *systray.MenuItem
-	mShutdown  *systray.MenuItem
-	mLock      *systray.MenuItem
-	mNoSleep   *systray.MenuItem
-	mIdleEnable  *systray.MenuItem
-	mIdleTimeout *systray.MenuItem
-	mIdleAction  *systray.MenuItem
-	mHotkeys      *systray.MenuItem
-	mThemeSwitch  *systray.MenuItem
-	mThemeLightAt *systray.MenuItem
-	mThemeDarkAt  *systray.MenuItem
+	mSleep          *systray.MenuItem
+	mHibernate      *systray.MenuItem
+	mShutdown       *systray.MenuItem
+	mLock           *systray.MenuItem
+	mNoSleep        *systray.MenuItem
+	mIdleEnable     *systray.MenuItem
+	mIdleTimeout    *systray.MenuItem
+	mIdleAction     *systray.MenuItem
+	mHotkeys        *systray.MenuItem
+	mThemeSwitch    *systray.MenuItem
+	mThemeLightAt   *systray.MenuItem
+	mThemeDarkAt    *systray.MenuItem
 	mThemeSwitchNow *systray.MenuItem
 	mThemeRepair    *systray.MenuItem
 	themeLightItems []*systray.MenuItem
 	themeDarkItems  []*systray.MenuItem
-	timeoutItems []*systray.MenuItem
-	actionItems  []*systray.MenuItem
+	timeoutItems    []*systray.MenuItem
+	actionItems     []*systray.MenuItem
 }
 
 type labelItem struct {
@@ -166,7 +166,6 @@ func (s *trayState) buildMenu() {
 	// Disable actions the system does not support.
 	s.applyCapabilities()
 
-
 	systray.AddSeparator()
 
 	s.mNoSleep = systray.AddMenuItemCheckbox(T("menu_nosleep"), "", s.cfg.NoSleepEnabled)
@@ -203,8 +202,8 @@ func (s *trayState) buildMenu() {
 	s.mThemeLightAt = s.mThemeSwitch.AddSubMenuItem(T("menu_theme_light_time"), "")
 	s.registerLabel(s.mThemeLightAt, "menu_theme_light_time")
 	s.themeLightItems = make([]*systray.MenuItem, 3)
-	lightKeys := []string{"theme_time_0600","theme_time_0700","theme_time_0800"}
-	lightVals := []string{"06:00","07:00","08:00"}
+	lightKeys := []string{"theme_time_0600", "theme_time_0700", "theme_time_0800"}
+	lightVals := []string{"06:00", "07:00", "08:00"}
 	for i := 0; i < 3; i++ {
 		checked := s.cfg.ThemeLightTime == lightVals[i]
 		s.themeLightItems[i] = s.mThemeLightAt.AddSubMenuItemCheckbox(T(lightKeys[i]), "", checked)
@@ -215,8 +214,8 @@ func (s *trayState) buildMenu() {
 	s.mThemeDarkAt = s.mThemeSwitch.AddSubMenuItem(T("menu_theme_dark_time"), "")
 	s.registerLabel(s.mThemeDarkAt, "menu_theme_dark_time")
 	s.themeDarkItems = make([]*systray.MenuItem, 4)
-	darkKeys := []string{"theme_time_1800","theme_time_1900","theme_time_2000","theme_time_2100"}
-	darkVals := []string{"18:00","19:00","20:00","21:00"}
+	darkKeys := []string{"theme_time_1800", "theme_time_1900", "theme_time_2000", "theme_time_2100"}
+	darkVals := []string{"18:00", "19:00", "20:00", "21:00"}
 	for i := 0; i < 4; i++ {
 		checked := s.cfg.ThemeDarkTime == darkVals[i]
 		s.themeDarkItems[i] = s.mThemeDarkAt.AddSubMenuItemCheckbox(T(darkKeys[i]), "", checked)
@@ -279,9 +278,9 @@ func (s *trayState) buildMenu() {
 				} else {
 					nosleep.Enable(true)
 					s.cfg.NoSleepEnabled = true
-				// NoSleep and idle monitor are mutually exclusive — auto-disable idle monitor.
-				s.cfg.IdleTimeoutMinutes = 0
-				s.stopMonitor()
+					// NoSleep and idle monitor are mutually exclusive — auto-disable idle monitor.
+					s.cfg.IdleTimeoutMinutes = 0
+					s.stopMonitor()
 				}
 				s.syncChecks()
 				config.Save(s.cfg)
@@ -289,13 +288,13 @@ func (s *trayState) buildMenu() {
 			case <-s.mIdleEnable.ClickedCh:
 				if s.mIdleEnable.Checked() {
 					s.mIdleEnable.Uncheck()
-				s.cfg.IdleTimeoutMinutes = 0
+					s.cfg.IdleTimeoutMinutes = 0
 					s.stopMonitor()
 				} else {
-				if nosleep.IsEnabled() {
-					nosleep.Disable()
-					s.cfg.NoSleepEnabled = false
-				}
+					if nosleep.IsEnabled() {
+						nosleep.Disable()
+						s.cfg.NoSleepEnabled = false
+					}
 					s.mIdleEnable.Check()
 					if s.cfg.IdleTimeoutMinutes <= 0 {
 						s.cfg.IdleTimeoutMinutes = 30
@@ -319,29 +318,29 @@ func (s *trayState) buildMenu() {
 				config.Save(s.cfg)
 
 			case <-s.mThemeSwitchNow.ClickedCh:
-			cur := themeswitch.Current()
-			if cur == themeswitch.ModeDark {
-				themeswitch.Switch(themeswitch.ModeLight)
-			} else {
-				themeswitch.Switch(themeswitch.ModeDark)
-			}
+				cur := themeswitch.Current()
+				if cur == themeswitch.ModeDark {
+					themeswitch.Switch(themeswitch.ModeLight)
+				} else {
+					themeswitch.Switch(themeswitch.ModeDark)
+				}
 
-		case <-s.mThemeRepair.ClickedCh:
-			themeswitch.Switch(themeswitch.Current())
+			case <-s.mThemeRepair.ClickedCh:
+				themeswitch.Switch(themeswitch.Current())
 
-		case <-s.mThemeSwitch.ClickedCh:
-			if s.mThemeSwitch.Checked() {
-				s.mThemeSwitch.Uncheck()
-				s.cfg.ThemeSwitchEnabled = false
-				s.stopThemeScheduler()
-			} else {
-				s.mThemeSwitch.Check()
-				s.cfg.ThemeSwitchEnabled = true
-				s.startThemeScheduler()
-			}
-			config.Save(s.cfg)
+			case <-s.mThemeSwitch.ClickedCh:
+				if s.mThemeSwitch.Checked() {
+					s.mThemeSwitch.Uncheck()
+					s.cfg.ThemeSwitchEnabled = false
+					s.stopThemeScheduler()
+				} else {
+					s.mThemeSwitch.Check()
+					s.cfg.ThemeSwitchEnabled = true
+					s.startThemeScheduler()
+				}
+				config.Save(s.cfg)
 
-		case <-s.mHotkeys.ClickedCh:
+			case <-s.mHotkeys.ClickedCh:
 				if s.mHotkeys.Checked() {
 					s.mHotkeys.Uncheck()
 					s.cfg.HotkeysEnabled = false
@@ -431,12 +430,12 @@ func (s *trayState) syncChecks() {
 		s.mNoSleep.Uncheck()
 		s.mIdleEnable.Enable()
 	}
-		// Config compatibility: if both NoSleep and idle monitor are enabled,
-		// resolve the conflict — NoSleep takes priority.
-		// 配置兼容：若两者均启用，NoSleep 优先，自动禁用空闲监测。
-		if s.cfg.NoSleepEnabled && s.cfg.IdleTimeoutMinutes > 0 {
-			s.cfg.IdleTimeoutMinutes = 0
-		}
+	// Config compatibility: if both NoSleep and idle monitor are enabled,
+	// resolve the conflict — NoSleep takes priority.
+	// 配置兼容：若两者均启用，NoSleep 优先，自动禁用空闲监测。
+	if s.cfg.NoSleepEnabled && s.cfg.IdleTimeoutMinutes > 0 {
+		s.cfg.IdleTimeoutMinutes = 0
+	}
 	if s.cfg.IdleTimeoutMinutes > 0 {
 		s.mIdleEnable.Check()
 		s.mNoSleep.Disable()
@@ -550,13 +549,14 @@ func (s *trayState) stopMonitor() {
 
 func (s *trayState) startHotkeys() {
 	s.stopHotkeys()
-	s.hotkeyMgr = hotkey.NewManager(hotkey.DefaultBindings(), hotkey.Callbacks{
+	mgr := hotkey.NewManager(hotkey.DefaultBindings(), hotkey.Callbacks{
 		OnSleep:         func() { actions.Sleep() },
 		OnLock:          func() { actions.Lock() },
 		OnToggleNoSleep: s.toggleNoSleep,
 	})
+	s.hotkeyMgr = mgr
 	go func() {
-		failed := s.hotkeyMgr.Start()
+		failed := mgr.Start()
 		if len(failed) > 0 {
 			s.showHotkeyConflict(failed)
 		}
@@ -589,7 +589,7 @@ func (s *trayState) toggleNoSleep() {
 	} else {
 		nosleep.Enable(true)
 		s.cfg.NoSleepEnabled = true
-	mylog.Info("NoSleep toggled: enabled=%v screen=%v", nosleep.IsEnabled(), nosleep.IsKeepingScreenOn())
+		mylog.Info("NoSleep toggled: enabled=%v screen=%v", nosleep.IsEnabled(), nosleep.IsKeepingScreenOn())
 	}
 	s.syncChecks()
 	s.updateIcon()
@@ -757,7 +757,7 @@ func (s *trayState) handleIPC(cmd string) string {
 		config.Save(s.cfg)
 		return "ok"
 	case "monitor:off":
-			s.cfg.IdleTimeoutMinutes = 0
+		s.cfg.IdleTimeoutMinutes = 0
 		s.stopMonitor()
 		s.syncChecks()
 		s.updateIcon()
@@ -860,7 +860,6 @@ func (s *trayState) fmtStatus() string {
 
 // ---- helpers ----------------------------------------------------------
 
-
 func executeAction(a config.Action, lang string) {
 	switch a {
 	case config.ActionSleep:
@@ -895,7 +894,7 @@ func (s *trayState) switchLanguage(lang string) {
 	T := func(key string) string { return i18n.T(s.lang, key) }
 	for _, li := range s.labelItems {
 		li.item.SetTitle(T(li.key))
-	mylog.Info("Language switched: %s", lang)
+		mylog.Info("Language switched: %s", lang)
 	}
 	systray.SetTitle(T("app_title"))
 	s.updateIcon()
@@ -931,7 +930,7 @@ func (s *trayState) stopThemeScheduler() {
 
 func (s *trayState) wireThemeSubmenus() {
 	// Light time radio
-	lightVals := []string{"06:00","07:00","08:00"}
+	lightVals := []string{"06:00", "07:00", "08:00"}
 	for i, item := range s.themeLightItems {
 		idx := i
 		it := item
@@ -939,16 +938,22 @@ func (s *trayState) wireThemeSubmenus() {
 			for range it.ClickedCh {
 				s.cfg.ThemeLightTime = lightVals[idx]
 				for j, ti := range s.themeLightItems {
-					if j == idx { ti.Check() } else { ti.Uncheck() }
+					if j == idx {
+						ti.Check()
+					} else {
+						ti.Uncheck()
+					}
 				}
 				s.stopThemeScheduler()
-				if s.cfg.ThemeSwitchEnabled { s.startThemeScheduler() }
+				if s.cfg.ThemeSwitchEnabled {
+					s.startThemeScheduler()
+				}
 				config.Save(s.cfg)
 			}
 		}()
 	}
 	// Dark time radio
-	darkVals := []string{"18:00","19:00","20:00","21:00"}
+	darkVals := []string{"18:00", "19:00", "20:00", "21:00"}
 	for i, item := range s.themeDarkItems {
 		idx := i
 		it := item
@@ -956,10 +961,16 @@ func (s *trayState) wireThemeSubmenus() {
 			for range it.ClickedCh {
 				s.cfg.ThemeDarkTime = darkVals[idx]
 				for j, ti := range s.themeDarkItems {
-					if j == idx { ti.Check() } else { ti.Uncheck() }
+					if j == idx {
+						ti.Check()
+					} else {
+						ti.Uncheck()
+					}
 				}
 				s.stopThemeScheduler()
-				if s.cfg.ThemeSwitchEnabled { s.startThemeScheduler() }
+				if s.cfg.ThemeSwitchEnabled {
+					s.startThemeScheduler()
+				}
 				config.Save(s.cfg)
 			}
 		}()
