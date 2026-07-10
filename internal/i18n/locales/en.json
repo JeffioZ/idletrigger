@@ -90,6 +90,6 @@
   "menu_theme_skip_fullscreen": "Pause Fullscreen",
   "menu_process_watch": "Process Watch",
   "about_body": "Stay Awake     Prevent system sleep\nIdle Monitor   Auto-trigger after N min of inactivity\nGlobal Hotkeys Win+Shift+S/L/N\nDay/Night      Auto-switch theme by time or sunrise\nBattery Aware  Auto-disable on battery\nProcess Watch  Auto-enable for specific apps\n\nhttps://github.com/JeffioZ/idletrigger",
-  "tooltip_theme": "Day/Night: %s",
+  "tooltip_theme": "Day/Night",
   "tooltip_hotkeys": "Hotkeys active"
 }

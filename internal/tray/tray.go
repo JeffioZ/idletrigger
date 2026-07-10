@@ -764,7 +764,6 @@ func (s *trayState) toggleNoSleep() {
 		s.cfg.NoSleepEnabled = false
 	} else {
 		s.cfg.NoSleepEnabled = true
-		s.cfg.IdleTimeoutMinutes = 0
 	}
 	s.reconcileRuntime()
 	mylog.Info("NoSleep toggled: enabled=%v keep_screen_on=%v", nosleep.IsEnabled(), nosleep.IsKeepingScreenOn())
