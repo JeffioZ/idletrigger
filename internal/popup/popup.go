@@ -52,7 +52,6 @@ const (
 	ActIdleTimeout Action = 100 + iota
 	ActIdleAction
 	ActThemeToggle
-	ActSunriseToggle
 	ActBatteryToggle
 	ActFullscreenToggle
 	ActSwitchTheme
@@ -66,13 +65,13 @@ const (
 )
 
 type State struct {
-	NoSleepEnabled, ProcessWatchEnabled, IdleEnabled               bool
-	IdleTimeout                                                    int
-	IdleAction                                                     string
-	ThemeSwitchEnabled, SunriseMode, DarkOnBattery, SkipFullscreen bool
-	HotkeysEnabled, AutostartEnabled                               bool
-	IsChinese                                                      bool
-	ThemeSchedule                                                  string
+	NoSleepEnabled, ProcessWatchEnabled, IdleEnabled  bool
+	IdleTimeout                                       int
+	IdleAction                                        string
+	ThemeSwitchEnabled, DarkOnBattery, SkipFullscreen bool
+	HotkeysEnabled, AutostartEnabled                  bool
+	IsChinese                                         bool
+	ThemeSchedule                                     string
 }
 
 type LangFunc func(key string) string
@@ -144,7 +143,6 @@ const (
 	idProcess         = 11
 	idIdle            = 20
 	idTheme           = 30
-	idSunrise         = 31
 	idBattery         = 32
 	idFullscreen      = 33
 	idThemeSwitch     = 34
@@ -267,7 +265,7 @@ func Show(state State, onAction OnAction, langFn LangFunc) error {
 		toggles: map[uint16]bool{
 			idNoSleep: state.NoSleepEnabled, idProcess: state.ProcessWatchEnabled,
 			idIdle: state.IdleEnabled, idTheme: state.ThemeSwitchEnabled,
-			idSunrise: state.SunriseMode, idBattery: state.DarkOnBattery,
+			idBattery:    state.DarkOnBattery,
 			idFullscreen: state.SkipFullscreen, idHotkeys: state.HotkeysEnabled,
 			idAutostart: state.AutostartEnabled,
 		},
@@ -797,9 +795,6 @@ func (p *panel) handleCommand(id uint16) {
 	case id == idTheme:
 		p.toggle(id)
 		action = ActThemeToggle
-	case id == idSunrise:
-		p.toggle(id)
-		action = ActSunriseToggle
 	case id == idBattery:
 		p.toggle(id)
 		action = ActBatteryToggle
