@@ -1,0 +1,38 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Generate .syso
+        run: |
+          go install github.com/akavel/rsrc@latest
+          ~/go/bin/rsrc -arch 386 -ico assets/app.ico -manifest assets/manifest.xml -o rsrc_windows_386.syso
+
+      - name: Build
+        run: |
+          $env:CGO_ENABLED = "0"
+          $env:GOARCH = "386"
+          go build -ldflags="-s -w -H windowsgui" -o IdleTrigger.exe .
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: IdleTrigger.exe
+          body: |
+            Download `IdleTrigger.exe` and run it — no installation needed.
+
+            See [README.md](https://github.com/JeffioZ/idletrigger/blob/master/README.md) for full documentation.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
