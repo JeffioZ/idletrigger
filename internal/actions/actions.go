@@ -1,5 +1,5 @@
 // Package actions implements Windows system power actions — sleep,
-// hibernate, shutdown, and lock — via direct Win32 API calls.
+// hibernate, shutdown, restart, and lock — via direct Win32 API calls.
 package actions
 
 import (
@@ -37,20 +37,30 @@ func Hibernate() error {
 	return nil
 }
 
+const (
+	ewxReboot   = 0x00000002
+	ewxShutdown = 0x00000001
+	ewxPoweroff = 0x00000008
+	// Mark power actions as planned so Windows records them correctly.
+	shutdownReasonPlanned = 0x80000000
+)
+
 // Shutdown powers off the system after acquiring SE_SHUTDOWN_NAME privilege.
 func Shutdown() error {
+	return exitWindows(ewxShutdown | ewxPoweroff)
+}
+
+// Restart reboots the system after acquiring SE_SHUTDOWN_NAME privilege.
+func Restart() error {
+	return exitWindows(ewxReboot)
+}
+
+func exitWindows(flags uintptr) error {
 	if err := acquireShutdownPrivilege(); err != nil {
 		return fmt.Errorf("acquire shutdown privilege: %w", err)
 	}
 	proc := user32.NewProc("ExitWindowsEx")
-	const (
-		EWX_SHUTDOWN = 0x00000001
-		EWX_POWEROFF = 0x00000008
-		// Mark the shutdown as planned so Windows records it correctly.
-		SHTDN_REASON_FLAG_PLANNED = 0x80000000
-	)
-	flags := uintptr(EWX_SHUTDOWN | EWX_POWEROFF)
-	r, _, err := proc.Call(flags, uintptr(SHTDN_REASON_FLAG_PLANNED))
+	r, _, err := proc.Call(flags, uintptr(shutdownReasonPlanned))
 	if r == 0 {
 		return fmt.Errorf("ExitWindowsEx: %v", err)
 	}

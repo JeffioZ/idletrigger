@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -228,6 +229,7 @@ func (t *winTray) setIcon(src string) error {
 // Shell_NotifyIcon: https://msdn.microsoft.com/en-us/library/windows/desktop/bb762159(v=vs.85).aspx
 func (t *winTray) setTooltip(src string) error {
 	const NIF_TIP = 0x00000004
+	src = strings.TrimSpace(src)
 	b, err := windows.UTF16FromString(src)
 	if err != nil {
 		return err
@@ -235,7 +237,15 @@ func (t *winTray) setTooltip(src string) error {
 
 	t.muNID.Lock()
 	defer t.muNID.Unlock()
-	copy(t.nid.Tip[:], b[:])
+	for i := range t.nid.Tip {
+		t.nid.Tip[i] = 0
+	}
+	if len(b) > len(t.nid.Tip) {
+		b = b[:len(t.nid.Tip)]
+	}
+	if len(b) > 0 {
+		copy(t.nid.Tip[:], b[:len(b)-1])
+	}
 	t.nid.Flags |= NIF_TIP
 	t.nid.Size = uint32(unsafe.Sizeof(*t.nid))
 

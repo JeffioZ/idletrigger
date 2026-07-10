@@ -95,16 +95,44 @@ func Switch(mode Mode) error {
 		return fmt.Errorf("set SystemUsesLightTheme: %w", err)
 	}
 
+	notifyThemeChanged()
+	return nil
+}
+
+// Refresh asks Windows shell surfaces to re-read the current theme settings.
+func Refresh() error {
+	notifyThemeChanged()
+	return nil
+}
+
+func notifyThemeChanged() {
 	user32 := windows.NewLazySystemDLL("user32.dll")
+	updatePerUser := user32.NewProc("UpdatePerUserSystemParameters")
+	sendNotify := user32.NewProc("SendNotifyMessageW")
 	sendMsg := user32.NewProc("SendMessageTimeoutW")
 	const (
-		hwndBroadcast   = 0xFFFF
-		wmSettingChange = 0x001A
-		smtoNormal      = 0x0000
+		hwndBroadcast    = 0xFFFF
+		wmThemeChanged   = 0x031A
+		wmSysColorChange = 0x0015
+		wmSettingChange  = 0x001A
+		smtoAbortIfHung  = 0x0002
 	)
-	imm, _ := windows.UTF16PtrFromString("ImmersiveColorSet")
-	sendMsg.Call(hwndBroadcast, wmSettingChange, 0, uintptr(unsafe.Pointer(imm)), smtoNormal, 5000, 0)
-	return nil
+
+	updatePerUser.Call(0, 1)
+
+	// Notify every top-level window, including Explorer's taskbars on each
+	// display. Windows components do not all listen for the same token, so send
+	// the common theme and color notifications without blocking on hung apps.
+	for _, token := range []string{"ImmersiveColorSet", "WindowsThemeElement", "Policy"} {
+		ptr, _ := windows.UTF16PtrFromString(token)
+		lp := uintptr(unsafe.Pointer(ptr))
+		sendNotify.Call(hwndBroadcast, wmSettingChange, 0, lp)
+		sendMsg.Call(hwndBroadcast, wmSettingChange, 0, lp, smtoAbortIfHung, 250, 0)
+	}
+	sendNotify.Call(hwndBroadcast, wmSysColorChange, 0, 0)
+	sendMsg.Call(hwndBroadcast, wmSysColorChange, 0, 0, smtoAbortIfHung, 250, 0)
+	sendNotify.Call(hwndBroadcast, wmThemeChanged, 0, 0)
+	sendMsg.Call(hwndBroadcast, wmThemeChanged, 0, 0, smtoAbortIfHung, 250, 0)
 }
 
 // Current returns the current theme mode.
@@ -119,6 +147,21 @@ func Current() Mode {
 		return ModeDark
 	}
 	return ModeLight
+}
+
+// ScheduleTimes returns today's light and dark switch times as HH:MM.
+func ScheduleTimes(mode, lightTime, darkTime string, lat, lon float64, now time.Time) (string, string, bool) {
+	var lightMin, darkMin int
+	if mode == "sunrise" {
+		lightMin, darkMin = sunriseSunset(now, lat, lon)
+	} else {
+		lightMin = parseTime(lightTime)
+		darkMin = parseTime(darkTime)
+	}
+	if lightMin < 0 || darkMin < 0 {
+		return "", "", false
+	}
+	return formatMinute(lightMin), formatMinute(darkMin), true
 }
 
 // Scheduler checks time periodically and switches theme.
@@ -361,4 +404,12 @@ func parseTime(s string) int {
 		return -1
 	}
 	return h*60 + m
+}
+
+func formatMinute(minute int) string {
+	for minute < 0 {
+		minute += 1440
+	}
+	minute %= 1440
+	return fmt.Sprintf("%02d:%02d", minute/60, minute%60)
 }

@@ -19,12 +19,12 @@ func Enable() {
 	kernel32 := syscall.NewLazyDLL("kernel32.dll")
 	getProc := kernel32.NewProc("GetProcAddress")
 
-	// SetPreferredAppMode — ordinal 135.  ForceDark (2) is more
-	// aggressive than AllowDark (1) and works on more controls.
+	// SetPreferredAppMode — ordinal 135. AllowDark follows the active
+	// Windows app theme; the control panel paints its own matching palette.
 	proc1, _, _ := getProc.Call(uintptr(uxtheme), uintptr(135))
 	if proc1 != 0 {
-		const forceDark = 2
-		syscall.Syscall(proc1, 1, uintptr(forceDark), 0, 0)
+		const allowDark = 1
+		syscall.Syscall(proc1, 1, uintptr(allowDark), 0, 0)
 	}
 
 	// FlushMenuThemes — ordinal 136
