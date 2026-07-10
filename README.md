@@ -30,7 +30,7 @@ A lightweight, single-EXE utility that lives in your system tray.  It can:
 
 ## Quick Start
 
-1. Download `IdleTrigger.exe` from [Releases](https://github.com/jeffio/idletrigger/releases)
+1. Download `IdleTrigger.exe` from [Releases](https://github.com/JeffioZ/idletrigger/releases)
 2. Double-click → tray icon appears (slate blue power symbol)
 3. Right-click to configure; or edit `IdleTrigger.toml`
 

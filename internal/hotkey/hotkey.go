@@ -1,6 +1,7 @@
 package hotkey
 
 import (
+	"runtime"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -155,18 +156,37 @@ func (m *Manager) Run() {
 }
 
 // Start is a convenience: Register, then Run in a new goroutine.
-// Returns the Failed list from Register so the caller can notify the user.
+// The goroutine locks the OS thread so the message loop and window
+// stay on the same thread as required by Win32.
+// goroutine 锁定 OS 线程以保证消息循环和窗口在同一线程。
 func (m *Manager) Start() Failed {
 	failed := m.Register()
-	go m.Run()
+	go func() {
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
+		m.Run()
+	}()
 	return failed
 }
 
 func (m *Manager) Stop() {
 	user32 := windows.NewLazySystemDLL("user32.dll")
-	post := user32.NewProc("PostQuitMessage")
-	post.Call(0)
+	// Unregister all hotkeys before destroying the window.
+	// 销毁窗口前注销所有热键。
+	for i := range m.bindings {
+		unreg := user32.NewProc("UnregisterHotKey")
+		unreg.Call(uintptr(m.hwnd), uintptr(i))
+	}
+	// Post WM_QUIT to the message loop, then destroy the window.
+	post := user32.NewProc("PostMessageW")
+	const wmQuit = 0x0012
+	post.Call(uintptr(m.hwnd), wmQuit, 0, 0)
 	close(m.stopCh)
+	if m.hwnd != 0 {
+		destroy := user32.NewProc("DestroyWindow")
+		destroy.Call(uintptr(m.hwnd))
+		m.hwnd = 0
+	}
 }
 
 func (m *Manager) wndProc(hwnd windows.Handle, msg2 uint32, wParam, lParam uintptr) uintptr {
