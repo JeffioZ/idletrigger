@@ -285,7 +285,11 @@ func (t *winTray) wndProc(hWnd windows.Handle, message uint32, wParam, lParam ui
 				t.showMenu()
 			}
 		case WM_RBUTTONUP:
-			t.showMenu()
+			if OnLeftClick != nil {
+				OnLeftClick()
+			} else {
+				t.showMenu()
+			}
 		}
 	case t.wmTaskbarCreated: // on explorer.exe restarts
 		t.muNID.Lock()
