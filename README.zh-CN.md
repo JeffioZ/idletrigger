@@ -94,7 +94,7 @@ process_watch_list = []            # 例如 ["chrome.exe", "powerpnt.exe"]
 logging_enabled = false            # 调试日志输出
 
 theme_switch_enabled = false       # 自动主题切换
-theme_mode = "fixed"               # "fixed" 或 "sunrise"
+theme_mode = "sunrise"               # "fixed" 或 "sunrise"
 theme_light_time = "07:00"
 theme_dark_time = "19:00"
 theme_latitude = 0                 # 0 = 根据时区自动检测

@@ -96,7 +96,7 @@ process_watch_list = []            # e.g. ["chrome.exe", "powerpnt.exe"]
 logging_enabled = false            # debug log to IdleTrigger.log
 
 theme_switch_enabled = false       # auto theme switch
-theme_mode = "fixed"               # "fixed" or "sunrise"
+theme_mode = "sunrise"               # "fixed" or "sunrise"
 theme_light_time = "07:00"
 theme_dark_time = "19:00"
 theme_latitude = 0                 # 0 = auto-detect from timezone

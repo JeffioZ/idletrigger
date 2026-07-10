@@ -113,7 +113,7 @@ func DefaultConfig() Config {
 		ThemeSwitchEnabled:      false,
 		ThemeLightTime:          "07:00",
 		ThemeDarkTime:           "19:00",
-		ThemeMode:               "fixed",
+		ThemeMode:               "sunrise",
 		ThemeLatitude:           0,
 		ThemeLongitude:          0,
 		ThemeDarkOnBattery:      true,

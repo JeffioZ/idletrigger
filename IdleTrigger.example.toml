@@ -17,7 +17,7 @@ process_watch_list = []
 logging_enabled = false
 
 theme_switch_enabled = false
-theme_mode = "fixed"
+theme_mode = "sunrise"
 theme_light_time = "07:00"
 theme_dark_time = "19:00"
 theme_latitude = 0
