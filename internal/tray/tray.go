@@ -556,34 +556,15 @@ func (s *trayState) wireSubmenus() {
 // ---- state sync -------------------------------------------------------
 
 func (s *trayState) syncChecks() {
-	// NoSleep and idle monitor are mutually exclusive — when one is active,
-	// the other is visually disabled (grayed out) in the menu.
 	if s.cfg.NoSleepEnabled {
 		s.mNoSleep.Check()
-		s.mIdleEnable.Disable()
 	} else {
 		s.mNoSleep.Uncheck()
-		if s.processNoSleep {
-			s.mIdleEnable.Disable()
-		} else {
-			s.mIdleEnable.Enable()
-		}
-	}
-	// Config compatibility: if both NoSleep and idle monitor are enabled,
-	// resolve the conflict — NoSleep takes priority.
-	if s.cfg.NoSleepEnabled && s.cfg.IdleTimeoutMinutes > 0 {
-		s.cfg.IdleTimeoutMinutes = 0
 	}
 	if s.cfg.IdleTimeoutMinutes > 0 {
 		s.mIdleEnable.Check()
-		if s.processNoSleep {
-			s.mNoSleep.Enable()
-		} else {
-			s.mNoSleep.Disable()
-		}
 	} else {
 		s.mIdleEnable.Uncheck()
-		s.mNoSleep.Enable()
 	}
 	if s.cfg.ProcessWatchEnabled {
 		s.mProcessWatch.Check()
