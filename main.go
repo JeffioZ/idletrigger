@@ -89,6 +89,10 @@ func main() {
 }
 
 func enableConsoleOutput() {
+	if bindStandardConsoleFiles() {
+		return
+	}
+
 	kernel32 := windows.NewLazySystemDLL("kernel32.dll")
 
 	attach := kernel32.NewProc("AttachConsole")
@@ -99,12 +103,28 @@ func enableConsoleOutput() {
 		alloc.Call()
 	}
 
+	bindStandardConsoleFiles()
+}
+
+func bindStandardConsoleFiles() bool {
 	hOut, _ := windows.GetStdHandle(windows.STD_OUTPUT_HANDLE)
 	hErr, _ := windows.GetStdHandle(windows.STD_ERROR_HANDLE)
-	if hOut != windows.InvalidHandle {
+	bound := false
+	if usableStdHandle(hOut) {
 		os.Stdout = os.NewFile(uintptr(hOut), "/dev/stdout")
+		bound = true
 	}
-	if hErr != windows.InvalidHandle {
+	if usableStdHandle(hErr) {
 		os.Stderr = os.NewFile(uintptr(hErr), "/dev/stderr")
+		bound = true
 	}
+	return bound
+}
+
+func usableStdHandle(h windows.Handle) bool {
+	if h == 0 || h == windows.InvalidHandle {
+		return false
+	}
+	fileType, err := windows.GetFileType(h)
+	return err == nil && fileType != windows.FILE_TYPE_UNKNOWN
 }
