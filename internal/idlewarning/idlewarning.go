@@ -31,6 +31,10 @@ type monitorInfo struct {
 	Flags         uint32
 }
 
+type textSize struct {
+	CX, CY int32
+}
+
 // paintStruct is an opaque buffer large enough for PAINTSTRUCT on 32-bit and
 // 64-bit Windows. Only BeginPaint/EndPaint consume it, so this avoids Go
 // struct-alignment differences between architectures.
@@ -43,6 +47,7 @@ const (
 	wmClose        = 0x0010
 	wmPaint        = 0x000F
 	wmEraseBkgnd   = 0x0014
+	wmLButtonDown  = 0x0201
 	wmLButtonUp    = 0x0202
 	wmMouseMove    = 0x0200
 	wmMouseLeave   = 0x02A3
@@ -85,6 +90,8 @@ var (
 	pTrackMouseEvent   = user32.NewProc("TrackMouseEvent")
 	pFillRect          = user32.NewProc("FillRect")
 	pDrawText          = user32.NewProc("DrawTextW")
+	pTextOut           = gdi32.NewProc("TextOutW")
+	pGetTextExtent     = gdi32.NewProc("GetTextExtentPoint32W")
 	pSetTextColor      = gdi32.NewProc("SetTextColor")
 	pSetBkMode         = gdi32.NewProc("SetBkMode")
 	pGetDpiForWindow   = user32.NewProc("GetDpiForWindow")
@@ -99,6 +106,7 @@ var (
 	title     string
 	body      string
 	closeHot  bool
+	closeDown bool
 	dismissMu sync.RWMutex
 	onDismiss func()
 
@@ -135,6 +143,7 @@ func Hide() {
 		pDestroyWindow.Call(uintptr(active))
 	}
 	closeHot = false
+	closeDown = false
 }
 
 func showNow(titleText, bodyText string) {
@@ -237,20 +246,28 @@ func wndProc(hwnd windows.Handle, message uint32, wParam, lParam uintptr) uintpt
 	case wmClose:
 		dismiss()
 		return 0
+	case wmLButtonDown:
+		point := point{X: int32(int16(lParam)), Y: int32(int16(lParam >> 16))}
+		setCloseState(hwnd, pointInRect(point, closeRect(hwnd)), pointInRect(point, closeRect(hwnd)))
+		return 0
 	case wmLButtonUp:
 		point := point{X: int32(int16(lParam)), Y: int32(int16(lParam >> 16))}
-		if pointInRect(point, closeRect(hwnd)) {
+		inside := pointInRect(point, closeRect(hwnd))
+		pressed := closeDown
+		setCloseState(hwnd, inside, false)
+		if pressed && inside {
 			dismiss()
 		}
 		return 0
 	case wmMouseMove:
 		point := point{X: int32(int16(lParam)), Y: int32(int16(lParam >> 16))}
-		setCloseHot(hwnd, pointInRect(point, closeRect(hwnd)))
+		inside := pointInRect(point, closeRect(hwnd))
+		setCloseState(hwnd, inside, closeDown && inside)
 		track := trackMouseEvent{Size: uint32(unsafe.Sizeof(trackMouseEvent{})), Flags: tmeLeave, HwndTrack: hwnd}
 		pTrackMouseEvent.Call(uintptr(unsafe.Pointer(&track)))
 		return 0
 	case wmMouseLeave:
-		setCloseHot(hwnd, false)
+		setCloseState(hwnd, false, false)
 		return 0
 	case wmDestroy:
 		if active == hwnd {
@@ -262,11 +279,12 @@ func wndProc(hwnd windows.Handle, message uint32, wParam, lParam uintptr) uintpt
 	return result
 }
 
-func setCloseHot(hwnd windows.Handle, value bool) {
-	if closeHot == value {
+func setCloseState(hwnd windows.Handle, hot, down bool) {
+	if closeHot == hot && closeDown == down {
 		return
 	}
-	closeHot = value
+	closeHot = hot
+	closeDown = down
 	pInvalidateRect.Call(uintptr(hwnd), 0, 0)
 }
 
@@ -290,9 +308,13 @@ func paint(hwnd windows.Handle) {
 	var client rect
 	pGetClientRect.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&client)))
 	dark := themeswitch.Current() == themeswitch.ModeDark
-	background, foreground, accent, closeHover := rgb(250, 251, 252), rgb(28, 33, 39), rgb(0, 112, 145), rgb(232, 236, 241)
+	background, foreground, accent := rgb(246, 248, 250), rgb(25, 30, 36), rgb(0, 111, 177)
+	closeForeground, closeHover, closePressed := rgb(99, 108, 118), rgb(255, 239, 240), rgb(255, 207, 211)
+	closeActiveText := rgb(190, 24, 34)
 	if dark {
-		background, foreground, accent, closeHover = rgb(35, 39, 45), rgb(244, 247, 250), rgb(81, 225, 211), rgb(66, 72, 80)
+		background, foreground, accent = rgb(31, 34, 38), rgb(244, 247, 250), rgb(47, 151, 208)
+		closeForeground, closeHover, closePressed = rgb(174, 182, 191), rgb(68, 43, 49), rgb(88, 50, 57)
+		closeActiveText = rgb(255, 162, 168)
 	}
 	brush := makeBrush(background)
 	defer pDeleteObject.Call(uintptr(brush))
@@ -307,14 +329,20 @@ func paint(hwnd windows.Handle) {
 	sc := func(v int32) int32 { return scaleForWindow(hwnd, v) }
 	margin := sc(16)
 	close := closeRect(hwnd)
+	closeText := closeForeground
 	if closeHot {
-		closeBrush := makeBrush(closeHover)
+		fill := closeHover
+		if closeDown {
+			fill = closePressed
+		}
+		closeBrush := makeBrush(fill)
 		pFillRect.Call(dc, uintptr(unsafe.Pointer(&close)), uintptr(closeBrush))
 		pDeleteObject.Call(uintptr(closeBrush))
+		closeText = closeActiveText
 	}
 	drawText(dc, title, rect{Left: margin, Top: sc(17), Right: close.Left - sc(6), Bottom: sc(43)}, sc(15), 600, dtLeft)
 	drawText(dc, body, rect{Left: margin, Top: sc(48), Right: client.Right - margin, Bottom: client.Bottom - sc(14)}, sc(13), 400, dtLeft|dtWordBreak)
-	drawText(dc, "\u00d7", close, sc(18), 400, dtCenter|dtVCenter)
+	drawCloseGlyph(dc, close, closeText)
 }
 
 func closeRect(hwnd windows.Handle) rect {
@@ -327,6 +355,32 @@ func closeRect(hwnd windows.Handle) rect {
 
 func pointInRect(point point, bounds rect) bool {
 	return point.X >= bounds.Left && point.X < bounds.Right && point.Y >= bounds.Top && point.Y < bounds.Bottom
+}
+
+func drawCloseGlyph(dc uintptr, bounds rect, color uint32) {
+	ptr, err := windows.UTF16PtrFromString("\uE711")
+	if err != nil {
+		return
+	}
+	size := bounds.Bottom - bounds.Top
+	glyphSize := size * 4 / 7
+	font := makeFontWithFace(glyphSize, 400, "Segoe MDL2 Assets")
+	if font == 0 {
+		font = makeFont(glyphSize, 400)
+	}
+	if font == 0 {
+		return
+	}
+	defer pDeleteObject.Call(uintptr(font))
+	old, _, _ := pSelectObject.Call(dc, uintptr(font))
+	defer pSelectObject.Call(dc, old)
+	pSetTextColor.Call(dc, uintptr(color))
+	pSetBkMode.Call(dc, transparent)
+	measured := textSize{}
+	pGetTextExtent.Call(dc, uintptr(unsafe.Pointer(ptr)), 1, uintptr(unsafe.Pointer(&measured)))
+	x := bounds.Left + (bounds.Right-bounds.Left-measured.CX)/2
+	y := bounds.Top + (bounds.Bottom-bounds.Top-measured.CY)/2
+	pTextOut.Call(dc, uintptr(x), uintptr(y), uintptr(unsafe.Pointer(ptr)), 1)
 }
 
 func drawText(dc uintptr, text string, bounds rect, size, weight int32, format uintptr) {
@@ -344,14 +398,19 @@ func drawText(dc uintptr, text string, bounds rect, size, weight int32, format u
 }
 
 func makeFont(size, weight int32) windows.Handle {
+	return makeFontWithFace(size, weight, "Microsoft YaHei UI")
+}
+
+func makeFontWithFace(size, weight int32, face string) windows.Handle {
 	type logFont struct {
 		Height, Width, Escapement, Orientation, Weight       int32
 		Italic, Underline, StrikeOut, CharSet                byte
 		OutPrecision, ClipPrecision, Quality, PitchAndFamily byte
 		FaceName                                             [32]uint16
 	}
-	lf := logFont{Height: -size, Weight: weight, CharSet: 1}
-	copy(lf.FaceName[:], windows.StringToUTF16("Microsoft YaHei UI"))
+	const clearTypeQuality = 5
+	lf := logFont{Height: -size, Weight: weight, CharSet: 1, Quality: clearTypeQuality}
+	copy(lf.FaceName[:], windows.StringToUTF16(face))
 	result, _, _ := pCreateFont.Call(uintptr(unsafe.Pointer(&lf)))
 	return windows.Handle(result)
 }

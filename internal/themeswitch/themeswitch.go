@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -177,6 +178,7 @@ type Scheduler struct {
 	doneCh         chan struct{}
 	running        bool
 	mu             sync.Mutex
+	manualUntil    atomic.Int64
 }
 
 // NewScheduler creates a Scheduler.
@@ -245,6 +247,33 @@ func (s *Scheduler) CheckNow() {
 	s.check(time.Now())
 }
 
+// HoldManualOverride keeps a user-selected theme until the next scheduled
+// light or dark transition. Battery dark-mode policy remains authoritative.
+func (s *Scheduler) HoldManualOverride(now time.Time) {
+	if s == nil {
+		return
+	}
+	lightMin, darkMin := s.scheduleMinutes(now)
+	if lightMin < 0 || darkMin < 0 {
+		return
+	}
+	y, m, d := now.Date()
+	today := time.Date(y, m, d, 0, 0, 0, 0, now.Location())
+	var next time.Time
+	for _, candidate := range []time.Time{
+		today.Add(time.Duration(lightMin) * time.Minute),
+		today.Add(time.Duration(darkMin) * time.Minute),
+	} {
+		if !candidate.After(now) {
+			candidate = candidate.AddDate(0, 0, 1)
+		}
+		if next.IsZero() || candidate.Before(next) {
+			next = candidate
+		}
+	}
+	s.manualUntil.Store(next.UnixNano())
+}
+
 func (s *Scheduler) check(now time.Time) {
 	// If dark-on-battery is enabled and running on battery, force dark.
 	if s.darkOnBattery && onBattery() {
@@ -253,15 +282,11 @@ func (s *Scheduler) check(now time.Time) {
 		}
 		return
 	}
-	var lightMin, darkMin int
-
-	if s.mode == "sunrise" {
-		lightMin, darkMin = sunriseSunset(now, s.latitude, s.longitude)
-	} else {
-		lightMin = parseTime(s.lightTime)
-		darkMin = parseTime(s.darkTime)
-	}
+	lightMin, darkMin := s.scheduleMinutes(now)
 	if lightMin < 0 || darkMin < 0 {
+		return
+	}
+	if until := s.manualUntil.Load(); until > now.UnixNano() {
 		return
 	}
 
@@ -292,6 +317,13 @@ func (s *Scheduler) check(now time.Time) {
 		}
 		Switch(target)
 	}
+}
+
+func (s *Scheduler) scheduleMinutes(now time.Time) (int, int) {
+	if s.mode == "sunrise" {
+		return sunriseSunset(now, s.latitude, s.longitude)
+	}
+	return parseTime(s.lightTime), parseTime(s.darkTime)
 }
 
 // sunriseSunset returns light and dark times as minutes since midnight,

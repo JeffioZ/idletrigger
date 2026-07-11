@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -180,6 +181,10 @@ func TestLoadFromRefreshesExistingPlainConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	stableTime := time.Now().Add(-time.Hour).Truncate(time.Second)
+	if err := os.Chtimes(path, stableTime, stableTime); err != nil {
+		t.Fatal(err)
+	}
 	infoAfterRefresh, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
@@ -215,6 +220,41 @@ func TestLoadFromRefreshesExistingPlainConfig(t *testing.T) {
 	}
 	if !os.SameFile(infoAfterRefresh, infoAfterSecondLoad) {
 		t.Fatal("annotated config was rewritten on the second load")
+	}
+	if !infoAfterSecondLoad.ModTime().Equal(stableTime) {
+		t.Fatal("annotated config modification time changed on the second load")
+	}
+}
+
+func TestLoadFromKeepsMalformedConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "IdleTrigger.toml")
+	broken := []byte("idle_timeout_minutes = [")
+	if err := os.WriteFile(path, broken, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := loadFrom(path); err == nil {
+		t.Fatal("loadFrom should report malformed TOML")
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(broken) {
+		t.Fatalf("malformed config was modified: %q", got)
+	}
+}
+
+func TestNormalizeConfigUsesValidationBounds(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.IdleTimeoutMinutes = 7*24*60 + 1
+	cfg.IdleWarningSeconds = 3600
+	got := NormalizeConfig(cfg)
+	if got.IdleTimeoutMinutes != DefaultConfig().IdleTimeoutMinutes {
+		t.Fatalf("idle timeout = %d, want default %d", got.IdleTimeoutMinutes, DefaultConfig().IdleTimeoutMinutes)
+	}
+	if got.IdleWarningSeconds != 3600 {
+		t.Fatalf("idle warning = %d, want 3600", got.IdleWarningSeconds)
 	}
 }
 

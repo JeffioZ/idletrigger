@@ -3,14 +3,14 @@ package popup
 
 import (
 	"fmt"
+	"os"
 	"sync"
 	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
-	"os"
 
-	t "github.com/JeffioZ/idletrigger/internal/idlewarning"
+	"github.com/JeffioZ/idletrigger/internal/idlewarning"
 	"github.com/JeffioZ/idletrigger/internal/themeswitch"
 )
 
@@ -128,35 +128,39 @@ const (
 	wsCaption       = 0x00C00000
 	wsSysMenu       = 0x00080000
 	wsClipChildren  = 0x02000000
+	wsClipSiblings  = 0x04000000
 	wsChild         = 0x40000000
 	wsVisible       = 0x10000000
 	wsVScroll       = 0x00200000
 	bsOwnerDraw     = 0x0000000B
 	ssOwnerDraw     = 0x0000000D
 	cbsDropDownList = 0x0003
+	cbsOwnerDrawFix = 0x0010
+	cbsHasStrings   = 0x0200
 	ssLeft          = 0x00000000
 	ssRight         = 0x00000002
 
 	wsExToolWindow = 0x00000080
 	wsExTopmost    = 0x00000008
+	wsExComposited = 0x02000000
 
-	swHide         = 0
-	swShowNormal   = 1
 	swpShowWindow  = 0x0040
 	monitorNearest = 2
 	gwlpWndProc    = ^uintptr(3)
 
-	odsSelected = 0x0001
-	odsDisabled = 0x0004
-	odsHotlight = 0x0040
-	dtCenter    = 0x00000001
-	dtVCenter   = 0x00000004
-	dtLeft      = 0x00000000
-	dtWordBreak = 0x00000010
-	dtCalcRect  = 0x00000400
-	transparent = 1
-	waInactive  = 0
-	tmeLeave    = 0x00000002
+	odsSelected     = 0x0001
+	odsDisabled     = 0x0004
+	odsHotlight     = 0x0040
+	odsComboBoxEdit = 0x1000
+	dtCenter        = 0x00000001
+	dtVCenter       = 0x00000004
+	dtLeft          = 0x00000000
+	dtWordBreak     = 0x00000010
+	dtCalcRect      = 0x00000400
+	dtSingleLine    = 0x00000020
+	transparent     = 1
+	waInactive      = 0
+	tmeLeave        = 0x00000002
 
 	ttsAlwaysTip      = 0x0001
 	ttsNoPrefix       = 0x0002
@@ -167,6 +171,7 @@ const (
 	cbAddString       = 0x0143
 	cbSetCurSel       = 0x014E
 	cbGetCurSel       = 0x0147
+	cbSetItemHeight   = 0x0153
 )
 
 const (
@@ -207,6 +212,7 @@ var (
 	gdi32    = windows.NewLazySystemDLL("gdi32.dll")
 	comctl   = windows.NewLazySystemDLL("comctl32.dll")
 	dwmapi   = windows.NewLazySystemDLL("dwmapi.dll")
+	uxtheme  = windows.NewLazySystemDLL("uxtheme.dll")
 	kernel32 = windows.NewLazySystemDLL("kernel32.dll")
 
 	pCreateWindowEx        = user32.NewProc("CreateWindowExW")
@@ -219,7 +225,6 @@ var (
 	pSendMessage           = user32.NewProc("SendMessageW")
 	pSetWindowLong         = user32.NewProc("SetWindowLongW")
 	pSetWindowLongPtr      = user32.NewProc("SetWindowLongPtrW")
-	pShowWindow            = user32.NewProc("ShowWindow")
 	pSetWindowPos          = user32.NewProc("SetWindowPos")
 	pGetCursorPos          = user32.NewProc("GetCursorPos")
 	pMonitorFromWindow     = user32.NewProc("MonitorFromWindow")
@@ -245,6 +250,7 @@ var (
 	pSelectObject          = gdi32.NewProc("SelectObject")
 	pInitCommonControlsEx  = comctl.NewProc("InitCommonControlsEx")
 	pDwmSetWindowAttribute = dwmapi.NewProc("DwmSetWindowAttribute")
+	pSetWindowTheme        = uxtheme.NewProc("SetWindowTheme")
 	pGetModuleHandle       = kernel32.NewProc("GetModuleHandleW")
 
 	classOnce sync.Once
@@ -316,6 +322,7 @@ type panel struct {
 	nextStaticID                    uint16
 	idlePaused                      bool
 	themeSchedule                   string
+	timeoutOptions                  []timeoutChoice
 }
 
 // Show opens the panel or closes the currently open panel. It must be called
@@ -375,14 +382,13 @@ func Show(state State, onAction OnAction, langFn LangFunc) error {
 	return nil
 }
 
-// Hide closes the currently visible panel.
+// Hide destroys the currently visible panel and releases its native resources.
 func Hide() {
 	panelMu.Lock()
 	p := active
-	active = nil
 	panelMu.Unlock()
 	if p != nil && p.hwnd != 0 {
-		pShowWindow.Call(uintptr(p.hwnd), swHide)
+		pDestroyWindow.Call(uintptr(p.hwnd))
 	}
 }
 
@@ -449,7 +455,7 @@ func (p *panel) create() error {
 	var cursor struct{ X, Y int32 }
 	pGetCursorPos.Call(uintptr(unsafe.Pointer(&cursor)))
 	style := uint32(wsPopup | wsCaption | wsSysMenu | wsClipChildren)
-	exStyle := uint32(wsExTopmost)
+	exStyle := uint32(wsExTopmost | wsExComposited)
 	hwnd, _, callErr := pCreateWindowEx.Call(uintptr(exStyle), uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(title)), uintptr(style), uintptr(cursor.X), uintptr(cursor.Y), 1, 1, uintptr(p.owner), 0, 0, 0)
 	if hwnd == 0 {
 		return fmt.Errorf("create control panel: %w", callErr)
@@ -636,18 +642,23 @@ func (p *panel) build() error {
 		return err
 	}
 	combo := func(x, y, width, height int, current int) error {
-		hwnd, err := p.child("COMBOBOX", "", wsChild|wsVisible|wsVScroll|cbsDropDownList, x, y, width, height, idIdleTimeout, p.font)
+		hwnd, err := p.child("COMBOBOX", "", wsChild|wsVisible|wsClipSiblings|wsVScroll|cbsDropDownList|cbsOwnerDrawFix|cbsHasStrings, x, y, width, height, idIdleTimeout, p.font)
 		if err != nil {
 			return err
 		}
-		options, selected := timeoutChoices(current, p.isChinese)
-		for _, option := range options {
+		p.applyComboTheme(hwnd, themeswitch.Current() == themeswitch.ModeDark)
+		var selected int
+		p.timeoutOptions, selected = timeoutChoices(current, p.isChinese)
+		for _, option := range p.timeoutOptions {
 			label, err := windows.UTF16PtrFromString(option.label)
 			if err != nil {
 				return err
 			}
 			pSendMessage.Call(uintptr(hwnd), cbAddString, 0, uintptr(unsafe.Pointer(label)))
 		}
+		itemHeight := uintptr(p.sc(30))
+		pSendMessage.Call(uintptr(hwnd), cbSetItemHeight, ^uintptr(0), itemHeight)
+		pSendMessage.Call(uintptr(hwnd), cbSetItemHeight, 0, itemHeight)
 		pSendMessage.Call(uintptr(hwnd), cbSetCurSel, uintptr(selected), 0)
 		return nil
 	}
@@ -754,14 +765,17 @@ func (p *panel) build() error {
 		return err
 	}
 	y += sectionH + labelGap
+	if os.Getenv("IDLETRIGGER_DEV") == "1" {
+		height, err := choiceRow(pad, y, baseW-2*pad, []string{p.text("msg_idle_warning_test")}, []uint16{idTestWarning})
+		if err != nil {
+			return err
+		}
+		y += height + gap
+	}
 	bottomLabels := []string{p.text("menu_open_config"), p.text("menu_exit")}
 	bottomH := p.rowHeight(bottomLabels, (baseW-2*pad-gap)/2)
 	p.clientH = y + bottomH + pad
 	_, err = choiceRow(pad, y, baseW-2*pad, bottomLabels, []uint16{idConfig, idExit})
-	if os.Getenv("IDLETRIGGER_DEV") == "1" {
-		testLabels := []string{p.text("msg_idle_warning_test")}
-		_, _ = choiceRow(pad, y-bottomH-p.sc(4), baseW-2*pad, testLabels, []uint16{idTestWarning})
-	}
 	return err
 }
 
@@ -1009,7 +1023,9 @@ func wndProc(hwnd windows.Handle, msg uint32, wp, lp uintptr) uintptr {
 		case wmDrawItem:
 			if lp != 0 {
 				item := drawItemFromLParam(lp)
-				if p.staticKinds[uint16(item.CtlID)] != staticNone {
+				if uint16(item.CtlID) == idIdleTimeout {
+					p.drawTimeoutChoice(item)
+				} else if p.staticKinds[uint16(item.CtlID)] != staticNone {
 					p.drawStatic(item)
 				} else {
 					p.drawButton(item)
@@ -1110,7 +1126,9 @@ func (p *panel) handleCommand(id uint16) {
 		action = ActLanguage
 		value = 1
 	case id == idTestWarning:
-		t.Show(p.text("app_title"), p.text("msg_idle_warning_test"))
+		Hide()
+		idlewarning.Show(p.text("app_title"), p.text("msg_idle_warning_test"))
+		return
 	case id == idConfig:
 		action = ActConfig
 	case id == idExit:
@@ -1129,23 +1147,22 @@ func (p *panel) handleCommand(id uint16) {
 func (p *panel) handleTimeoutSelection() {
 	hwnd := p.controls[idIdleTimeout]
 	index, _, _ := pSendMessage.Call(uintptr(hwnd), cbGetCurSel, 0, 0)
-	choices, _ := timeoutChoices(p.idleTimeout, p.isChinese)
-	if index >= uintptr(len(choices)) {
+	if index >= uintptr(len(p.timeoutOptions)) {
 		return
 	}
 	p.setToggle(idNoSleep, false)
 	p.setToggle(idIdle, true)
 	if p.onAction != nil {
-		p.onAction(ActIdleTimeout, choices[index].minutes)
+		p.onAction(ActIdleTimeout, p.timeoutOptions[index].minutes)
 	}
 }
 
 func (p *panel) refreshTheme(invalidate bool) {
 	dark := themeswitch.Current() == themeswitch.ModeDark
 	if dark {
-		p.palette = colors{background: rgb(31, 34, 38), surface: rgb(43, 48, 54), hover: rgb(54, 61, 69), border: rgb(76, 85, 95), accent: rgb(20, 132, 194), accentHover: rgb(47, 151, 208), pressed: rgb(11, 107, 164), text: rgb(244, 247, 250), mutedText: rgb(174, 182, 191), accentText: rgb(255, 255, 255), disabled: rgb(40, 44, 49), danger: rgb(101, 45, 50), dangerHover: rgb(126, 53, 59), dangerPressed: rgb(84, 37, 42), dangerText: rgb(255, 240, 241)}
+		p.palette = colors{background: rgb(31, 34, 38), surface: rgb(43, 48, 54), hover: rgb(54, 61, 69), border: rgb(76, 85, 95), accent: rgb(20, 132, 194), accentHover: rgb(47, 151, 208), pressed: rgb(11, 107, 164), text: rgb(244, 247, 250), mutedText: rgb(174, 182, 191), accentText: rgb(255, 255, 255), disabled: rgb(40, 44, 49), danger: rgb(88, 34, 39), dangerHover: rgb(116, 43, 50), dangerPressed: rgb(72, 28, 33), dangerText: rgb(255, 162, 168)}
 	} else {
-		p.palette = colors{background: rgb(246, 248, 250), surface: rgb(255, 255, 255), hover: rgb(235, 243, 249), border: rgb(202, 211, 220), accent: rgb(0, 111, 177), accentHover: rgb(0, 126, 198), pressed: rgb(0, 91, 151), text: rgb(25, 30, 36), mutedText: rgb(99, 108, 118), accentText: rgb(255, 255, 255), disabled: rgb(238, 242, 245), danger: rgb(255, 243, 244), dangerHover: rgb(255, 231, 233), dangerPressed: rgb(255, 213, 216), dangerText: rgb(157, 40, 47)}
+		p.palette = colors{background: rgb(246, 248, 250), surface: rgb(255, 255, 255), hover: rgb(235, 243, 249), border: rgb(202, 211, 220), accent: rgb(0, 111, 177), accentHover: rgb(0, 126, 198), pressed: rgb(0, 91, 151), text: rgb(25, 30, 36), mutedText: rgb(99, 108, 118), accentText: rgb(255, 255, 255), disabled: rgb(238, 242, 245), danger: rgb(255, 239, 240), dangerHover: rgb(255, 225, 228), dangerPressed: rgb(255, 207, 211), dangerText: rgb(190, 24, 34)}
 	}
 	p.releaseBrushes()
 	p.backgroundBrush = makeBrush(p.palette.background)
@@ -1160,11 +1177,26 @@ func (p *panel) refreshTheme(invalidate bool) {
 	p.dangerHoverBrush = makeBrush(p.palette.dangerHover)
 	p.dangerPressedBrush = makeBrush(p.palette.dangerPressed)
 	p.applyFrameTheme(dark)
+	p.applyComboTheme(p.controls[idIdleTimeout], dark)
 	if invalidate && p.hwnd != 0 {
 		pInvalidateRect.Call(uintptr(p.hwnd), 0, 1)
 		for id := range p.controls {
 			p.invalidate(id)
 		}
+	}
+}
+
+func (p *panel) applyComboTheme(hwnd windows.Handle, dark bool) {
+	if hwnd == 0 {
+		return
+	}
+	if !dark {
+		pSetWindowTheme.Call(uintptr(hwnd), 0, 0)
+		return
+	}
+	name, err := windows.UTF16PtrFromString("DarkMode_Explorer")
+	if err == nil {
+		pSetWindowTheme.Call(uintptr(hwnd), uintptr(unsafe.Pointer(name)), 0)
 	}
 }
 
@@ -1244,6 +1276,40 @@ func (p *panel) drawButton(item *drawItem) {
 	r.Left += int32(p.sc(8))
 	r.Right -= int32(p.sc(8))
 	drawTextCentered(item.HDC, text, r)
+}
+
+// drawTimeoutChoice owns both the selected field and the drop-down rows. The
+// native combo box still supplies focus, keyboard navigation, and DPI-aware
+// arrow geometry, while this keeps its content on the panel's theme palette.
+func (p *panel) drawTimeoutChoice(item *drawItem) {
+	brush := p.surfaceBrush
+	textColor := p.palette.text
+	if item.ItemState&odsSelected != 0 && item.ItemState&odsComboBoxEdit == 0 {
+		brush = p.accentBrush
+		textColor = p.palette.accentText
+	}
+	pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&item.Rect)), uintptr(brush))
+
+	// UINT_MAX means that the combo box has no current item to paint.
+	if item.ItemID == ^uint32(0) || int(item.ItemID) >= len(p.timeoutOptions) {
+		return
+	}
+	text, err := windows.UTF16PtrFromString(p.timeoutOptions[item.ItemID].label)
+	if err != nil {
+		return
+	}
+	pSetTextColor.Call(uintptr(item.HDC), uintptr(textColor))
+	pSetBkMode.Call(uintptr(item.HDC), transparent)
+	old, _, _ := pSelectObject.Call(uintptr(item.HDC), uintptr(p.font))
+	defer pSelectObject.Call(uintptr(item.HDC), old)
+	bounds := item.Rect
+	bounds.Left += int32(p.sc(8))
+	if item.ItemState&odsComboBoxEdit != 0 {
+		bounds.Right -= int32(p.sc(40))
+	} else {
+		bounds.Right -= int32(p.sc(8))
+	}
+	pDrawText.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(text)), ^uintptr(0), uintptr(unsafe.Pointer(&bounds)), dtLeft|dtVCenter|dtSingleLine)
 }
 
 func (p *panel) drawStatic(item *drawItem) {

@@ -49,7 +49,7 @@
   "cli_success": "Operation completed.",
   "warning_config_defaults": "Warning: failed to load the configuration; using defaults:",
   "config_header": "IdleTrigger configuration",
-  "config_edit_hint": "Edit this file, then restart IdleTrigger or run config:reload.",
+  "config_edit_hint": "Changes apply automatically within a few seconds. Restart IdleTrigger or run config:reload to apply them immediately.",
   "cli_unknown": "Unknown command. Run without arguments to start the tray icon.",
   "version": "IdleTrigger {{version}}",
   "msg_action_failed": "Failed to run “%s”:\n%s",

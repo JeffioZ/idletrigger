@@ -15,7 +15,9 @@ import (
 	"github.com/JeffioZ/idletrigger/internal/darkmode"
 	"github.com/JeffioZ/idletrigger/internal/dpi"
 	"github.com/JeffioZ/idletrigger/internal/i18n"
+	"github.com/JeffioZ/idletrigger/internal/ipc"
 	mylog "github.com/JeffioZ/idletrigger/internal/log"
+	"github.com/JeffioZ/idletrigger/internal/singleinstance"
 	"github.com/JeffioZ/idletrigger/internal/tray"
 	"github.com/JeffioZ/idletrigger/internal/version"
 )
@@ -39,8 +41,27 @@ func main() {
 			isCLI = true
 		}
 	}
+	if !isCLI {
+		guard, primary, err := singleinstance.Acquire()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "IdleTrigger startup failed:", err)
+			return
+		}
+		if !primary {
+			deadline := time.Now().Add(2 * time.Second)
+			for time.Now().Before(deadline) {
+				if _, ok := ipc.Send("open"); ok {
+					return
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+			return
+		}
+		defer guard.Release()
+	}
 
 	cfg, err := config.Load()
+	configLoadErr := err
 	if err != nil {
 		fmt.Fprintln(os.Stderr, i18n.T("auto", "warning_config_defaults"), err)
 		cfg = config.DefaultConfig()
@@ -57,6 +78,9 @@ func main() {
 	mylog.Init(cfg.LoggingEnabled, filepath.Dir(exePath))
 	defer mylog.Close()
 	mylog.Info("IdleTrigger starting: version=%s mode=GUI", version.Value)
+	if configLoadErr != nil {
+		mylog.Info("Config load failed; using defaults without modifying the file: %v", configLoadErr)
+	}
 
 	if startupDelay > 0 {
 		time.Sleep(time.Duration(startupDelay) * time.Second)

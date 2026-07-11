@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -27,7 +28,7 @@ const (
 	ActionLock      Action = "lock"
 )
 
-const configTemplateVersion = 3
+const configTemplateVersion = 4
 
 // Config holds all user-configurable settings.
 type Config struct {
@@ -158,12 +159,21 @@ func loadFrom(p string) (Config, error) {
 		return cfg, fmt.Errorf("read config: %w", err)
 	}
 	if err := toml.Unmarshal(data, &cfg); err != nil {
-		saveTo(p, DefaultConfig())
-		return DefaultConfig(), nil
+		return DefaultConfig(), fmt.Errorf("parse config: %w", err)
 	}
-	cfg = NormalizeConfig(cfg)
-	saveTo(p, cfg)
-	return cfg, nil
+	normalized := NormalizeConfig(cfg)
+	corrected := !reflect.DeepEqual(normalized, cfg)
+	if corrected {
+		if err := os.WriteFile(p+".bak", data, 0600); err != nil {
+			return normalized, fmt.Errorf("back up corrected config: %w", err)
+		}
+	}
+	if needsAnnotatedTOMLRefresh(data) || corrected {
+		if err := saveTo(p, normalized); err != nil {
+			return normalized, fmt.Errorf("refresh config annotations: %w", err)
+		}
+	}
+	return normalized, nil
 }
 
 func needsAnnotatedTOMLRefresh(data []byte) bool {
@@ -194,15 +204,15 @@ func NormalizeConfig(cfg Config) Config {
 	if cfg.Language != "auto" && cfg.Language != "en" && cfg.Language != "zh-CN" {
 		cfg.Language = d.Language
 	}
-	if cfg.IdleTimeoutMinutes < 0 {
-		cfg.IdleTimeoutMinutes = 0
+	if cfg.IdleTimeoutMinutes < 0 || cfg.IdleTimeoutMinutes > 7*24*60 {
+		cfg.IdleTimeoutMinutes = d.IdleTimeoutMinutes
 	}
 	switch cfg.IdleAction {
 	case "sleep", "hibernate", "shutdown", "lock":
 	default:
 		cfg.IdleAction = d.IdleAction
 	}
-	if cfg.IdleWarningSeconds < 0 || cfg.IdleWarningSeconds > 300 {
+	if cfg.IdleWarningSeconds < 0 || cfg.IdleWarningSeconds > 3600 {
 		cfg.IdleWarningSeconds = d.IdleWarningSeconds
 	}
 	if cfg.NoSleepBatteryThreshold < 0 || cfg.NoSleepBatteryThreshold > 100 {

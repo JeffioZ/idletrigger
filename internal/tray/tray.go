@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/JeffioZ/idletrigger/assets"
@@ -49,6 +50,7 @@ type trayState struct {
 	trayThemeDark  bool
 	menuOpen       *systray.MenuItem
 	menuExit       *systray.MenuItem
+	selfConfigMod  atomic.Int64
 }
 
 type stateRequest struct {
@@ -123,6 +125,7 @@ func Run(cfg config.Config, cbs Callbacks) {
 			}
 		}()
 		go s.batteryLoop()
+		go s.watchConfig()
 
 		systray.OnLeftClick = func() { s.showPopup() }
 		systray.OnPowerChange = func() {
@@ -606,53 +609,66 @@ func (s *trayState) handleIPCState(cmd string) string {
 
 	case "ping":
 		return "pong"
+	case "open":
+		if !systray.Post(s.showPopup) {
+			return "err: tray UI is not ready"
+		}
+		return "ok"
 
 	case "config:reload":
 		mylog.Info("IPC config reload requested")
-		newCfg, err := config.Load()
-		if err != nil {
+		if err := s.reloadConfig(); err != nil {
 			return "err: " + err.Error()
 		}
-		s.cfg = newCfg
-		if enabled, updated, err := autostart.EnsureCurrent(); err == nil {
-			s.cfg.AutostartEnabled = enabled
-			if updated {
-				mylog.Info("Autostart entry updated to current executable path")
-			}
-		} else {
-			mylog.Info("Autostart check failed: %v", err)
-		}
-		s.stopMonitor()
-		s.stopHotkeys()
-		s.stopProcessWatcher()
-		s.stopThemeScheduler()
-		nosleep.Disable()
-		// Config compatibility: if both NoSleep and idle monitor are enabled,
-		// resolve the conflict — NoSleep takes priority.
-		if s.cfg.NoSleepEnabled && s.cfg.IdleTimeoutMinutes > 0 {
-			s.cfg.IdleTimeoutMinutes = 0
-		}
-		s.lang = s.cfg.Language
-		s.applyLanguage()
-		s.batteryBlocked = false
-		s.refreshBatteryPolicy()
-		if s.cfg.HotkeysEnabled {
-			s.startHotkeys()
-		}
-		if s.cfg.ProcessWatchEnabled && len(s.cfg.ProcessWatchList) > 0 {
-			s.startProcessWatcher()
-		}
-		if s.cfg.ThemeSwitchEnabled {
-			s.startThemeScheduler()
-		}
-		s.reconcileRuntime()
-
-		s.updateIcon()
 		return "ok"
 
 	default:
 		return "err: unknown command: " + cmd
 	}
+}
+
+func (s *trayState) reloadConfig() error {
+	newCfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	s.cfg = newCfg
+	if enabled, updated, err := autostart.EnsureCurrent(); err == nil {
+		s.cfg.AutostartEnabled = enabled
+		if updated {
+			mylog.Info("Autostart entry updated to current executable path")
+		}
+	} else {
+		mylog.Info("Autostart check failed: %v", err)
+	}
+	s.stopMonitor()
+	s.stopHotkeys()
+	s.stopProcessWatcher()
+	s.stopThemeScheduler()
+	nosleep.Disable()
+	// Config compatibility: if both NoSleep and idle monitor are enabled,
+	// resolve the conflict — NoSleep takes priority.
+	if s.cfg.NoSleepEnabled && s.cfg.IdleTimeoutMinutes > 0 {
+		s.cfg.IdleTimeoutMinutes = 0
+	}
+	s.lang = s.cfg.Language
+	s.applyLanguage()
+	s.batteryBlocked = false
+	s.refreshBatteryPolicy()
+	if s.cfg.HotkeysEnabled {
+		s.startHotkeys()
+	}
+	if s.cfg.ProcessWatchEnabled && len(s.cfg.ProcessWatchList) > 0 {
+		s.startProcessWatcher()
+	}
+	if s.cfg.ThemeSwitchEnabled {
+		s.startThemeScheduler()
+	}
+	s.reconcileRuntime()
+	s.updateIcon()
+	s.rememberConfigModTime()
+	systray.Post(popup.Hide)
+	return nil
 }
 
 func (s *trayState) fmtNoSleepStatus() string {
@@ -762,6 +778,7 @@ func (s *trayState) saveConfigErr() error {
 		mylog.Info("Config save failed: %v", err)
 		return err
 	}
+	s.rememberConfigModTime()
 	if s.callbacks.OnConfigChanged != nil {
 		s.callbacks.OnConfigChanged(s.cfg)
 	}
@@ -925,11 +942,15 @@ func (s *trayState) handlePopupAction(action popup.Action, value int) {
 		if themeswitch.Current() == themeswitch.ModeDark {
 			mode = themeswitch.ModeLight
 		}
+		if s.themeSched != nil {
+			s.themeSched.HoldManualOverride(time.Now())
+			mylog.Info("Manual theme override enabled until the next scheduled transition")
+		}
 		s.runThemeOperation("menu_theme_switch_now", func() error {
 			return themeswitch.Switch(mode)
-		})
+		}, nil)
 	case popup.ActRepairTheme:
-		s.runThemeOperation("menu_theme_repair", themeswitch.Refresh)
+		s.runThemeOperation("menu_theme_repair", themeswitch.Refresh, nil)
 	case popup.ActHotkeyToggle:
 		s.cfg.HotkeysEnabled = !s.cfg.HotkeysEnabled
 		if s.cfg.HotkeysEnabled {
@@ -985,13 +1006,18 @@ func (s *trayState) restartThemeScheduler() {
 	s.startThemeScheduler()
 }
 
-func (s *trayState) runThemeOperation(actionKey string, fn func() error) {
+func (s *trayState) runThemeOperation(actionKey string, fn func() error, onSuccess func()) {
 	go func() {
 		if err := fn(); err != nil {
 			s.post(func() { s.showError(actionKey, err) })
 			return
 		}
-		s.post(func() { s.refreshTrayThemeIcon() })
+		s.post(func() {
+			if onSuccess != nil {
+				onSuccess()
+			}
+			s.refreshTrayThemeIcon()
+		})
 	}()
 }
 
@@ -1022,37 +1048,29 @@ func (s *trayState) watchConfig() {
 		if err != nil {
 			continue
 		}
-		if info.ModTime().After(lastMod) {
-			lastMod = info.ModTime()
-			newCfg, err := config.Load()
-			if err != nil {
-				mylog.Info("config reload failed: %v", err)
+		modTime := info.ModTime()
+		if modTime.After(lastMod) {
+			lastMod = modTime
+			if modTime.UnixNano() == s.selfConfigMod.Load() {
 				continue
 			}
-			s.cfg = newCfg
-			s.lang = s.cfg.Language
-			s.reconcileRuntime()
-			s.updateIcon()
-			popup.Hide()
-			mylog.Info("config reloaded from disk")
+			s.post(func() {
+				if err := s.reloadConfig(); err != nil {
+					mylog.Info("config reload failed: %v", err)
+					return
+				}
+				mylog.Info("config reloaded from disk")
+			})
 		}
 	}
 }
 
-func (s *trayState) popupState() popup.State {
-	return popup.State{
-		NoSleepEnabled:      s.cfg.NoSleepEnabled,
-		ProcessWatchEnabled: s.cfg.ProcessWatchEnabled,
-		IdleEnabled:         s.cfg.IdleTimeoutMinutes > 0,
-		IdleTimeout:         s.cfg.IdleTimeoutMinutes,
-		IdleAction:          string(s.cfg.IdleAction),
-		ThemeSwitchEnabled:  s.cfg.ThemeSwitchEnabled,
-		DarkOnBattery:       s.cfg.ThemeDarkOnBattery,
-		SkipFullscreen:      s.cfg.ThemeSkipFullscreen,
-		HotkeysEnabled:      s.cfg.HotkeysEnabled,
-		AutostartEnabled:    s.cfg.AutostartEnabled,
-		IsChinese:           s.lang == "zh-CN",
-		ThemeSchedule:       s.cfg.ThemeMode,
-		LoggingEnabled:      s.cfg.LoggingEnabled,
+func (s *trayState) rememberConfigModTime() {
+	path, err := config.Path()
+	if err != nil {
+		return
+	}
+	if info, err := os.Stat(path); err == nil {
+		s.selfConfigMod.Store(info.ModTime().UnixNano())
 	}
 }

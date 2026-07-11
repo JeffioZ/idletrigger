@@ -5,6 +5,7 @@
 
 # Runtime config (generated next to the EXE)
 IdleTrigger.toml
+IdleTrigger.toml.bak
 IdleTrigger.log
 IdleTrigger.log.1
 .IdleTrigger-*.toml.tmp
