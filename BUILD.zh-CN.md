@@ -92,13 +92,17 @@ go build -mod=vendor -trimpath -ldflags="-s -w -H windowsgui" -o dist/IdleTrigge
 
 ```powershell
 go test ./...
-go build -o dist/IdleTrigger-dev.exe .
-.\dist\IdleTrigger-dev.exe
+$env:CGO_ENABLED = "0"
+$env:GOARCH = "amd64"
+go build -trimpath -ldflags="-H windowsgui" -o dist/IdleTrigger-x64-dev.exe .
+.\dist\IdleTrigger-x64-dev.exe
 
 # 托盘程序启动后，在第二个终端中执行：
-.\dist\IdleTrigger-dev.exe nosleep on
-.\dist\IdleTrigger-dev.exe nosleep status
-.\dist\IdleTrigger-dev.exe monitor on
+.\dist\IdleTrigger-x64-dev.exe nosleep on
+.\dist\IdleTrigger-x64-dev.exe nosleep status
+.\dist\IdleTrigger-x64-dev.exe monitor on
 ```
+
+制作文档截图时，可在启动 EXE 前设置 `IDLETRIGGER_CAPTURE_MODE=1`，再从托盘图标打开浮层。截图模式会把控制浮层显示为普通顶层应用窗口，便于截图工具选中整窗；该模式仅用于文档截图和视觉检查。
 
 代码签名是可选发布步骤。调试构建不要使用 UPX 加壳，以免增加诊断和杀毒软件分析成本。

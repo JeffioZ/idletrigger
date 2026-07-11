@@ -32,6 +32,19 @@ Windows 7 is intentionally not supported by the main build. See [BUILD.md](BUILD
 
 The control panel follows Windows light/dark mode, responds to DPI changes, and closes when it loses focus. Tooltips explain each available option.
 
+## Screenshots
+
+<img src="docs/images/panel-en-light.png" alt="IdleTrigger control panel in English light mode" width="420">
+
+<details>
+<summary>More themes and languages</summary>
+
+| English dark | Simplified Chinese light | Simplified Chinese dark |
+| --- | --- | --- |
+| <img src="docs/images/panel-en-dark.png" alt="IdleTrigger control panel in English dark mode" width="260"> | <img src="docs/images/panel-zh-light.png" alt="IdleTrigger control panel in Simplified Chinese light mode" width="260"> | <img src="docs/images/panel-zh-dark.png" alt="IdleTrigger control panel in Simplified Chinese dark mode" width="260"> |
+
+</details>
+
 ## Idle Monitor
 
 The idle monitor is enabled by default with a 30-minute timeout and Sleep as its action. Available panel timeouts are:
@@ -92,6 +105,7 @@ See [BUILD.md](BUILD.md) for prerequisites, dual-architecture builds, resource g
 
 ```text
 assets/                  Application icon, manifest, tray icon variants, resource tools
+docs/images/             README screenshots
 internal/actions/        Windows lock, sleep, hibernate, shutdown, and restart actions
 internal/config/         TOML load, validation, migration, and atomic save
 internal/idlewarning/    Non-activating, DPI-aware idle warning overlay

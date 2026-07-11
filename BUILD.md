@@ -92,13 +92,17 @@ go build -mod=vendor -trimpath -ldflags="-s -w -H windowsgui" -o dist/IdleTrigge
 
 ```powershell
 go test ./...
-go build -o dist/IdleTrigger-dev.exe .
-.\dist\IdleTrigger-dev.exe
+$env:CGO_ENABLED = "0"
+$env:GOARCH = "amd64"
+go build -trimpath -ldflags="-H windowsgui" -o dist/IdleTrigger-x64-dev.exe .
+.\dist\IdleTrigger-x64-dev.exe
 
 # In a second terminal after the tray app starts:
-.\dist\IdleTrigger-dev.exe nosleep on
-.\dist\IdleTrigger-dev.exe nosleep status
-.\dist\IdleTrigger-dev.exe monitor on
+.\dist\IdleTrigger-x64-dev.exe nosleep on
+.\dist\IdleTrigger-x64-dev.exe nosleep status
+.\dist\IdleTrigger-x64-dev.exe monitor on
 ```
+
+For documentation screenshots, set `IDLETRIGGER_CAPTURE_MODE=1` before launching the EXE, then open the panel from the tray icon. Capture mode shows the panel as a regular top-level app window so screenshot tools can select the whole window. It is only intended for documentation and visual checks.
 
 Code signing is an optional release step. Do not pack debug builds with UPX: it complicates diagnostics and can increase antivirus scrutiny.
