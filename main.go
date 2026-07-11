@@ -58,7 +58,9 @@ func main() {
 	defer mylog.Close()
 	mylog.Info("IdleTrigger starting: version=%s mode=GUI", version.Value)
 
-	if startupDelay > 0 { time.Sleep(time.Duration(startupDelay) * time.Second) }
+	if startupDelay > 0 {
+		time.Sleep(time.Duration(startupDelay) * time.Second)
+	}
 	tray.Run(cfg, tray.Callbacks{})
 }
 

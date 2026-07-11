@@ -4,7 +4,7 @@ import "testing"
 
 func TestCommandLineQuotesExecutableWithoutEscapingQuotes(t *testing.T) {
 	got := commandLine("C:\\Program Files\\IdleTrigger\\IdleTrigger-x64.exe")
-	want := "\"C:\\Program Files\\IdleTrigger\\IdleTrigger-x64.exe\" --minimized"
+	want := "\"C:\\Program Files\\IdleTrigger\\IdleTrigger-x64.exe\" --minimized --delay=3"
 	if got != want {
 		t.Fatalf("commandLine() = %q, want %q", got, want)
 	}
