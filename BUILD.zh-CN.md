@@ -51,10 +51,10 @@ $version = "dev"
 $ldflags = "-s -w -H windowsgui -X github.com/JeffioZ/idletrigger/internal/version.Value=$version"
 
 $env:GOARCH = "amd64"
-go build -trimpath "-ldflags=$ldflags" -o IdleTrigger-x64.exe .
+go build -trimpath "-ldflags=$ldflags" -o dist/IdleTrigger-x64.exe .
 
 $env:GOARCH = "386"
-go build -trimpath "-ldflags=$ldflags" -o IdleTrigger-x86.exe .
+go build -trimpath "-ldflags=$ldflags" -o dist/IdleTrigger-x86.exe .
 ```
 
 发布工作流会先运行 test 与 vet，再生成两种 EXE，并发布 `SHA256SUMS.txt`。
@@ -85,14 +85,14 @@ go mod vendor
 
 $env:CGO_ENABLED = "0"
 $env:GOARCH = "amd64"
-go build -mod=vendor -trimpath -ldflags="-s -w -H windowsgui" -o IdleTrigger-x64.exe .
+go build -mod=vendor -trimpath -ldflags="-s -w -H windowsgui" -o dist/IdleTrigger-x64.exe .
 ```
 
 ## 开发调试
 
 ```powershell
 go test ./...
-go build -o IdleTrigger-dev.exe .
+go build -o dist/IdleTrigger-dev.exe .
 .\IdleTrigger-dev.exe
 
 # 托盘程序启动后，在第二个终端中执行：
