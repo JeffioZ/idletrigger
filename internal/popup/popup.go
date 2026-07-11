@@ -124,25 +124,31 @@ const (
 	bnClicked         = 0
 	cbnSelChange      = 1
 
-	wsPopup         = 0x80000000
-	wsCaption       = 0x00C00000
-	wsSysMenu       = 0x00080000
-	wsClipChildren  = 0x02000000
-	wsClipSiblings  = 0x04000000
-	wsChild         = 0x40000000
-	wsVisible       = 0x10000000
-	wsVScroll       = 0x00200000
-	bsOwnerDraw     = 0x0000000B
-	ssOwnerDraw     = 0x0000000D
-	cbsDropDownList = 0x0003
-	cbsOwnerDrawFix = 0x0010
-	cbsHasStrings   = 0x0200
-	ssLeft          = 0x00000000
-	ssRight         = 0x00000002
+	wsOverlapped       = 0x00000000
+	wsPopup            = 0x80000000
+	wsCaption          = 0x00C00000
+	wsSysMenu          = 0x00080000
+	wsThickFrame       = 0x00040000
+	wsMinimizeBox      = 0x00020000
+	wsMaximizeBox      = 0x00010000
+	wsClipChildren     = 0x02000000
+	wsClipSiblings     = 0x04000000
+	wsChild            = 0x40000000
+	wsVisible          = 0x10000000
+	wsVScroll          = 0x00200000
+	wsOverlappedWindow = wsOverlapped | wsCaption | wsSysMenu | wsThickFrame | wsMinimizeBox | wsMaximizeBox
+	bsOwnerDraw        = 0x0000000B
+	ssOwnerDraw        = 0x0000000D
+	cbsDropDownList    = 0x0003
+	cbsOwnerDrawFix    = 0x0010
+	cbsHasStrings      = 0x0200
+	ssLeft             = 0x00000000
+	ssRight            = 0x00000002
 
 	wsExToolWindow = 0x00000080
 	wsExTopmost    = 0x00000008
 	wsExComposited = 0x02000000
+	wsExAppWindow  = 0x00040000
 
 	swpShowWindow  = 0x0040
 	monitorNearest = 2
@@ -456,7 +462,15 @@ func (p *panel) create() error {
 	pGetCursorPos.Call(uintptr(unsafe.Pointer(&cursor)))
 	style := uint32(wsPopup | wsCaption | wsSysMenu | wsClipChildren)
 	exStyle := uint32(wsExTopmost | wsExComposited)
-	hwnd, _, callErr := pCreateWindowEx.Call(uintptr(exStyle), uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(title)), uintptr(style), uintptr(cursor.X), uintptr(cursor.Y), 1, 1, uintptr(p.owner), 0, 0, 0)
+	owner := uintptr(p.owner)
+	if captureMode() {
+		// Capture mode uses a normal app window shape so screenshot tools can
+		// detect the whole panel instead of treating it as a transient tray popup.
+		style = uint32(wsOverlappedWindow | wsClipChildren)
+		exStyle = uint32(wsExAppWindow | wsExComposited)
+		owner = 0
+	}
+	hwnd, _, callErr := pCreateWindowEx.Call(uintptr(exStyle), uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(title)), uintptr(style), uintptr(cursor.X), uintptr(cursor.Y), 1, 1, owner, 0, 0, 0)
 	if hwnd == 0 {
 		return fmt.Errorf("create control panel: %w", callErr)
 	}
@@ -475,6 +489,10 @@ func (p *panel) create() error {
 	p.position(style, exStyle, cursor)
 	pSetForeground.Call(uintptr(p.hwnd))
 	return nil
+}
+
+func captureMode() bool {
+	return os.Getenv("IDLETRIGGER_CAPTURE_MODE") == "1"
 }
 
 func (p *panel) createTooltip() {
@@ -992,7 +1010,11 @@ func (p *panel) position(style, exStyle uint32, cursor struct{ X, Y int32 }) {
 	if y+height > info.Work.Bottom {
 		y = info.Work.Bottom - height
 	}
-	pSetWindowPos.Call(uintptr(p.hwnd), ^uintptr(0), uintptr(x), uintptr(y), uintptr(width), uintptr(height), swpShowWindow)
+	insertAfter := ^uintptr(0)
+	if captureMode() {
+		insertAfter = 0
+	}
+	pSetWindowPos.Call(uintptr(p.hwnd), insertAfter, uintptr(x), uintptr(y), uintptr(width), uintptr(height), swpShowWindow)
 }
 
 func wndProc(hwnd windows.Handle, msg uint32, wp, lp uintptr) uintptr {
@@ -1000,7 +1022,7 @@ func wndProc(hwnd windows.Handle, msg uint32, wp, lp uintptr) uintptr {
 	if p != nil {
 		switch msg {
 		case wmActivate:
-			if uint16(wp) == waInactive {
+			if uint16(wp) == waInactive && !captureMode() {
 				Hide()
 				return 0
 			}
