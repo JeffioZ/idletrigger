@@ -51,10 +51,10 @@ $version = "dev"
 $ldflags = "-s -w -H windowsgui -X github.com/JeffioZ/idletrigger/internal/version.Value=$version"
 
 $env:GOARCH = "amd64"
-go build -trimpath "-ldflags=$ldflags" -o IdleTrigger-x64.exe .
+go build -trimpath "-ldflags=$ldflags" -o dist/IdleTrigger-x64.exe .
 
 $env:GOARCH = "386"
-go build -trimpath "-ldflags=$ldflags" -o IdleTrigger-x86.exe .
+go build -trimpath "-ldflags=$ldflags" -o dist/IdleTrigger-x86.exe .
 ```
 
 The release workflow runs test and vet, produces both executables, and publishes `SHA256SUMS.txt`.
@@ -85,14 +85,14 @@ go mod vendor
 
 $env:CGO_ENABLED = "0"
 $env:GOARCH = "amd64"
-go build -mod=vendor -trimpath -ldflags="-s -w -H windowsgui" -o IdleTrigger-x64.exe .
+go build -mod=vendor -trimpath -ldflags="-s -w -H windowsgui" -o dist/IdleTrigger-x64.exe .
 ```
 
 ## Development Loop
 
 ```powershell
 go test ./...
-go build -o IdleTrigger-dev.exe .
+go build -o dist/IdleTrigger-dev.exe .
 .\IdleTrigger-dev.exe
 
 # In a second terminal after the tray app starts:

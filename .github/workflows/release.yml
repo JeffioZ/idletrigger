@@ -35,9 +35,9 @@ jobs:
           $version = "${{ github.ref_name }}".TrimStart("v")
           $ldflags = "-s -w -H windowsgui -X github.com/JeffioZ/idletrigger/internal/version.Value=$version"
           $env:GOARCH = "386"
-          go build -trimpath -ldflags "$ldflags" -o IdleTrigger-x86.exe .
+          go build -trimpath -ldflags "$ldflags" -o dist/IdleTrigger-x86.exe .
           $env:GOARCH = "amd64"
-          go build -trimpath -ldflags "$ldflags" -o IdleTrigger-x64.exe .
+          go build -trimpath -ldflags "$ldflags" -o dist/IdleTrigger-x64.exe .
 
       - name: Checksums
         run: |
