@@ -33,3 +33,4 @@ IdleTrigger.log.*
 Thumbs.db
 Desktop.ini
 /.gocache/
+/.agents/
