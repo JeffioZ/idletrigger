@@ -150,7 +150,6 @@ func loadFrom(p string) (Config, error) {
 	data, err := os.ReadFile(p)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			// First run — write defaults and return them.
 			if saveErr := saveTo(p, cfg); saveErr != nil {
 				return cfg, saveErr
 			}
@@ -159,16 +158,11 @@ func loadFrom(p string) (Config, error) {
 		return cfg, fmt.Errorf("read config: %w", err)
 	}
 	if err := toml.Unmarshal(data, &cfg); err != nil {
-		return cfg, fmt.Errorf("parse config: %w", err)
+		saveTo(p, DefaultConfig())
+		return DefaultConfig(), nil
 	}
-	if err := cfg.Validate(); err != nil {
-		return cfg, fmt.Errorf("validate config: %w", err)
-	}
-	if needsAnnotatedTOMLRefresh(data) {
-		if err := saveTo(p, cfg); err != nil {
-			return cfg, fmt.Errorf("refresh config annotations: %w", err)
-		}
-	}
+	cfg = NormalizeConfig(cfg)
+	saveTo(p, cfg)
 	return cfg, nil
 }
 
@@ -192,6 +186,23 @@ func needsAnnotatedTOMLRefresh(data []byte) bool {
 
 func configTemplateVersionMarker() string {
 	return fmt.Sprintf("# config_template_version = %d", configTemplateVersion)
+}
+
+
+// NormalizeConfig returns a copy of cfg with invalid fields replaced by defaults.
+func NormalizeConfig(cfg Config) Config {
+	d := DefaultConfig()
+	if cfg.Language != "auto" && cfg.Language != "en" && cfg.Language != "zh-CN" { cfg.Language = d.Language }
+	if cfg.IdleTimeoutMinutes < 0 { cfg.IdleTimeoutMinutes = 0 }
+	switch cfg.IdleAction { case "sleep","hibernate","shutdown","lock": default: cfg.IdleAction = d.IdleAction }
+	if cfg.IdleWarningSeconds < 0 || cfg.IdleWarningSeconds > 300 { cfg.IdleWarningSeconds = d.IdleWarningSeconds }
+	if cfg.NoSleepBatteryThreshold < 0 || cfg.NoSleepBatteryThreshold > 100 { cfg.NoSleepBatteryThreshold = d.NoSleepBatteryThreshold }
+	if cfg.ThemeMode != "fixed" && cfg.ThemeMode != "sunrise" { cfg.ThemeMode = d.ThemeMode }
+	if _, err := time.Parse("15:04", cfg.ThemeLightTime); err != nil { cfg.ThemeLightTime = d.ThemeLightTime }
+	if _, err := time.Parse("15:04", cfg.ThemeDarkTime); err != nil { cfg.ThemeDarkTime = d.ThemeDarkTime }
+	if cfg.ThemeLatitude < -90 || cfg.ThemeLatitude > 90 { cfg.ThemeLatitude = d.ThemeLatitude }
+	if cfg.ThemeLongitude < -180 || cfg.ThemeLongitude > 180 { cfg.ThemeLongitude = d.ThemeLongitude }
+	return cfg
 }
 
 // Validate checks values that can otherwise lead to unsafe or surprising
