@@ -66,7 +66,7 @@ IdleTrigger version
 
 IdleTrigger 会在 EXE 同目录创建并维护 `IdleTrigger.toml`。配置模板更新时，程序会补齐缺失字段、更新说明注释，并保留已有的有效配置值；不会在每次启动时重复改写文件。
 
-完整的中英文字段说明见 [IdleTrigger.example.toml](IdleTrigger.example.toml)。手动编辑配置后，重启 IdleTrigger 或运行：
+完整的中英文字段说明见 [IdleTrigger.example.toml](IdleTrigger.example.toml)。保存修改后会在数秒内自动应用；如需立即生效，可重启 IdleTrigger 或运行：
 
 ```powershell
 .\IdleTrigger-x64.exe config:reload

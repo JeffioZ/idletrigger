@@ -66,7 +66,7 @@ IdleTrigger version
 
 IdleTrigger creates and maintains `IdleTrigger.toml` next to the EXE. It adds missing keys and refreshed comments when the bundled configuration template changes, while retaining valid existing values. It does not rewrite the file on every run.
 
-Use [IdleTrigger.example.toml](IdleTrigger.example.toml) as the complete, bilingual field reference. After manually editing the file, restart IdleTrigger or run:
+Use [IdleTrigger.example.toml](IdleTrigger.example.toml) as the complete, bilingual field reference. Saved changes apply automatically within a few seconds. To apply a change immediately, restart IdleTrigger or run:
 
 ```powershell
 .\IdleTrigger-x64.exe config:reload
