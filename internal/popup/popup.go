@@ -11,8 +11,6 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/JeffioZ/idletrigger/internal/themeswitch"
-	"github.com/JeffioZ/idletrigger/internal/version"
-	"github.com/JeffioZ/idletrigger/internal/dialog"
 t"github.com/JeffioZ/idletrigger/internal/idlewarning"
 )
 
@@ -200,7 +198,6 @@ const (
 	idLangEN          = 151
 	idLangZH          = 152
 	idConfig          = 500
-	idAbout           = 501
 	idExit            = 502
 	idTestWarning     = 600
 )
@@ -757,10 +754,10 @@ func (p *panel) build() error {
 		return err
 	}
 	y += sectionH + labelGap
-	bottomLabels := []string{p.text("menu_open_config"), p.text("menu_about"), p.text("menu_exit")}
-	bottomH := p.rowHeight(bottomLabels, (baseW-2*pad-gap*2)/3)
+	bottomLabels := []string{p.text("menu_open_config"), p.text("menu_exit")}
+	bottomH := p.rowHeight(bottomLabels, (baseW-2*pad-gap)/2)
 	p.clientH = y + bottomH + pad
-	_, err = choiceRow(pad, y, baseW-2*pad, bottomLabels, []uint16{idConfig, idAbout, idExit})
+	_, err = choiceRow(pad, y, baseW-2*pad, bottomLabels, []uint16{idConfig, idExit})
 	if os.Getenv("IDLETRIGGER_DEV") == "1" {
 		testLabels := []string{p.text("msg_idle_warning_test")}
 		_, _ = choiceRow(pad, y-bottomH-p.sc(4), baseW-2*pad, testLabels, []uint16{idTestWarning})
@@ -1114,8 +1111,6 @@ func (p *panel) handleCommand(id uint16) {
 		value = 1
 	case id == idTestWarning:
 		t.Show(p.text("app_title"), p.text("msg_idle_warning_test"))
-	case id == idAbout:
-		showAboutDialog(p)
 	case id == idConfig:
 		action = ActConfig
 	case id == idExit:
@@ -1386,11 +1381,4 @@ func clearPanel(p *panel, hwnd windows.Handle) {
 	p.sectionFont = 0
 	p.subtitleFont = 0
 	p.hwnd = 0
-}
-
-func showAboutDialog(p *panel) {
-	ver := version.Value
-	nl := string(rune(10))
-	body := "IdleTrigger " + ver + nl + nl + p.text("about_text")
-	dialog.Info(p.text("app_title"), "", body)
 }

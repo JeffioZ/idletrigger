@@ -109,6 +109,5 @@
   "tip_exit": "退出托盘程序，并停止保持唤醒、空闲监测、热键和自动主题调度。",
   "menu_theme_enable": "启用自动切换",
   "menu_nosleep_enable": "启用保持唤醒",
-  "msg_idle_warning_test": "空闲预警预览",
-  "about_text": "IdleTrigger v1.3\n\n保持唤醒    阻止系统自动休眠，同步保持屏幕常亮\n空闲监测    N 分钟无操作后自动触发\n              睡眠/休眠/关机/锁屏\n全局热键    Win+Shift+S/L/N\n昼夜模式    定时或日出日落自动切换深浅色\n电池感知    使用电池时自动禁用保持唤醒\n进程关联    指定应用运行时自动启用保持唤醒\n\nhttps://github.com/JeffioZ/idletrigger"
+  "msg_idle_warning_test": "空闲预警预览"
 }
