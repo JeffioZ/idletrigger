@@ -108,5 +108,6 @@
   "tip_config": "用记事本打开 IdleTrigger.toml。进程列表、主题模式、经纬度等高级设置在这里修改。",
   "tip_exit": "退出托盘程序，并停止保持唤醒、空闲监测、热键和自动主题调度。",
   "menu_theme_enable": "启用自动切换",
-  "menu_nosleep_enable": "启用保持唤醒"
+  "menu_nosleep_enable": "启用保持唤醒",
+  "msg_idle_warning_test": "空闲预警预览"
 }
