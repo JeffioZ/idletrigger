@@ -108,5 +108,6 @@
   "tip_config": "Open IdleTrigger.toml in Notepad. Advanced settings such as process lists, theme mode, and coordinates are edited there.",
   "tip_exit": "Exit the tray app and stop Stay Awake, idle monitoring, hotkeys, and theme scheduling.",
   "menu_theme_enable": "Auto Switch",
-  "menu_nosleep_enable": "Enable Stay Awake"
+  "menu_nosleep_enable": "Enable Stay Awake",
+  "msg_idle_warning_test": "Idle Warning Preview"
 }

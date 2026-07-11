@@ -7,9 +7,11 @@ import (
 	"syscall"
 	"unsafe"
 
+	"os"
 	"golang.org/x/sys/windows"
 
 	"github.com/JeffioZ/idletrigger/internal/themeswitch"
+t"github.com/JeffioZ/idletrigger/internal/idlewarning"
 )
 
 type wndClassExW struct {
@@ -197,6 +199,7 @@ const (
 	idLangZH          = 152
 	idConfig          = 500
 	idExit            = 502
+	idTestWarning     = 600
 )
 
 var (
@@ -755,6 +758,10 @@ func (p *panel) build() error {
 	bottomH := p.rowHeight(bottomLabels, (baseW-2*pad-gap)/2)
 	p.clientH = y + bottomH + pad
 	_, err = choiceRow(pad, y, baseW-2*pad, bottomLabels, []uint16{idConfig, idExit})
+	if os.Getenv("IDLETRIGGER_DEV") == "1" {
+		testLabels := []string{p.text("msg_idle_warning_test")}
+		_, _ = choiceRow(pad, y-bottomH-p.sc(4), baseW-2*pad, testLabels, []uint16{idTestWarning})
+	}
 	return err
 }
 
@@ -1102,6 +1109,8 @@ func (p *panel) handleCommand(id uint16) {
 		p.choose(languageIDs(), id)
 		action = ActLanguage
 		value = 1
+	case id == idTestWarning:
+		t.Show(p.text("app_title"), p.text("msg_idle_warning_test"))
 	case id == idConfig:
 		action = ActConfig
 	case id == idExit:
