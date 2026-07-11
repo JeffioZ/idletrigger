@@ -8,7 +8,7 @@ IdleTrigger is a single executable with no runtime dependencies beyond Windows s
 
 ## What It Does
 
-- **Idle monitor**: after a chosen period without keyboard or mouse input, lock, sleep, hibernate, shut down, or restart the PC.
+- **Idle monitor**: after a chosen period without keyboard or mouse input, lock, sleep, hibernate, or shut down the PC.
 - **Pre-action warning**: show a non-activating warning before an idle action; mouse or keyboard input, or closing the warning, cancels the pending action.
 - **Stay Awake**: prevent automatic sleep, optionally keeping the display on.
 - **Day/Night theme**: switch Windows themes at fixed times or from calculated sunrise and sunset; optionally use dark mode on battery.
