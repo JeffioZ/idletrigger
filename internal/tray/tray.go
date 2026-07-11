@@ -79,7 +79,7 @@ func Run(cfg config.Config, cbs Callbacks) {
 		}()
 		go func() {
 			for range s.menuExit.ClickedCh {
-				systray.Quit()
+				popup.Destroy(); systray.Quit()
 			}
 		}()
 
@@ -972,7 +972,7 @@ func (s *trayState) handlePopupAction(action popup.Action, value int) {
 			mylog.Info("Config editor launch failed: %v", err)
 		}
 	case popup.ActExit:
-		systray.Quit()
+		popup.Destroy(); popup.Destroy(); systray.Quit()
 	}
 }
 

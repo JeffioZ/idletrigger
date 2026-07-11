@@ -138,7 +138,9 @@ const (
 	wsExToolWindow = 0x00000080
 	wsExTopmost    = 0x00000008
 
-	swpShowWindow  = 0x0040
+	swHide          = 0
+	swShowNormal    = 1
+	swpShowWindow   = 0x0040
 	monitorNearest = 2
 	gwlpWndProc    = ^uintptr(3)
 
@@ -214,6 +216,7 @@ var (
 	pSendMessage           = user32.NewProc("SendMessageW")
 	pSetWindowLong         = user32.NewProc("SetWindowLongW")
 	pSetWindowLongPtr      = user32.NewProc("SetWindowLongPtrW")
+	pShowWindow            = user32.NewProc("ShowWindow")
 	pSetWindowPos          = user32.NewProc("SetWindowPos")
 	pGetCursorPos          = user32.NewProc("GetCursorPos")
 	pMonitorFromWindow     = user32.NewProc("MonitorFromWindow")
@@ -373,10 +376,15 @@ func Show(state State, onAction OnAction, langFn LangFunc) error {
 func Hide() {
 	panelMu.Lock()
 	p := active
+	active = nil
 	panelMu.Unlock()
 	if p != nil && p.hwnd != 0 {
-		pDestroyWindow.Call(uintptr(p.hwnd))
+		pShowWindow.Call(uintptr(p.hwnd), swHide)
 	}
+}
+
+func Destroy() {
+	Hide()
 }
 
 func ensureClass() error {
