@@ -33,6 +33,25 @@ func TestExampleConfigParsesAndValidates(t *testing.T) {
 	assertConfigOrder(t, text)
 }
 
+func TestExampleConfigBodyMatchesGeneratedAnnotatedConfig(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "IdleTrigger.example.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	exampleBody, ok := annotatedConfigBody(string(data))
+	if !ok {
+		t.Fatalf("example config is missing annotated body:\n%s", string(data))
+	}
+	generated := renderAnnotatedTOML(DefaultConfig())
+	generatedBody, ok := annotatedConfigBody(generated)
+	if !ok {
+		t.Fatalf("generated config is missing annotated body:\n%s", generated)
+	}
+	if exampleBody != generatedBody {
+		t.Fatalf("example config body differs from generated annotated config\n\nexample:\n%s\n\ngenerated:\n%s", exampleBody, generatedBody)
+	}
+}
+
 func TestValidateRejectsUnsafeValues(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -348,4 +367,14 @@ func assertConfigOrder(t *testing.T, text string) {
 		}
 		last = pos
 	}
+}
+
+func annotatedConfigBody(text string) (string, bool) {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	marker := "# -- 保持唤醒 / Stay Awake --\n"
+	idx := strings.Index(text, marker)
+	if idx < 0 {
+		return "", false
+	}
+	return text[idx:], true
 }
