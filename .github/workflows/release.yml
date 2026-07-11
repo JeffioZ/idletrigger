@@ -69,10 +69,11 @@ jobs:
 
             ### Highlights
 
-            - Refined the native tray control panel and idle-warning overlay for light/dark mode, DPI scaling, multilingual text, and multi-monitor positioning.
-            - Made idle monitoring reset safely on startup, activity, warning cancellation, and completed actions.
-            - Added an idle-action warning cancellation path and startup session IDs in debug logs.
-            - Improved configuration annotation migration, tray status text, CLI parity, and English/Simplified Chinese documentation.
+            - Added IP-based sunrise/sunset location resolution with safe fallback through Windows timezone, UTC offset, and the default location.
+            - Improved day/night theme fallback documentation and failure diagnostics.
+            - Fixed CLI output behavior for Windows GUI-subsystem builds.
+            - Aligned user-facing idle monitor and theme text in English and Simplified Chinese.
+            - Hardened release, lint, repository hygiene, and config example consistency checks.
 
             Download the native 64-bit build `IdleTrigger-x64.exe` (recommended) or
             the 32-bit compatibility build `IdleTrigger-x86.exe` — no installation needed.
@@ -83,10 +84,11 @@ jobs:
 
             ### 更新重点
 
-            - 优化原生托盘控制浮层与空闲预警浮层，适配深浅色、DPI、多语言和多显示器定位。
-            - 空闲监测会在启动、用户活动、取消预警和动作执行后安全重置计时。
-            - 空闲动作预警支持取消，并在调试日志中增加启动会话标识。
-            - 完善配置注释迁移、托盘状态文案、CLI 一致性及中英文文档。
+            - 新增基于 IP 的日出日落定位，并按 Windows 时区、UTC 偏移和默认位置安全回退。
+            - 完善昼夜主题回退说明和主题切换失败诊断日志。
+            - 修复 Windows GUI 子系统构建下 CLI 输出行为。
+            - 对齐空闲监测与主题相关的中英文用户可见文案。
+            - 强化发布、Lint、仓库清理和配置示例一致性检查。
 
             下载原生 64 位版本 `IdleTrigger-x64.exe`（推荐），或下载 32 位兼容版本
             `IdleTrigger-x86.exe`。无需安装，直接运行即可。
