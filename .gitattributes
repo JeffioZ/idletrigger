@@ -1,14 +1,17 @@
-# Auto-detect text files, force LF line endings for consistency across platforms.
+# Auto-detect text files, then pin important project files to stable line endings.
 *       text=auto
 
-# Go source — always LF
+# Source files
 *.go    text eol=lf
+*.py    text eol=lf
 
-# Shell / script files
+# Scripts
 *.sh    text eol=lf
 *.ps1   text eol=lf
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
 
-# Markdown / docs — LF in repo, let Windows users checkout as-is
+# Project metadata / docs / config examples
 *.md    text eol=lf
 *.json  text eol=lf
 *.toml  text eol=lf
@@ -19,14 +22,21 @@
 .gitignore text eol=lf
 .gitattributes text eol=lf
 
-# Python
-*.py    text eol=lf
-
-# Binary files — don't mangle line endings
+# Binary files: never normalize line endings.
 *.ico   binary
 *.exe   binary
 *.syso  binary
 *.png   binary
 *.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.webp  binary
+*.pdf   binary
 *.gz    binary
 *.zip   binary
+*.7z    binary
+*.rar   binary
+*.tar   binary
+*.dll   binary
+*.pdb   binary
+*.msi   binary
