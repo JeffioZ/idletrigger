@@ -972,7 +972,7 @@ func (s *trayState) handlePopupAction(action popup.Action, value int) {
 			mylog.Info("Config editor launch failed: %v", err)
 		}
 	case popup.ActExit:
-		popup.Destroy(); popup.Destroy(); systray.Quit()
+		popup.Destroy(); systray.Quit()
 	}
 }
 
