@@ -20,6 +20,7 @@ const (
 	pipeRejectRemote = 0x00000008
 	pipeUnlimited    = 255
 	pipeTimeout      = 1000
+	maxConnections   = 8
 )
 
 type Handler func(cmd string) string
@@ -101,7 +102,9 @@ func Server(handler Handler) error {
 		return fmt.Errorf("pipe path: %w", err)
 	}
 
+	connections := make(chan struct{}, maxConnections)
 	for {
+		connections <- struct{}{}
 		openMode := uint32(pipeAccessDuplex)
 		pipeMode := uint32(pipeTypeMessage | pipeReadModeMsg | pipeRejectRemote)
 
@@ -111,16 +114,21 @@ func Server(handler Handler) error {
 			pipeTimeout, sa,
 		)
 		if err != nil {
+			<-connections
 			return fmt.Errorf("CreateNamedPipe: %w", err)
 		}
 
 		err = windows.ConnectNamedPipe(h, nil)
 		if err != nil && err != windows.ERROR_PIPE_CONNECTED {
 			windows.CloseHandle(h)
+			<-connections
 			continue
 		}
 
-		go handleConn(h, handler)
+		go func() {
+			defer func() { <-connections }()
+			handleConn(h, handler)
+		}()
 	}
 }
 

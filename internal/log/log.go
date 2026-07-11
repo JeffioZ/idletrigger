@@ -39,12 +39,17 @@ func Init(enabled bool, exeDir string) {
 	sessionID = fmt.Sprintf("%x-%x", time.Now().UnixNano(), os.Getpid())
 
 	path := filepath.Join(exeDir, "IdleTrigger.log")
-	rotate(path)
+	if err := rotate(path); err != nil {
+		path = filepath.Join(os.TempDir(), "IdleTrigger.log")
+	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		// Fall back to %TEMP%.
 		path = filepath.Join(os.TempDir(), "IdleTrigger.log")
-		rotate(path)
+		if err := rotate(path); err != nil {
+			on = false
+			return
+		}
 		f, err = os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 		if err != nil {
 			on = false
@@ -88,12 +93,14 @@ func writeLocked(msg string) {
 	fmt.Fprintf(w, "[%s] [session:%s] %s\n", ts, sessionID, msg)
 }
 
-func rotate(path string) {
+func rotate(path string) error {
 	info, err := os.Stat(path)
 	if err != nil || info.Size() < maxLogSize {
-		return
+		return nil
 	}
 	backup := path + ".1"
-	os.Remove(backup)
-	os.Rename(path, backup)
+	if err := os.Remove(backup); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return os.Rename(path, backup)
 }

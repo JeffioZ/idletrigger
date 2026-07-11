@@ -49,7 +49,7 @@
   "cli_success": "操作已完成。",
   "warning_config_defaults": "警告：配置加载失败，将使用默认配置：",
   "config_header": "IdleTrigger 配置",
-  "config_edit_hint": "编辑此文件后，请重启 IdleTrigger 或运行 config:reload。",
+  "config_edit_hint": "保存后会在数秒内自动应用；如需立即生效，请重启 IdleTrigger 或运行 config:reload。",
   "cli_unknown": "未知命令。不带参数运行以启动托盘图标。",
   "version": "IdleTrigger {{version}}",
   "msg_action_failed": "执行“%s”失败：\n%s",

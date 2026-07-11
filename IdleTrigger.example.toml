@@ -1,7 +1,7 @@
 # IdleTrigger 配置示例 / Configuration Example
 # 复制为 IdleTrigger.toml 放在 EXE 同目录即可生效
 # Copy to IdleTrigger.toml next to the EXE to apply
-# config_template_version = 3
+# config_template_version = 4
 
 # -- 保持唤醒 / Stay Awake --
 # 手动启用保持唤醒，阻止系统自动睡眠 / Manually keep the system awake and prevent automatic sleep

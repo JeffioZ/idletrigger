@@ -39,3 +39,25 @@ func TestSunriseSunsetPolarCondition(t *testing.T) {
 		t.Fatalf("polar condition should be unavailable, got %d/%d", sunrise, sunset)
 	}
 }
+
+func TestManualOverrideEndsAtNextScheduledTransition(t *testing.T) {
+	loc := time.FixedZone("CST", 8*60*60)
+	s := NewScheduler("fixed", "07:00", "19:00", 0, 0, false, false)
+	now := time.Date(2026, 7, 11, 10, 0, 0, 0, loc)
+	s.HoldManualOverride(now)
+	want := time.Date(2026, 7, 11, 19, 0, 0, 0, loc)
+	if got := time.Unix(0, s.manualUntil.Load()); !got.Equal(want) {
+		t.Fatalf("manual override ends at %s, want %s", got, want)
+	}
+}
+
+func TestManualOverrideCrossesMidnightToNextTransition(t *testing.T) {
+	loc := time.FixedZone("CST", 8*60*60)
+	s := NewScheduler("fixed", "19:00", "07:00", 0, 0, false, false)
+	now := time.Date(2026, 7, 11, 22, 0, 0, 0, loc)
+	s.HoldManualOverride(now)
+	want := time.Date(2026, 7, 12, 7, 0, 0, 0, loc)
+	if got := time.Unix(0, s.manualUntil.Load()); !got.Equal(want) {
+		t.Fatalf("manual override ends at %s, want %s", got, want)
+	}
+}

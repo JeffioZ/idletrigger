@@ -6,6 +6,7 @@ package systray
 import (
 	"crypto/md5"
 	"encoding/hex"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -16,6 +17,8 @@ import (
 	"syscall"
 	"unsafe"
 
+	"github.com/JeffioZ/idletrigger/internal/darkmode"
+	"github.com/JeffioZ/idletrigger/internal/themeswitch"
 	"golang.org/x/sys/windows"
 )
 
@@ -522,6 +525,7 @@ func (t *winTray) initInstance() error {
 		return err
 	}
 	t.window = windows.Handle(windowHandle)
+	darkmode.AllowWindow(uintptr(t.window))
 
 	pShowWindow.Call(
 		uintptr(t.window),
@@ -769,6 +773,8 @@ func (t *winTray) showMenu() error {
 		return err
 	}
 	pSetForegroundWindow.Call(uintptr(t.window))
+	darkmode.SetPreferredAppMode(themeswitch.Current() == themeswitch.ModeDark)
+	darkmode.RefreshMenuThemes()
 
 	res, _, err = pTrackPopupMenu.Call(
 		uintptr(t.menus[0]),
@@ -826,7 +832,10 @@ func (t *winTray) getVisibleItemIndex(parent, val uint32) int {
 func (t *winTray) loadIconFrom(src string) (windows.Handle, error) {
 	const IMAGE_ICON = 1               // Loads an icon
 	const LR_LOADFROMFILE = 0x00000010 // Loads the stand-alone image from the file
-	const LR_DEFAULTSIZE = 0x00000040  // Loads default-size icon for windows(SM_CXICON x SM_CYICON) if cx, cy are set to zero
+	const (
+		smCxSmallIcon = 49
+		smCySmallIcon = 50
+	)
 
 	// Save and reuse handles of loaded images
 	t.muLoadedImages.RLock()
@@ -837,13 +846,18 @@ func (t *winTray) loadIconFrom(src string) (windows.Handle, error) {
 		if err != nil {
 			return 0, err
 		}
+		cx, _, _ := pGetSystemMetrics.Call(smCxSmallIcon)
+		cy, _, _ := pGetSystemMetrics.Call(smCySmallIcon)
+		if cx == 0 || cy == 0 {
+			return 0, fmt.Errorf("get system small icon size")
+		}
 		res, _, err := pLoadImage.Call(
 			0,
 			uintptr(unsafe.Pointer(srcPtr)),
 			IMAGE_ICON,
-			0,
-			0,
-			LR_LOADFROMFILE|LR_DEFAULTSIZE,
+			cx,
+			cy,
+			LR_LOADFROMFILE,
 		)
 		if res == 0 {
 			return 0, err
