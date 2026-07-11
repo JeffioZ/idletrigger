@@ -266,6 +266,8 @@ type Scheduler struct {
 	running        bool
 	mu             sync.Mutex
 	manualUntil    atomic.Int64
+	logMu          sync.Mutex
+	lastSwitchErr  string
 }
 
 // NewScheduler creates a Scheduler.
@@ -365,7 +367,11 @@ func (s *Scheduler) check(now time.Time) {
 	// If dark-on-battery is enabled and running on battery, force dark.
 	if s.darkOnBattery && onBattery() {
 		if Current() != ModeDark && (!s.skipFullscreen || !IsFullscreen()) {
-			_ = Switch(ModeDark)
+			if err := Switch(ModeDark); err != nil {
+				s.logSwitchFailure("battery", ModeDark, err)
+			} else {
+				s.clearSwitchFailure()
+			}
 		}
 		return
 	}
@@ -402,8 +408,37 @@ func (s *Scheduler) check(now time.Time) {
 		if s.skipFullscreen && IsFullscreen() {
 			return
 		}
-		Switch(target)
+		if err := Switch(target); err != nil {
+			s.logSwitchFailure("schedule", target, err)
+		} else {
+			s.clearSwitchFailure()
+		}
 	}
+}
+
+func (s *Scheduler) logSwitchFailure(reason string, target Mode, err error) {
+	key := fmt.Sprintf("%s|%s|%v", reason, themeModeName(target), err)
+	s.logMu.Lock()
+	if s.lastSwitchErr == key {
+		s.logMu.Unlock()
+		return
+	}
+	s.lastSwitchErr = key
+	s.logMu.Unlock()
+	mylog.Info("Theme switch failed: reason=%s target=%s error=%v", reason, themeModeName(target), err)
+}
+
+func (s *Scheduler) clearSwitchFailure() {
+	s.logMu.Lock()
+	s.lastSwitchErr = ""
+	s.logMu.Unlock()
+}
+
+func themeModeName(mode Mode) string {
+	if mode == ModeDark {
+		return "dark"
+	}
+	return "light"
 }
 
 func (s *Scheduler) scheduleMinutes(now time.Time) (int, int) {

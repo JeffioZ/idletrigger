@@ -1,9 +1,13 @@
 package themeswitch
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	mylog "github.com/JeffioZ/idletrigger/internal/log"
 )
 
 func TestParseTime(t *testing.T) {
@@ -127,3 +131,29 @@ func TestManualOverrideCrossesMidnightToNextTransition(t *testing.T) {
 		t.Fatalf("manual override ends at %s, want %s", got, want)
 	}
 }
+
+func TestSwitchFailureLogDedupesUntilSuccess(t *testing.T) {
+	dir := t.TempDir()
+	mylog.Init(true, dir)
+	defer mylog.Close()
+
+	s := NewScheduler("fixed", "07:00", "19:00", 0, 0, false, false)
+	err := errTestSwitchFailure{}
+	s.logSwitchFailure("schedule", ModeDark, err)
+	s.logSwitchFailure("schedule", ModeDark, err)
+	s.clearSwitchFailure()
+	s.logSwitchFailure("schedule", ModeDark, err)
+
+	text, readErr := os.ReadFile(filepath.Join(dir, "IdleTrigger.log"))
+	if readErr != nil {
+		t.Fatalf("read log: %v", readErr)
+	}
+	const want = "Theme switch failed: reason=schedule target=dark error=test switch failure"
+	if got := strings.Count(string(text), want); got != 2 {
+		t.Fatalf("failure log count = %d, want 2:\n%s", got, text)
+	}
+}
+
+type errTestSwitchFailure struct{}
+
+func (errTestSwitchFailure) Error() string { return "test switch failure" }
