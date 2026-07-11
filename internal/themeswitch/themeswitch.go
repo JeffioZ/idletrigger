@@ -47,6 +47,10 @@ var timezoneLookup = map[string][2]float64{
 // AutoLocation returns approximate coordinates based on the Windows timezone.
 // Falls back to Beijing if the timezone is unknown.
 func AutoLocation() (float64, float64) {
+	// Try GPS first (cached after first call), fall back to timezone.
+	if lat, lon := GetLocation(); lat != 0 || lon != 0 {
+		return lat, lon
+	}
 	// Get the Windows timezone name via GetTimeZoneInformation.
 	kernel32 := windows.NewLazySystemDLL("kernel32.dll")
 	proc := kernel32.NewProc("GetTimeZoneInformation")
