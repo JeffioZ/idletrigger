@@ -15,6 +15,7 @@ import (
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 
+	mylog "github.com/JeffioZ/idletrigger/internal/log"
 	"github.com/JeffioZ/idletrigger/internal/power"
 )
 
@@ -44,13 +45,20 @@ var timezoneLookup = map[string][2]float64{
 	"New Zealand Standard Time":      {-36.8, 174.8},
 }
 
-// AutoLocation returns approximate coordinates based on the Windows timezone.
-// Falls back to Beijing if the timezone is unknown.
-func AutoLocation() (float64, float64) {
-	// Try GPS first (cached after first call), fall back to timezone.
-	if lat, lon := GetLocation(); lat != 0 || lon != 0 {
-		return lat, lon
+// AutoLocationInfo resolves coordinates for sunrise/sunset mode. When IP
+// location is enabled, it is tried before falling back to the current Windows
+// timezone, UTC offset, and finally Beijing.
+func AutoLocationInfo(useIPLocation bool, blockIPLookup bool) LocationInfo {
+	if useIPLocation {
+		if blockIPLookup {
+			if info, ok := cachedIPLocation(time.Now()); ok {
+				return logAutoLocationInfo(info)
+			}
+		} else if info, ok := cachedIPLocationFast(time.Now()); ok {
+			return logAutoLocationInfo(info)
+		}
 	}
+
 	// Get the Windows timezone name via GetTimeZoneInformation.
 	kernel32 := windows.NewLazySystemDLL("kernel32.dll")
 	proc := kernel32.NewProc("GetTimeZoneInformation")
@@ -64,12 +72,65 @@ func AutoLocation() (float64, float64) {
 		DaylightBias int32
 	}
 	var tz tzInfo
-	proc.Call(uintptr(unsafe.Pointer(&tz)))
+	result, _, _ := proc.Call(uintptr(unsafe.Pointer(&tz)))
 	name := windows.UTF16ToString(tz.StandardName[:])
+	return logAutoLocationInfo(locationFromTimezone(name, tz.Bias+tz.StandardBias, result != 0xFFFFFFFF))
+}
+
+func locationFromTimezone(name string, effectiveBias int32, valid bool) LocationInfo {
 	if coords, ok := timezoneLookup[name]; ok {
-		return coords[0], coords[1]
+		return LocationInfo{Latitude: coords[0], Longitude: coords[1], Source: LocationSourceTimezone, TimezoneName: name}
 	}
-	return 39.9, 116.4
+	if valid {
+		// Windows Bias is minutes west of UTC. Convert the effective UTC offset
+		// to a rough longitude so sunrise/sunset is still locally plausible when
+		// the localized timezone name is not in the lookup table.
+		offsetMinutes := -effectiveBias
+		lon := float64(offsetMinutes) / 4
+		if lon < -180 {
+			lon = -180
+		} else if lon > 180 {
+			lon = 180
+		}
+		return LocationInfo{Latitude: 35, Longitude: lon, Source: LocationSourceUTCOffset, TimezoneName: name}
+	}
+	return LocationInfo{Latitude: 39.9, Longitude: 116.4, Source: LocationSourceDefault}
+}
+
+var lastAutoLocationLog atomic.Value
+
+func logAutoLocationInfo(info LocationInfo) LocationInfo {
+	key := fmt.Sprintf("%s|%s|%.4f|%.4f", info.Source, info.TimezoneName, info.Latitude, info.Longitude)
+	if last, _ := lastAutoLocationLog.Load().(string); last == key {
+		return info
+	}
+	lastAutoLocationLog.Store(key)
+
+	switch info.Source {
+	case LocationSourceIP:
+		if info.LocationLabel != "" {
+			mylog.Info("Theme location: using IP location %q lat=%.4f lon=%.4f", info.LocationLabel, info.Latitude, info.Longitude)
+		} else {
+			mylog.Info("Theme location: using IP location lat=%.4f lon=%.4f", info.Latitude, info.Longitude)
+		}
+	case LocationSourceTimezone:
+		mylog.Info("Theme location: using timezone %q lat=%.4f lon=%.4f", info.TimezoneName, info.Latitude, info.Longitude)
+	case LocationSourceUTCOffset:
+		if info.TimezoneName != "" {
+			mylog.Info("Theme location: estimating from timezone %q lat=%.4f lon=%.4f", info.TimezoneName, info.Latitude, info.Longitude)
+		} else {
+			mylog.Info("Theme location: estimating from UTC offset lat=%.4f lon=%.4f", info.Latitude, info.Longitude)
+		}
+	case LocationSourceDefault:
+		mylog.Info("Theme location: using fallback location lat=%.4f lon=%.4f", info.Latitude, info.Longitude)
+	}
+	return info
+}
+
+// AutoLocation returns coordinates for sunrise/sunset mode.
+func AutoLocation() (float64, float64) {
+	info := AutoLocationInfo(false, false)
+	return info.Latitude, info.Longitude
 }
 
 const regPath = `Software\Microsoft\Windows\CurrentVersion\Themes\Personalize`
@@ -154,19 +215,41 @@ func Current() Mode {
 	return ModeLight
 }
 
+type ScheduleInfo struct {
+	LightTime     string
+	DarkTime      string
+	OK            bool
+	FixedFallback bool
+}
+
 // ScheduleTimes returns today's light and dark switch times as HH:MM.
 func ScheduleTimes(mode, lightTime, darkTime string, lat, lon float64, now time.Time) (string, string, bool) {
+	info := ScheduleInfoFor(mode, lightTime, darkTime, lat, lon, now)
+	return info.LightTime, info.DarkTime, info.OK
+}
+
+// ScheduleInfoFor returns the theme schedule and reports when sunrise/sunset
+// mode had to fall back to fixed times, such as during polar day/night.
+func ScheduleInfoFor(mode, lightTime, darkTime string, lat, lon float64, now time.Time) ScheduleInfo {
 	var lightMin, darkMin int
 	if mode == "sunrise" {
 		lightMin, darkMin = CalcSunriseSunset(now, lat, lon)
-	} else {
-		lightMin = parseTime(lightTime)
-		darkMin = parseTime(darkTime)
+		if lightMin >= 0 && darkMin >= 0 {
+			return ScheduleInfo{LightTime: formatMinute(lightMin), DarkTime: formatMinute(darkMin), OK: true}
+		}
 	}
+
+	lightMin = parseTime(lightTime)
+	darkMin = parseTime(darkTime)
 	if lightMin < 0 || darkMin < 0 {
-		return "", "", false
+		return ScheduleInfo{}
 	}
-	return formatMinute(lightMin), formatMinute(darkMin), true
+	return ScheduleInfo{
+		LightTime:     formatMinute(lightMin),
+		DarkTime:      formatMinute(darkMin),
+		OK:            true,
+		FixedFallback: mode == "sunrise",
+	}
 }
 
 // Scheduler checks time periodically and switches theme.
@@ -325,12 +408,15 @@ func (s *Scheduler) check(now time.Time) {
 
 func (s *Scheduler) scheduleMinutes(now time.Time) (int, int) {
 	if s.mode == "sunrise" {
-		return CalcSunriseSunset(now, s.latitude, s.longitude)
+		lightMin, darkMin := CalcSunriseSunset(now, s.latitude, s.longitude)
+		if lightMin >= 0 && darkMin >= 0 {
+			return lightMin, darkMin
+		}
 	}
 	return parseTime(s.lightTime), parseTime(s.darkTime)
 }
 
-// sunriseSunset returns light and dark times as minutes since midnight,
+// CalcSunriseSunset returns light and dark times as minutes since midnight,
 // calculated using the NOAA solar calculator.
 func CalcSunriseSunset(t time.Time, lat, lon float64) (sunriseMinutes, sunsetMinutes int) {
 	// Day of year

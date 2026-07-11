@@ -1,7 +1,7 @@
 # IdleTrigger 配置示例 / Configuration Example
 # 复制为 IdleTrigger.toml 放在 EXE 同目录即可生效
 # Copy to IdleTrigger.toml next to the EXE to apply
-# config_template_version = 4
+# config_template_version = 5
 
 # -- 保持唤醒 / Stay Awake --
 # 手动启用保持唤醒，阻止系统自动睡眠 / Manually keep the system awake and prevent automatic sleep
@@ -30,14 +30,16 @@ idle_warning_seconds = 30
 theme_switch_enabled = false
 # 切换模式："fixed" 使用下方固定时间；"sunrise" 根据日出日落计算 / Mode: "fixed" uses times below; "sunrise" calculates sunrise/sunset
 theme_mode = "sunrise"
-# 浅色开始时间，HH:MM，fixed 模式使用 / Light theme start time, HH:MM, used by fixed mode
+# 浅色开始时间，HH:MM；fixed 模式使用，日出日落不可用时也作为兜底 / Light theme start time, HH:MM; used by fixed mode and as fallback when sunrise/sunset is unavailable
 theme_light_time = "07:00"
-# 深色开始时间，HH:MM，fixed 模式使用 / Dark theme start time, HH:MM, used by fixed mode
+# 深色开始时间，HH:MM；fixed 模式使用，日出日落不可用时也作为兜底 / Dark theme start time, HH:MM; used by fixed mode and as fallback when sunrise/sunset is unavailable
 theme_dark_time = "19:00"
-# 日出日落计算纬度，范围 -90 到 90；经纬度都为 0 时按时区估算 / Latitude for sunrise mode, -90..90; if both lat/lon are 0, estimate from timezone
+# 日出日落计算纬度，范围 -90 到 90；经纬度都为 0 时优先看下方 IP 定位开关，未开启或失败则按时区推算 / Latitude for sunrise mode, -90..90; when both lat/lon are 0, the IP location option below is used first; otherwise estimate by timezone
 theme_latitude = 0
-# 日出日落计算经度，范围 -180 到 180；经纬度都为 0 时按时区估算 / Longitude for sunrise mode, -180..180; if both lat/lon are 0, estimate from timezone
+# 日出日落计算经度，范围 -180 到 180；经纬度都为 0 时优先看下方 IP 定位开关，未开启或失败则按时区推算 / Longitude for sunrise mode, -180..180; when both lat/lon are 0, the IP location option below is used first; otherwise estimate by timezone
 theme_longitude = 0
+# 经纬度都为 0 时，通过 https://ipwho.is/ 估算公网 IP 所在城市；成功结果仅内存缓存 24 小时，失败后 30 分钟再试；关闭或失败时按时区推算 / When coordinates are 0, estimate city via https://ipwho.is/; successful results are cached in memory for 24 hours, failures retry after 30 minutes; falls back to timezone when off or failed
+theme_ip_location_enabled = false
 # 电池供电时自动切换深色，接入电源后按当前计划恢复 / Switch to dark on battery, then restore by schedule on AC power
 theme_dark_on_battery = true
 # 全屏应用或游戏运行时暂不自动切换主题 / Pause automatic theme switching during fullscreen apps/games

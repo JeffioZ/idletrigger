@@ -1,138 +1,229 @@
 package themeswitch
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"strings"
 	"sync"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
-	"syscall"
+
+	mylog "github.com/JeffioZ/idletrigger/internal/log"
 )
 
-type variant struct {
-	VT         uint16
-	_          [6]byte
-	Val        [8]byte
+// LocationSource describes how automatic sunrise/sunset coordinates were
+// resolved when the config does not provide explicit coordinates.
+type LocationSource string
+
+const (
+	LocationSourceConfigured LocationSource = "configured"
+	LocationSourceIP         LocationSource = "ip"
+	LocationSourceTimezone   LocationSource = "timezone"
+	LocationSourceUTCOffset  LocationSource = "utc_offset"
+	LocationSourceDefault    LocationSource = "default"
+)
+
+// LocationInfo is the resolved coordinate pair used for sunrise/sunset mode.
+type LocationInfo struct {
+	Latitude, Longitude float64
+	Source              LocationSource
+	TimezoneName        string
+	LocationLabel       string
 }
 
 const (
-	vtEmpty    = 0
-	vtR8       = 5
-	vtR4       = 4
+	ipLocationHost            = "ipwho.is"
+	ipLocationPath            = "/?fields=success,message,latitude,longitude,city,region,country"
+	ipLocationRequestTimeout  = 4 * time.Second
+	ipLocationRetryInterval   = 30 * time.Minute
+	ipLocationSuccessCacheTTL = 24 * time.Hour
 )
 
 var (
-	cachedLatLon struct {
-		sync.Once
-		lat, lon float64
-	}
+	winhttp                    = windows.NewLazySystemDLL("winhttp.dll")
+	procWinHttpOpen            = winhttp.NewProc("WinHttpOpen")
+	procWinHttpConnect         = winhttp.NewProc("WinHttpConnect")
+	procWinHttpOpenRequest     = winhttp.NewProc("WinHttpOpenRequest")
+	procWinHttpSendRequest     = winhttp.NewProc("WinHttpSendRequest")
+	procWinHttpReceiveResponse = winhttp.NewProc("WinHttpReceiveResponse")
+	procWinHttpQueryData       = winhttp.NewProc("WinHttpQueryDataAvailable")
+	procWinHttpReadData        = winhttp.NewProc("WinHttpReadData")
+	procWinHttpSetTimeouts     = winhttp.NewProc("WinHttpSetTimeouts")
+	procWinHttpCloseHandle     = winhttp.NewProc("WinHttpCloseHandle")
 )
 
-// GetLocation returns GPS coordinates via the Windows Location COM API.
-// Cached after first call — subsequent calls return immediately.
-// Falls back to 0,0 silently if location services are disabled.
-func GetLocation() (float64, float64) {
-	cachedLatLon.Do(func() {
-		cachedLatLon.lat, cachedLatLon.lon = queryLocation()
-	})
-	return cachedLatLon.lat, cachedLatLon.lon
+var ipCache struct {
+	sync.Mutex
+	info        LocationInfo
+	ok          bool
+	querying    bool
+	lastAttempt time.Time
 }
 
-func queryLocation() (float64, float64) {
-	// CLSID: LatLongReportFactory = {8A3CD7B2-E3E5-448D-83F8-E5384C2E4CF7}
-	// This COM class provides the last known location.
-	clsid := windows.GUID{
-		Data1: 0x8A3CD7B2, Data2: 0xE3E5, Data3: 0x448D,
-		Data4: [8]byte{0x83, 0xF8, 0xE5, 0x38, 0x4C, 0x2E, 0x4C, 0xF7},
+func cachedIPLocation(now time.Time) (LocationInfo, bool) {
+	ipCache.Lock()
+	if ipCache.ok && now.Sub(ipCache.lastAttempt) < ipLocationSuccessCacheTTL {
+		info := ipCache.info
+		ipCache.Unlock()
+		return info, true
 	}
-	iidIDispatch := windows.GUID{
-		Data1: 0x00020400, Data2: 0x0000, Data3: 0x0000,
-		Data4: [8]byte{0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46},
+	if !ipCache.ok && !ipCache.lastAttempt.IsZero() && now.Sub(ipCache.lastAttempt) < ipLocationRetryInterval {
+		ipCache.Unlock()
+		return LocationInfo{}, false
 	}
+	if ipCache.querying {
+		ipCache.Unlock()
+		return LocationInfo{}, false
+	}
+	ipCache.lastAttempt = now
+	ipCache.querying = true
+	ipCache.Unlock()
 
-	// Initialize COM
-	ole32 := windows.NewLazySystemDLL("ole32.dll")
-	coInit := ole32.NewProc("CoInitializeEx")
-	coInit.Call(0, 2) // COINIT_APARTMENTTHREADED
-	defer ole32.NewProc("CoUninitialize").Call()
+	info, reason, ok := queryIPLocation()
 
-	// Create COM object
-	coCreate := ole32.NewProc("CoCreateInstance")
-	var disp uintptr
-	r, _, _ := coCreate.Call(
-		uintptr(unsafe.Pointer(&clsid)),
-		0, // outer unknown
-		1, // CLSCTX_INPROC_SERVER
-		uintptr(unsafe.Pointer(&iidIDispatch)),
-		uintptr(unsafe.Pointer(&disp)),
+	ipCache.Lock()
+	defer ipCache.Unlock()
+	ipCache.lastAttempt = time.Now()
+	ipCache.querying = false
+	if ok {
+		ipCache.info = info
+		ipCache.ok = true
+		mylog.Info("Theme location: IP location resolved lat=%.4f lon=%.4f label=%q", info.Latitude, info.Longitude, info.LocationLabel)
+		return info, true
+	}
+	ipCache.ok = false
+	mylog.Info("Theme location: IP location unavailable: %s", reason)
+	return LocationInfo{}, false
+}
+
+func cachedIPLocationFast(now time.Time) (LocationInfo, bool) {
+	ipCache.Lock()
+	defer ipCache.Unlock()
+	if ipCache.ok && now.Sub(ipCache.lastAttempt) < ipLocationSuccessCacheTTL {
+		return ipCache.info, true
+	}
+	return LocationInfo{}, false
+}
+
+type ipWhoIsResponse struct {
+	Success   bool    `json:"success"`
+	Message   string  `json:"message"`
+	Latitude  float64 `json:"latitude"`
+	Longitude float64 `json:"longitude"`
+	City      string  `json:"city"`
+	Region    string  `json:"region"`
+	Country   string  `json:"country"`
+}
+
+func queryIPLocation() (LocationInfo, string, bool) {
+	body, err := winHTTPGet(ipLocationHost, ipLocationPath, ipLocationRequestTimeout)
+	if err != nil {
+		return LocationInfo{}, err.Error(), false
+	}
+	info, err := parseIPLocation(strings.NewReader(body))
+	if err != nil {
+		return LocationInfo{}, err.Error(), false
+	}
+	return info, "", true
+}
+
+func winHTTPGet(host, path string, timeout time.Duration) (string, error) {
+	const (
+		accessTypeDefaultProxy = 0
+		defaultHTTPSPort       = 443
+		flagSecure             = 0x00800000
 	)
-	if r != 0 || disp == 0 {
-		return 0, 0
+	userAgent, _ := windows.UTF16PtrFromString("IdleTrigger")
+	session, _, err := procWinHttpOpen.Call(uintptr(unsafe.Pointer(userAgent)), accessTypeDefaultProxy, 0, 0, 0)
+	if session == 0 {
+		return "", fmt.Errorf("WinHttpOpen: %w", err)
 	}
-	defer releaseCom(disp)
+	defer procWinHttpCloseHandle.Call(session)
 
-	// Get "Latitude" property (DISPID 1)
-	lat := getDispatchFloat(disp, 1)
-	// Get "Longitude" property (DISPID 2)
-	lon := getDispatchFloat(disp, 2)
+	timeoutMS := int(timeout / time.Millisecond)
+	procWinHttpSetTimeouts.Call(session, uintptr(timeoutMS), uintptr(timeoutMS), uintptr(timeoutMS), uintptr(timeoutMS))
 
-	if lat < -90 || lat > 90 || lon < -180 || lon > 180 {
-		return 0, 0
+	hostPtr, _ := windows.UTF16PtrFromString(host)
+	connect, _, err := procWinHttpConnect.Call(session, uintptr(unsafe.Pointer(hostPtr)), defaultHTTPSPort, 0)
+	if connect == 0 {
+		return "", fmt.Errorf("WinHttpConnect: %w", err)
 	}
-	return lat, lon
+	defer procWinHttpCloseHandle.Call(connect)
+
+	method, _ := windows.UTF16PtrFromString("GET")
+	pathPtr, _ := windows.UTF16PtrFromString(path)
+	request, _, err := procWinHttpOpenRequest.Call(connect, uintptr(unsafe.Pointer(method)), uintptr(unsafe.Pointer(pathPtr)), 0, 0, 0, flagSecure)
+	if request == 0 {
+		return "", fmt.Errorf("WinHttpOpenRequest: %w", err)
+	}
+	defer procWinHttpCloseHandle.Call(request)
+
+	if ok, _, err := procWinHttpSendRequest.Call(request, 0, 0, 0, 0, 0, 0); ok == 0 {
+		return "", fmt.Errorf("WinHttpSendRequest: %w", err)
+	}
+	if ok, _, err := procWinHttpReceiveResponse.Call(request, 0); ok == 0 {
+		return "", fmt.Errorf("WinHttpReceiveResponse: %w", err)
+	}
+
+	var out strings.Builder
+	for {
+		var available uint32
+		if ok, _, err := procWinHttpQueryData.Call(request, uintptr(unsafe.Pointer(&available))); ok == 0 {
+			return "", fmt.Errorf("WinHttpQueryDataAvailable: %w", err)
+		}
+		if available == 0 {
+			break
+		}
+		if out.Len()+int(available) > 64*1024 {
+			return "", errors.New("response too large")
+		}
+		buf := make([]byte, available)
+		var read uint32
+		if ok, _, err := procWinHttpReadData.Call(request, uintptr(unsafe.Pointer(&buf[0])), uintptr(available), uintptr(unsafe.Pointer(&read))); ok == 0 {
+			return "", fmt.Errorf("WinHttpReadData: %w", err)
+		}
+		out.WriteString(string(buf[:read]))
+	}
+	return out.String(), nil
 }
 
-// getDispatchFloat invokes IDispatch::Invoke to read a float property.
-func getDispatchFloat(disp uintptr, dispid int32) float64 {
-	vtbl := *(**uintptr)(unsafe.Pointer(&disp))
-	invokeSlot := (*[8]uintptr)(unsafe.Pointer(vtbl))[6] // IDispatch::Invoke = slot 6
-
-	// Build DISPPARAMS
-	type dispparams struct {
-		args       *uint16
-		namedArgs  *int32
-		cArgs      uint32
-		cNamedArgs uint32
+func parseIPLocation(r io.Reader) (LocationInfo, error) {
+	var data ipWhoIsResponse
+	if err := json.NewDecoder(r).Decode(&data); err != nil {
+		return LocationInfo{}, fmt.Errorf("decode response: %w", err)
 	}
-	var dp dispparams
-
-	var result variant
-	result.VT = vtEmpty
-
-	var except uintptr
-	var argErr uint32
-
-	// DISPATCH_PROPERTYGET = 2, LOCALE_USER_DEFAULT = 0x0400
-	r, _, _ := syscall.Syscall9(
-		invokeSlot, 8,
-		disp,                               // this
-		uintptr(dispid),                     // dispid
-		uintptr(unsafe.Pointer(&windows.GUID{})), // riid (IID_NULL)
-		uintptr(0x0400),                     // lcid
-		uintptr(2),                          // flags (DISPATCH_PROPERTYGET)
-		uintptr(unsafe.Pointer(&dp)),        // params
-		uintptr(unsafe.Pointer(&result)),    // result
-		uintptr(unsafe.Pointer(&except)),    // exception
-		uintptr(unsafe.Pointer(&argErr)),    // argErr
-	)
-	if r != 0 {
-		return 0
+	if !data.Success {
+		if data.Message == "" {
+			data.Message = "service returned success=false"
+		}
+		return LocationInfo{}, errors.New(data.Message)
 	}
-	if result.VT == vtR8 {
-		return *(*float64)(unsafe.Pointer(&result.Val))
+	if !validCoordinates(data.Latitude, data.Longitude) {
+		return LocationInfo{}, fmt.Errorf("invalid coordinates lat=%.4f lon=%.4f", data.Latitude, data.Longitude)
 	}
-	// Coerce to float if not already R8
-	if result.VT == vtR4 {
-		return float64(*(*float32)(unsafe.Pointer(&result.Val)))
-	}
-	return 0
+	return LocationInfo{
+		Latitude:      data.Latitude,
+		Longitude:     data.Longitude,
+		Source:        LocationSourceIP,
+		LocationLabel: ipLocationLabel(data),
+	}, nil
 }
 
-func releaseCom(disp uintptr) {
-	if disp == 0 {
-		return
+func ipLocationLabel(data ipWhoIsResponse) string {
+	parts := make([]string, 0, 3)
+	for _, value := range []string{data.City, data.Region, data.Country} {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			parts = append(parts, value)
+		}
 	}
-	vtbl := *(**uintptr)(unsafe.Pointer(&disp))
-	releaseSlot := (*[4]uintptr)(unsafe.Pointer(vtbl))[2] // IUnknown::Release = slot 2
-	syscall.Syscall(releaseSlot, 1, disp, 0, 0)
+	return strings.Join(parts, ", ")
 }
 
+func validCoordinates(lat, lon float64) bool {
+	return lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180 && (lat != 0 || lon != 0)
+}

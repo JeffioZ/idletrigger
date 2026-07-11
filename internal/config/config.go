@@ -28,7 +28,7 @@ const (
 	ActionLock      Action = "lock"
 )
 
-const configTemplateVersion = 4
+const configTemplateVersion = 5
 
 // Config holds all user-configurable settings.
 type Config struct {
@@ -82,12 +82,16 @@ type Config struct {
 	// ThemeDarkTime is when to switch to dark mode (HH:MM).
 	ThemeDarkTime string `toml:"theme_dark_time"`
 
-	// ThemeMode: "fixed" (use times above) or "sunrise" (calculate from lat/lon).
+	// ThemeMode: "fixed" (use times above) or "sunrise" (calculate from location).
 	ThemeMode string `toml:"theme_mode"`
 
-	// ThemeLatitude / ThemeLongitude for sunrise calculation.
+	// ThemeLatitude / ThemeLongitude override automatic sunrise/sunset location.
 	ThemeLatitude  float64 `toml:"theme_latitude"`
 	ThemeLongitude float64 `toml:"theme_longitude"`
+
+	// ThemeIPLocationEnabled allows an HTTPS IP geolocation lookup when
+	// sunrise/sunset mode has no explicit coordinates.
+	ThemeIPLocationEnabled bool `toml:"theme_ip_location_enabled"`
 
 	// ThemeDarkOnBattery switches to dark mode when on battery.
 	ThemeDarkOnBattery bool `toml:"theme_dark_on_battery"`
@@ -121,6 +125,7 @@ func DefaultConfig() Config {
 		ThemeMode:               "sunrise",
 		ThemeLatitude:           0,
 		ThemeLongitude:          0,
+		ThemeIPLocationEnabled:  false,
 		ThemeDarkOnBattery:      true,
 		ThemeSkipFullscreen:     true,
 		AutostartEnabled:        false,
@@ -351,14 +356,16 @@ func renderAnnotatedTOML(cfg Config) string {
 	fmt.Fprintf(&b, "theme_switch_enabled = %t\n", cfg.ThemeSwitchEnabled)
 	b.WriteString("# 切换模式：\"fixed\" 使用下方固定时间；\"sunrise\" 根据日出日落计算 / Mode: \"fixed\" uses times below; \"sunrise\" calculates sunrise/sunset\n")
 	fmt.Fprintf(&b, "theme_mode = %s\n", tomlString(cfg.ThemeMode))
-	b.WriteString("# 浅色开始时间，HH:MM，fixed 模式使用 / Light theme start time, HH:MM, used by fixed mode\n")
+	b.WriteString("# 浅色开始时间，HH:MM；fixed 模式使用，日出日落不可用时也作为兜底 / Light theme start time, HH:MM; used by fixed mode and as fallback when sunrise/sunset is unavailable\n")
 	fmt.Fprintf(&b, "theme_light_time = %s\n", tomlString(cfg.ThemeLightTime))
-	b.WriteString("# 深色开始时间，HH:MM，fixed 模式使用 / Dark theme start time, HH:MM, used by fixed mode\n")
+	b.WriteString("# 深色开始时间，HH:MM；fixed 模式使用，日出日落不可用时也作为兜底 / Dark theme start time, HH:MM; used by fixed mode and as fallback when sunrise/sunset is unavailable\n")
 	fmt.Fprintf(&b, "theme_dark_time = %s\n", tomlString(cfg.ThemeDarkTime))
-	b.WriteString("# 日出日落计算纬度，范围 -90 到 90；经纬度都为 0 时按时区估算 / Latitude for sunrise mode, -90..90; if both lat/lon are 0, estimate from timezone\n")
+	b.WriteString("# 日出日落计算纬度，范围 -90 到 90；经纬度都为 0 时优先看下方 IP 定位开关，未开启或失败则按时区推算 / Latitude for sunrise mode, -90..90; when both lat/lon are 0, the IP location option below is used first; otherwise estimate by timezone\n")
 	fmt.Fprintf(&b, "theme_latitude = %s\n", tomlFloat(cfg.ThemeLatitude))
-	b.WriteString("# 日出日落计算经度，范围 -180 到 180；经纬度都为 0 时按时区估算 / Longitude for sunrise mode, -180..180; if both lat/lon are 0, estimate from timezone\n")
+	b.WriteString("# 日出日落计算经度，范围 -180 到 180；经纬度都为 0 时优先看下方 IP 定位开关，未开启或失败则按时区推算 / Longitude for sunrise mode, -180..180; when both lat/lon are 0, the IP location option below is used first; otherwise estimate by timezone\n")
 	fmt.Fprintf(&b, "theme_longitude = %s\n", tomlFloat(cfg.ThemeLongitude))
+	b.WriteString("# 经纬度都为 0 时，通过 https://ipwho.is/ 估算公网 IP 所在城市；成功结果仅内存缓存 24 小时，失败后 30 分钟再试；关闭或失败时按时区推算 / When coordinates are 0, estimate city via https://ipwho.is/; successful results are cached in memory for 24 hours, failures retry after 30 minutes; falls back to timezone when off or failed\n")
+	fmt.Fprintf(&b, "theme_ip_location_enabled = %t\n", cfg.ThemeIPLocationEnabled)
 	b.WriteString("# 电池供电时自动切换深色，接入电源后按当前计划恢复 / Switch to dark on battery, then restore by schedule on AC power\n")
 	fmt.Fprintf(&b, "theme_dark_on_battery = %t\n", cfg.ThemeDarkOnBattery)
 	b.WriteString("# 全屏应用或游戏运行时暂不自动切换主题 / Pause automatic theme switching during fullscreen apps/games\n")

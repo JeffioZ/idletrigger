@@ -68,6 +68,7 @@ const (
 	ActThemeToggle
 	ActBatteryToggle
 	ActFullscreenToggle
+	ActIPLocationToggle
 	ActSwitchTheme
 	ActRepairTheme
 	ActHotkeyToggle
@@ -84,6 +85,7 @@ type State struct {
 	IdleTimeout                                                  int
 	IdleAction                                                   string
 	ThemeSwitchEnabled, DarkOnBattery, SkipFullscreen            bool
+	IPLocationEnabled                                            bool
 	HotkeysEnabled, AutostartEnabled, LoggingEnabled             bool
 	IsChinese                                                    bool
 	ThemeSchedule                                                string
@@ -168,16 +170,18 @@ const (
 	waInactive      = 0
 	tmeLeave        = 0x00000002
 
-	ttsAlwaysTip      = 0x0001
-	ttsNoPrefix       = 0x0002
-	ttfIDIsHwnd       = 0x0001
-	ttfSubclass       = 0x0010
-	ttmAddTool        = 0x0432
-	ttmSetMaxTipWidth = 0x0418
-	cbAddString       = 0x0143
-	cbSetCurSel       = 0x014E
-	cbGetCurSel       = 0x0147
-	cbSetItemHeight   = 0x0153
+	ttsAlwaysTip       = 0x0001
+	ttsNoPrefix        = 0x0002
+	ttfIDIsHwnd        = 0x0001
+	ttfSubclass        = 0x0010
+	ttmAddTool         = 0x0432
+	ttmSetTipBkColor   = 0x0413
+	ttmSetTipTextColor = 0x0414
+	ttmSetMaxTipWidth  = 0x0418
+	cbAddString        = 0x0143
+	cbSetCurSel        = 0x014E
+	cbGetCurSel        = 0x0147
+	cbSetItemHeight    = 0x0153
 )
 
 const (
@@ -198,6 +202,7 @@ const (
 	idFullscreen      = 33
 	idThemeSwitch     = 34
 	idThemeRepair     = 35
+	idIPLocation      = 36
 	idHotkeys         = 40
 	idAutostart       = 41
 	idLogging         = 42
@@ -326,6 +331,7 @@ type panel struct {
 	oldButtonProc                   map[windows.Handle]uintptr
 	hoverID                         uint16
 	nextStaticID                    uint16
+	themeScheduleID                 uint16
 	idlePaused                      bool
 	themeSchedule                   string
 	timeoutOptions                  []timeoutChoice
@@ -361,8 +367,10 @@ func Show(state State, onAction OnAction, langFn LangFunc) error {
 			idIdle: state.IdleEnabled && !state.IdlePaused, idIdleWarning: state.IdleWarningEnabled,
 			idTheme:      state.ThemeSwitchEnabled,
 			idBattery:    state.DarkOnBattery,
-			idFullscreen: state.SkipFullscreen, idHotkeys: state.HotkeysEnabled,
-			idAutostart: state.AutostartEnabled, idLogging: state.LoggingEnabled,
+			idFullscreen: state.SkipFullscreen,
+			idIPLocation: state.IPLocationEnabled,
+			idHotkeys:    state.HotkeysEnabled,
+			idAutostart:  state.AutostartEnabled, idLogging: state.LoggingEnabled,
 		},
 		selected:      make(map[uint16]bool),
 		disabled:      make(map[uint16]bool),
@@ -395,6 +403,26 @@ func Hide() {
 	panelMu.Unlock()
 	if p != nil && p.hwnd != 0 {
 		pDestroyWindow.Call(uintptr(p.hwnd))
+	}
+}
+
+// UpdateThemeSchedule refreshes the already visible Day/Night schedule line.
+// It is intentionally layout-preserving; callers should still recreate the
+// panel when a future change needs to add or remove controls.
+func UpdateThemeSchedule(text string) {
+	panelMu.Lock()
+	p := active
+	if p == nil || p.themeScheduleID == 0 {
+		panelMu.Unlock()
+		return
+	}
+	id := p.themeScheduleID
+	hwnd := p.controls[id]
+	p.labels[id] = text
+	panelMu.Unlock()
+
+	if hwnd != 0 {
+		pInvalidateRect.Call(uintptr(hwnd), 0, 1)
 	}
 }
 
@@ -617,6 +645,8 @@ func (p *panel) tooltipText(id uint16) string {
 		key = "tip_fullscreen"
 	case idBattery:
 		key = "tip_battery_theme"
+	case idIPLocation:
+		key = "tip_ip_location"
 	case idThemeSwitch:
 		key = "tip_theme_switch"
 	case idThemeRepair:
@@ -746,7 +776,9 @@ func (p *panel) build() error {
 	}
 	y += sectionH + labelGap
 	if p.themeSchedule != "" {
-		if err := subtitle(p.themeSchedule, pad, y, baseW-2*pad); err != nil {
+		id := p.staticID(staticSubtitle)
+		p.themeScheduleID = id
+		if _, err := p.child("STATIC", p.themeSchedule, wsChild|wsVisible|ssOwnerDraw, pad, y, baseW-2*pad, subtitleH, id, 0); err != nil {
 			return err
 		}
 		y += subtitleH + labelGap
@@ -756,7 +788,7 @@ func (p *panel) build() error {
 		return err
 	}
 	y += height + gap
-	height, err = choiceRow(pad, y, baseW-2*pad, []string{p.text("menu_theme_switch_now"), p.text("menu_theme_repair")}, []uint16{idThemeSwitch, idThemeRepair})
+	height, err = choiceRow(pad, y, baseW-2*pad, []string{p.text("menu_theme_ip_location"), p.text("menu_theme_switch_now"), p.text("menu_theme_repair")}, []uint16{idIPLocation, idThemeSwitch, idThemeRepair})
 	if err != nil {
 		return err
 	}
@@ -1126,6 +1158,9 @@ func (p *panel) handleCommand(id uint16) {
 	case id == idFullscreen:
 		p.toggle(id)
 		action = ActFullscreenToggle
+	case id == idIPLocation:
+		p.toggle(id)
+		action = ActIPLocationToggle
 	case id == idThemeSwitch:
 		action = ActSwitchTheme
 	case id == idThemeRepair:
@@ -1200,6 +1235,7 @@ func (p *panel) refreshTheme(invalidate bool) {
 	p.dangerPressedBrush = makeBrush(p.palette.dangerPressed)
 	p.applyFrameTheme(dark)
 	p.applyComboTheme(p.controls[idIdleTimeout], dark)
+	p.applyTooltipTheme(dark)
 	if invalidate && p.hwnd != 0 {
 		pInvalidateRect.Call(uintptr(p.hwnd), 0, 1)
 		for id := range p.controls {
@@ -1220,6 +1256,21 @@ func (p *panel) applyComboTheme(hwnd windows.Handle, dark bool) {
 	if err == nil {
 		pSetWindowTheme.Call(uintptr(hwnd), uintptr(unsafe.Pointer(name)), 0)
 	}
+}
+
+func (p *panel) applyTooltipTheme(dark bool) {
+	if p.tooltip == 0 {
+		return
+	}
+	if dark {
+		if name, err := windows.UTF16PtrFromString("DarkMode_Explorer"); err == nil {
+			pSetWindowTheme.Call(uintptr(p.tooltip), uintptr(unsafe.Pointer(name)), 0)
+		}
+	} else {
+		pSetWindowTheme.Call(uintptr(p.tooltip), 0, 0)
+	}
+	pSendMessage.Call(uintptr(p.tooltip), ttmSetTipBkColor, uintptr(p.palette.surface), 0)
+	pSendMessage.Call(uintptr(p.tooltip), ttmSetTipTextColor, uintptr(p.palette.text), 0)
 }
 
 func (p *panel) applyFrameTheme(dark bool) {

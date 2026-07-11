@@ -117,6 +117,7 @@ func Run(cfg config.Config, cbs Callbacks) {
 		if s.cfg.ThemeSwitchEnabled {
 			s.startThemeScheduler()
 		}
+		s.refreshIPLocationInBackground()
 
 		go s.stateLoop()
 		go func() {
@@ -232,7 +233,7 @@ func (s *trayState) themeTooltipValueShort() string {
 	if !s.cfg.ThemeSwitchEnabled {
 		return i18n.T(s.lang, "status_short_off")
 	}
-	if schedule := s.themeScheduleText(); schedule != "" {
+	if schedule := s.themeScheduleText(false); schedule != "" {
 		return i18n.T(s.lang, "status_short_on") + " " + compactThemeSchedule(schedule)
 	}
 	return i18n.T(s.lang, "status_short_on")
@@ -249,16 +250,52 @@ func compactThemeSchedule(schedule string) string {
 	return replacer.Replace(schedule)
 }
 
-func (s *trayState) themeScheduleText() string {
-	lat, lon := s.cfg.ThemeLatitude, s.cfg.ThemeLongitude
-	if lat == 0 && lon == 0 {
-		lat, lon = themeswitch.AutoLocation()
+func (s *trayState) themeScheduleText(showSource bool) string {
+	loc := themeswitch.LocationInfo{Latitude: s.cfg.ThemeLatitude, Longitude: s.cfg.ThemeLongitude, Source: themeswitch.LocationSourceConfigured}
+	if s.cfg.ThemeMode == "sunrise" {
+		loc = s.themeLocationInfo(false)
 	}
-	light, dark, ok := themeswitch.ScheduleTimes(s.cfg.ThemeMode, s.cfg.ThemeLightTime, s.cfg.ThemeDarkTime, lat, lon, time.Now())
-	if !ok {
+	scheduleInfo := themeswitch.ScheduleInfoFor(s.cfg.ThemeMode, s.cfg.ThemeLightTime, s.cfg.ThemeDarkTime, loc.Latitude, loc.Longitude, time.Now())
+	if !scheduleInfo.OK {
 		return i18n.T(s.lang, "theme_schedule_unavailable")
 	}
-	return fmt.Sprintf(i18n.T(s.lang, "theme_schedule_format"), light, dark)
+	schedule := fmt.Sprintf(i18n.T(s.lang, "theme_schedule_format"), scheduleInfo.LightTime, scheduleInfo.DarkTime)
+	if scheduleInfo.FixedFallback {
+		return fmt.Sprintf(i18n.T(s.lang, "theme_schedule_fallback_format"), schedule)
+	}
+	if s.cfg.ThemeMode != "sunrise" || !showSource {
+		return schedule
+	}
+	return fmt.Sprintf(i18n.T(s.lang, "theme_schedule_source_format"), schedule, s.locationSourceText(loc))
+}
+
+func (s *trayState) themeLocationInfo(blockIPLookup bool) themeswitch.LocationInfo {
+	lat, lon := s.cfg.ThemeLatitude, s.cfg.ThemeLongitude
+	if lat != 0 || lon != 0 {
+		return themeswitch.LocationInfo{Latitude: lat, Longitude: lon, Source: themeswitch.LocationSourceConfigured}
+	}
+	return themeswitch.AutoLocationInfo(s.cfg.ThemeIPLocationEnabled, blockIPLookup)
+}
+
+func (s *trayState) locationSourceText(loc themeswitch.LocationInfo) string {
+	switch loc.Source {
+	case themeswitch.LocationSourceConfigured:
+		return i18n.T(s.lang, "theme_location_configured")
+	case themeswitch.LocationSourceIP:
+		if loc.LocationLabel != "" {
+			return fmt.Sprintf(i18n.T(s.lang, "theme_location_ip_named"), loc.LocationLabel)
+		}
+		return i18n.T(s.lang, "theme_location_ip")
+	case themeswitch.LocationSourceTimezone:
+		if loc.TimezoneName != "" {
+			return fmt.Sprintf(i18n.T(s.lang, "theme_location_timezone_named"), loc.TimezoneName)
+		}
+		return i18n.T(s.lang, "theme_location_timezone")
+	case themeswitch.LocationSourceUTCOffset:
+		return i18n.T(s.lang, "theme_location_utc_offset")
+	default:
+		return i18n.T(s.lang, "theme_location_default")
+	}
 }
 
 func tooltipText(lines []string) string {
@@ -664,6 +701,7 @@ func (s *trayState) reloadConfig() error {
 	if s.cfg.ThemeSwitchEnabled {
 		s.startThemeScheduler()
 	}
+	s.refreshIPLocationInBackground()
 	s.reconcileRuntime()
 	s.updateIcon()
 	s.rememberConfigModTime()
@@ -803,13 +841,13 @@ func (s *trayState) startThemeScheduler() {
 	if s.cfg.ThemeLightTime == "" || s.cfg.ThemeDarkTime == "" {
 		return
 	}
-	lat, lon := s.cfg.ThemeLatitude, s.cfg.ThemeLongitude
-	if lat == 0 && lon == 0 {
-		lat, lon = themeswitch.AutoLocation()
+	loc := themeswitch.LocationInfo{Latitude: s.cfg.ThemeLatitude, Longitude: s.cfg.ThemeLongitude, Source: themeswitch.LocationSourceConfigured}
+	if s.cfg.ThemeMode == "sunrise" {
+		loc = s.themeLocationInfo(false)
 	}
-	s.themeSched = themeswitch.NewScheduler(s.cfg.ThemeMode, s.cfg.ThemeLightTime, s.cfg.ThemeDarkTime, lat, lon, s.cfg.ThemeSkipFullscreen, s.cfg.ThemeDarkOnBattery)
+	s.themeSched = themeswitch.NewScheduler(s.cfg.ThemeMode, s.cfg.ThemeLightTime, s.cfg.ThemeDarkTime, loc.Latitude, loc.Longitude, s.cfg.ThemeSkipFullscreen, s.cfg.ThemeDarkOnBattery)
 	s.themeSched.Start()
-	mylog.Info("Theme scheduler started: light=%s dark=%s", s.cfg.ThemeLightTime, s.cfg.ThemeDarkTime)
+	mylog.Info("Theme scheduler started: mode=%s light=%s dark=%s lat=%.4f lon=%.4f source=%s", s.cfg.ThemeMode, s.cfg.ThemeLightTime, s.cfg.ThemeDarkTime, loc.Latitude, loc.Longitude, loc.Source)
 }
 
 func (s *trayState) stopThemeScheduler() {
@@ -839,11 +877,12 @@ func (s *trayState) showPopup() {
 				ThemeSwitchEnabled:  s.cfg.ThemeSwitchEnabled,
 				DarkOnBattery:       s.cfg.ThemeDarkOnBattery,
 				SkipFullscreen:      s.cfg.ThemeSkipFullscreen,
+				IPLocationEnabled:   s.cfg.ThemeIPLocationEnabled,
 				HotkeysEnabled:      s.cfg.HotkeysEnabled,
 				AutostartEnabled:    s.cfg.AutostartEnabled,
 				LoggingEnabled:      s.cfg.LoggingEnabled,
 				IsChinese:           i18n.ResolveLanguage(s.lang) == "zh-CN",
-				ThemeSchedule:       s.themeScheduleText(),
+				ThemeSchedule:       s.themeScheduleText(true),
 				AppVersion:          version.Value,
 				Owner:               systray.WindowHandle(),
 			},
@@ -928,14 +967,24 @@ func (s *trayState) handlePopupAction(action popup.Action, value int) {
 			s.stopThemeScheduler()
 		}
 		s.updateIcon()
+		s.refreshPopupThemeSchedule()
 		s.saveConfig()
 	case popup.ActBatteryToggle:
 		s.cfg.ThemeDarkOnBattery = !s.cfg.ThemeDarkOnBattery
 		s.restartThemeScheduler()
+		s.refreshPopupThemeSchedule()
 		s.saveConfig()
 	case popup.ActFullscreenToggle:
 		s.cfg.ThemeSkipFullscreen = !s.cfg.ThemeSkipFullscreen
 		s.restartThemeScheduler()
+		s.refreshPopupThemeSchedule()
+		s.saveConfig()
+	case popup.ActIPLocationToggle:
+		s.cfg.ThemeIPLocationEnabled = !s.cfg.ThemeIPLocationEnabled
+		s.restartThemeScheduler()
+		s.refreshIPLocationInBackground()
+		s.updateIcon()
+		s.refreshPopupThemeSchedule()
 		s.saveConfig()
 	case popup.ActSwitchTheme:
 		mode := themeswitch.ModeDark
@@ -1005,6 +1054,33 @@ func (s *trayState) restartThemeScheduler() {
 		return
 	}
 	s.startThemeScheduler()
+}
+
+func (s *trayState) refreshPopupThemeSchedule() {
+	text := s.themeScheduleText(true)
+	systray.Post(func() {
+		popup.UpdateThemeSchedule(text)
+	})
+}
+
+func (s *trayState) refreshIPLocationInBackground() {
+	if !s.cfg.ThemeIPLocationEnabled || s.cfg.ThemeMode != "sunrise" || s.cfg.ThemeLatitude != 0 || s.cfg.ThemeLongitude != 0 {
+		return
+	}
+	go func() {
+		loc := themeswitch.AutoLocationInfo(true, true)
+		if loc.Source != themeswitch.LocationSourceIP {
+			return
+		}
+		s.post(func() {
+			if !s.cfg.ThemeIPLocationEnabled || s.cfg.ThemeMode != "sunrise" || s.cfg.ThemeLatitude != 0 || s.cfg.ThemeLongitude != 0 {
+				return
+			}
+			s.restartThemeScheduler()
+			s.refreshPopupThemeSchedule()
+			s.updateIcon()
+		})
+	}()
 }
 
 func (s *trayState) runThemeOperation(actionKey string, fn func() error, onSuccess func()) {
