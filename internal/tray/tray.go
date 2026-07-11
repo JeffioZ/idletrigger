@@ -124,6 +124,10 @@ func Run(cfg config.Config, cbs Callbacks) {
 		go s.batteryLoop()
 
 		systray.OnLeftClick = func() { s.showPopup() }
+		// Pre-create the popup window so the first click opens instantly.
+		// 预创建浮层窗口，首次点击即可瞬间展示。
+		s.showPopup()
+		popup.Hide()
 		systray.OnPowerChange = func() {
 			s.post(func() { s.refreshBatteryPolicy() })
 		}
