@@ -2,8 +2,8 @@ package idlewarning
 
 import "testing"
 
-func TestShow_NoPanic(t *testing.T) { Show("test", "body") }
-func TestHide_NoPanic(t *testing.T) { Hide() }
+func TestShow_NoPanic(t *testing.T)     { Show("test", "body") }
+func TestHide_NoPanic(t *testing.T)     { Hide() }
 func TestSetOnDismiss_Nil(t *testing.T) { SetOnDismiss(nil) }
 func TestShowHideRepeat(t *testing.T) {
 	for i := 0; i < 3; i++ {
