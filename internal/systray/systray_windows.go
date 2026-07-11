@@ -7,7 +7,6 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -456,7 +455,7 @@ func (t *winTray) initInstance() error {
 
 	taskbarEventNamePtr, _ := windows.UTF16PtrFromString("TaskbarCreated")
 	// https://msdn.microsoft.com/en-us/library/windows/desktop/ms644947
-	res, _, err := pRegisterWindowMessage.Call(
+	res, _, _ := pRegisterWindowMessage.Call(
 		uintptr(unsafe.Pointer(taskbarEventNamePtr)),
 	)
 	t.wmTaskbarCreated = uint32(res)
@@ -669,7 +668,7 @@ func (t *winTray) addOrUpdateMenuItem(menuItemId uint32, parentId uint32, title 
 		t.muMenus.Unlock()
 	} else if t.getVisibleItemIndex(parentId, menuItemId) != -1 {
 		// We set the menu item info based on the menuID
-		res, _, err = pSetMenuItemInfo.Call(
+		res, _, _ = pSetMenuItemInfo.Call(
 			uintptr(menu),
 			uintptr(menuItemId),
 			0,
@@ -960,7 +959,7 @@ func iconBytesToFilePath(iconBytes []byte) (string, error) {
 	iconFilePath := filepath.Join(os.TempDir(), "systray_temp_icon_"+dataHash)
 
 	if _, err := os.Stat(iconFilePath); os.IsNotExist(err) {
-		if err := ioutil.WriteFile(iconFilePath, iconBytes, 0644); err != nil {
+		if err := os.WriteFile(iconFilePath, iconBytes, 0644); err != nil {
 			return "", err
 		}
 	}

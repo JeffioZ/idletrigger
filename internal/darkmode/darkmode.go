@@ -25,7 +25,7 @@ func SetPreferredAppMode(forceDark bool) {
 			if forceDark {
 				mode = 2
 			}
-			syscall.Syscall(proc, 1, mode, 0, 0)
+			syscall.SyscallN(proc, mode)
 		}
 		flushMenuThemes(uxtheme, getProc)
 	})
@@ -41,7 +41,7 @@ func AllowWindow(hwnd uintptr) {
 		// AllowDarkModeForWindow — ordinal 133.
 		proc, _, _ := getProc.Call(uxtheme, uintptr(133))
 		if proc != 0 {
-			syscall.Syscall(proc, 2, hwnd, 1, 0)
+			syscall.SyscallN(proc, hwnd, 1)
 		}
 	})
 }
@@ -70,6 +70,6 @@ func flushMenuThemes(uxtheme uintptr, getProc *syscall.LazyProc) {
 	// FlushMenuThemes — ordinal 136.
 	proc2, _, _ := getProc.Call(uxtheme, uintptr(136))
 	if proc2 != 0 {
-		syscall.Syscall(proc2, 0, 0, 0, 0)
+		syscall.SyscallN(proc2)
 	}
 }

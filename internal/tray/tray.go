@@ -979,9 +979,10 @@ func (s *trayState) handlePopupAction(action popup.Action, value int) {
 		s.updateIcon()
 		s.saveConfig()
 	case popup.ActLanguage:
-		if value == 0 {
+		switch value {
+		case 0:
 			s.switchLanguage("en")
-		} else if value == 1 {
+		case 1:
 			s.switchLanguage("zh-CN")
 		}
 	case popup.ActConfig:
