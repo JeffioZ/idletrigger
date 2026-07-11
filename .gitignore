@@ -32,3 +32,4 @@ IdleTrigger.log.*
 .DS_Store
 Thumbs.db
 Desktop.ini
+/.gocache/
