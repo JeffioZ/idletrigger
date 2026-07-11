@@ -4,7 +4,7 @@
 
 ## Requirements
 
-- Go 1.25 or later
+- Go 1.26 or later
 - Git
 - `github.com/akavel/rsrc` only when regenerating Windows resources
 
