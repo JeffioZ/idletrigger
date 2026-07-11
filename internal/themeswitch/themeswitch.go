@@ -5,7 +5,6 @@ package themeswitch
 import (
 	"fmt"
 	"math"
-	osExec "os/exec"
 	"strconv"
 	"strings"
 	"sync"
@@ -47,34 +46,7 @@ var timezoneLookup = map[string][2]float64{
 
 // AutoLocation returns approximate coordinates based on the Windows timezone.
 // Falls back to Beijing if the timezone is unknown.
-
-func GetLocation() (float64, float64) {
-	ps, _ := osExec.LookPath("powershell.exe")
-	cmd := osExec.Command(ps, "-NoProfile", "-NonInteractive", "-Command",
-		"=New-Object Windows.Devices.Geolocation.Geolocator;"+
-			"=.GetGeopositionAsync().GetAwaiter().GetResult();"+
-			"Write-Output (.Coordinate.Point.Position.Latitude.ToString())+' '+"+
-			"(.Coordinate.Point.Position.Longitude.ToString())")
-	cmd.Stderr = nil
-	out, err := cmd.Output()
-	if err != nil {
-		return 0, 0
-	}
-	var lat, lon float64
-	if _, err := fmt.Sscanf(string(out), "%f %f", &lat, &lon); err != nil {
-		return 0, 0
-	}
-	if lat < -90 || lat > 90 || lon < -180 || lon > 180 {
-		return 0, 0
-	}
-	return lat, lon
-}
-
 func AutoLocation() (float64, float64) {
-	// Try GPS first, fall back to timezone.
-	if lat, lon := GetLocation(); lat != 0 || lon != 0 {
-		return lat, lon
-	}
 	// Get the Windows timezone name via GetTimeZoneInformation.
 	kernel32 := windows.NewLazySystemDLL("kernel32.dll")
 	proc := kernel32.NewProc("GetTimeZoneInformation")
