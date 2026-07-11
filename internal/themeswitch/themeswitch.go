@@ -158,7 +158,7 @@ func Current() Mode {
 func ScheduleTimes(mode, lightTime, darkTime string, lat, lon float64, now time.Time) (string, string, bool) {
 	var lightMin, darkMin int
 	if mode == "sunrise" {
-		lightMin, darkMin = sunriseSunset(now, lat, lon)
+		lightMin, darkMin = CalcSunriseSunset(now, lat, lon)
 	} else {
 		lightMin = parseTime(lightTime)
 		darkMin = parseTime(darkTime)
@@ -325,14 +325,14 @@ func (s *Scheduler) check(now time.Time) {
 
 func (s *Scheduler) scheduleMinutes(now time.Time) (int, int) {
 	if s.mode == "sunrise" {
-		return sunriseSunset(now, s.latitude, s.longitude)
+		return CalcSunriseSunset(now, s.latitude, s.longitude)
 	}
 	return parseTime(s.lightTime), parseTime(s.darkTime)
 }
 
 // sunriseSunset returns light and dark times as minutes since midnight,
 // calculated using the NOAA solar calculator.
-func sunriseSunset(t time.Time, lat, lon float64) (sunriseMinutes, sunsetMinutes int) {
+func CalcSunriseSunset(t time.Time, lat, lon float64) (sunriseMinutes, sunsetMinutes int) {
 	// Day of year
 	doy := float64(t.YearDay())
 

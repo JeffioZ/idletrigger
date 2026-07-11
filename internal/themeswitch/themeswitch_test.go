@@ -23,7 +23,7 @@ func TestParseTime(t *testing.T) {
 func TestSunriseSunsetBeijingSummer(t *testing.T) {
 	loc := time.FixedZone("CST", 8*60*60)
 	date := time.Date(2026, 6, 21, 12, 0, 0, 0, loc)
-	sunrise, sunset := sunriseSunset(date, 39.9, 116.4)
+	sunrise, sunset := CalcSunriseSunset(date, 39.9, 116.4)
 	if sunrise < 240 || sunrise > 360 {
 		t.Fatalf("unexpected sunrise: %d", sunrise)
 	}
@@ -34,7 +34,7 @@ func TestSunriseSunsetBeijingSummer(t *testing.T) {
 
 func TestSunriseSunsetPolarCondition(t *testing.T) {
 	date := time.Date(2026, 12, 21, 12, 0, 0, 0, time.UTC)
-	sunrise, sunset := sunriseSunset(date, 89, 0)
+	sunrise, sunset := CalcSunriseSunset(date, 89, 0)
 	if sunrise != -1 || sunset != -1 {
 		t.Fatalf("polar condition should be unavailable, got %d/%d", sunrise, sunset)
 	}
