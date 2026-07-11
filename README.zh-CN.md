@@ -108,6 +108,7 @@ scripts/                 资源和主题托盘图标生成器
 - [getlantern/systray](https://github.com/getlantern/systray)：本地 Windows 托盘实现基于 v1.2.2（MIT）调整
 - [BurntSushi/toml](https://github.com/BurntSushi/toml)：TOML 解析器
 - [golang.org/x/sys](https://pkg.go.dev/golang.org/x/sys)：Windows API 绑定
+- [NoSleep](https://github.com/CHerSun/NoSleep)：保持唤醒功能的设计灵感来源
 
 ## 许可证
 

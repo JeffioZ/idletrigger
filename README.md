@@ -108,6 +108,7 @@ scripts/                 Resource and themed-icon generators
 - [getlantern/systray](https://github.com/getlantern/systray): local Windows tray implementation derived from v1.2.2 (MIT)
 - [BurntSushi/toml](https://github.com/BurntSushi/toml): TOML parser
 - [golang.org/x/sys](https://pkg.go.dev/golang.org/x/sys): Windows API bindings
+- [NoSleep](https://github.com/CHerSun/NoSleep): inspiration for the Stay Awake feature
 
 ## License
 
