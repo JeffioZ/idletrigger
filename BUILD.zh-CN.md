@@ -93,12 +93,12 @@ go build -mod=vendor -trimpath -ldflags="-s -w -H windowsgui" -o dist/IdleTrigge
 ```powershell
 go test ./...
 go build -o dist/IdleTrigger-dev.exe .
-.\IdleTrigger-dev.exe
+.\dist\IdleTrigger-dev.exe
 
 # 托盘程序启动后，在第二个终端中执行：
-.\IdleTrigger-dev.exe nosleep on
-.\IdleTrigger-dev.exe nosleep status
-.\IdleTrigger-dev.exe monitor on
+.\dist\IdleTrigger-dev.exe nosleep on
+.\dist\IdleTrigger-dev.exe nosleep status
+.\dist\IdleTrigger-dev.exe monitor on
 ```
 
 代码签名是可选发布步骤。调试构建不要使用 UPX 加壳，以免增加诊断和杀毒软件分析成本。

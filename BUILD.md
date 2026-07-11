@@ -93,12 +93,12 @@ go build -mod=vendor -trimpath -ldflags="-s -w -H windowsgui" -o dist/IdleTrigge
 ```powershell
 go test ./...
 go build -o dist/IdleTrigger-dev.exe .
-.\IdleTrigger-dev.exe
+.\dist\IdleTrigger-dev.exe
 
 # In a second terminal after the tray app starts:
-.\IdleTrigger-dev.exe nosleep on
-.\IdleTrigger-dev.exe nosleep status
-.\IdleTrigger-dev.exe monitor on
+.\dist\IdleTrigger-dev.exe nosleep on
+.\dist\IdleTrigger-dev.exe nosleep status
+.\dist\IdleTrigger-dev.exe monitor on
 ```
 
 Code signing is an optional release step. Do not pack debug builds with UPX: it complicates diagnostics and can increase antivirus scrutiny.
