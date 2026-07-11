@@ -60,7 +60,7 @@ func readFrames(path string) ([]iconFrame, error) {
 			return nil, fmt.Errorf("truncated ICO entry %d", i)
 		}
 		width, height := data[entry], data[entry+1]
-		if width == 0 || height == 0 || width > 32 || height > 32 {
+		if width == 0 || height == 0 || width > 64 || height > 64 {
 			continue
 		}
 		size := int(binary.LittleEndian.Uint32(data[entry+8 : entry+12]))
