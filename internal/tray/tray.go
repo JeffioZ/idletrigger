@@ -631,15 +631,7 @@ func (s *trayState) handleIPCState(cmd string) string {
 		}
 		return "ok"
 	case "monitor:status":
-		if s.mon != nil {
-			value := fmt.Sprintf(
-				i18n.T(s.lang, "status_monitor_active"),
-				s.cfg.IdleTimeoutMinutes,
-				i18n.T(s.lang, actionTranslationKey(s.cfg.IdleAction)),
-			)
-			return s.statusLine("status_monitor", value)
-		}
-		return s.statusLine("status_monitor", i18n.T(s.lang, "status_disabled"))
+		return s.statusLine("status_monitor", s.monitorStatusText())
 
 	case "status":
 		return s.fmtStatus()
@@ -728,14 +720,7 @@ func (s *trayState) fmtStatus() string {
 			ns = i18n.T(s.lang, "status_enabled_keep_screen")
 		}
 	}
-	mon := i18n.T(s.lang, "status_disabled")
-	if s.mon != nil {
-		mon = fmt.Sprintf(
-			i18n.T(s.lang, "status_monitor_active"),
-			s.cfg.IdleTimeoutMinutes,
-			i18n.T(s.lang, actionTranslationKey(s.cfg.IdleAction)),
-		)
-	}
+	mon := s.monitorStatusText()
 	ps := power.GetStatus()
 	pow := i18n.T(s.lang, "status_unknown")
 	if ps.Valid && ps.ACLine {
@@ -766,6 +751,20 @@ func (s *trayState) fmtStatus() string {
 
 func (s *trayState) statusLine(labelKey, value string) string {
 	return fmt.Sprintf(i18n.T(s.lang, "status_line"), i18n.T(s.lang, labelKey), value)
+}
+
+func (s *trayState) monitorStatusText() string {
+	if s.mon != nil {
+		return fmt.Sprintf(
+			i18n.T(s.lang, "status_monitor_active"),
+			s.cfg.IdleTimeoutMinutes,
+			i18n.T(s.lang, actionTranslationKey(s.cfg.IdleAction)),
+		)
+	}
+	if s.idleSuspended() {
+		return i18n.T(s.lang, "status_paused_by_nosleep")
+	}
+	return i18n.T(s.lang, "status_disabled")
 }
 
 // ---- helpers ----------------------------------------------------------

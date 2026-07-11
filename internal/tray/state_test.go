@@ -125,6 +125,9 @@ func TestIdleSuspendedByProcessKeepAwake(t *testing.T) {
 	if got := state.buildTooltip(); !strings.Contains(got, "空闲监测：已暂停") {
 		t.Fatalf("tooltip should expose idle suspension: %q", got)
 	}
+	if got := state.monitorStatusText(); got != "保持唤醒时暂停" {
+		t.Fatalf("monitor status = %q, want paused by Stay Awake", got)
+	}
 }
 
 func hasDanglingTooltipSuffix(value string) bool {
