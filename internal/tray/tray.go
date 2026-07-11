@@ -1031,7 +1031,26 @@ func (s *trayState) watchConfig() {
 			s.lang = s.cfg.Language
 			s.reconcileRuntime()
 			s.updateIcon()
+			popup.Hide()
 			mylog.Info("config reloaded from disk")
 		}
+	}
+}
+
+func (s *trayState) popupState() popup.State {
+	return popup.State{
+		NoSleepEnabled:      s.cfg.NoSleepEnabled,
+		ProcessWatchEnabled: s.cfg.ProcessWatchEnabled,
+		IdleEnabled:         s.cfg.IdleTimeoutMinutes > 0,
+		IdleTimeout:         s.cfg.IdleTimeoutMinutes,
+		IdleAction:          string(s.cfg.IdleAction),
+		ThemeSwitchEnabled:  s.cfg.ThemeSwitchEnabled,
+		DarkOnBattery:       s.cfg.ThemeDarkOnBattery,
+		SkipFullscreen:      s.cfg.ThemeSkipFullscreen,
+		HotkeysEnabled:      s.cfg.HotkeysEnabled,
+		AutostartEnabled:    s.cfg.AutostartEnabled,
+		IsChinese:           s.lang == "zh-CN",
+		ThemeSchedule:       s.cfg.ThemeMode,
+		LoggingEnabled:      s.cfg.LoggingEnabled,
 	}
 }
