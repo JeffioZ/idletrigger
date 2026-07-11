@@ -30,5 +30,3 @@ func show(title, text string, icon uintptr) {
 	const mbOK = 0
 	proc.Call(0, uintptr(unsafe.Pointer(b)), uintptr(unsafe.Pointer(t)), uintptr(mbOK)|icon)
 }
-
-func Info(title, heading, body string) { show(title, compose(heading, body), 0x40) }
