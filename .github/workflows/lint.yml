@@ -14,7 +14,14 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
-      - uses: golangci/golangci-lint-action@v6
+      - name: gofmt
+        run: |
+          $unfmt = (gofmt -l .)
+          if ($unfmt) { Write-Error "gofmt: $unfmt"; exit 1 }
+      - name: go vet
+        run: go vet ./...
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
         with:
           version: latest
           args: --timeout=5m
