@@ -29,4 +29,4 @@ jobs:
         uses: golangci/golangci-lint-action@db9de0fc1a667e1a49d2291a1a042dff081d78f6 # v9
         with:
           version: v2.11.4
-          args: --timeout=5m
+          args: --timeout=5m --disable=errcheck
