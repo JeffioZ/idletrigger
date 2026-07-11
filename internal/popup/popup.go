@@ -7,11 +7,11 @@ import (
 	"syscall"
 	"unsafe"
 
-	"os"
 	"golang.org/x/sys/windows"
+	"os"
 
+	t "github.com/JeffioZ/idletrigger/internal/idlewarning"
 	"github.com/JeffioZ/idletrigger/internal/themeswitch"
-t"github.com/JeffioZ/idletrigger/internal/idlewarning"
 )
 
 type wndClassExW struct {
@@ -140,9 +140,9 @@ const (
 	wsExToolWindow = 0x00000080
 	wsExTopmost    = 0x00000008
 
-	swHide          = 0
-	swShowNormal    = 1
-	swpShowWindow   = 0x0040
+	swHide         = 0
+	swShowNormal   = 1
+	swpShowWindow  = 0x0040
 	monitorNearest = 2
 	gwlpWndProc    = ^uintptr(3)
 
