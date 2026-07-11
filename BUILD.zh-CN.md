@@ -4,7 +4,7 @@
 
 ## 前置条件
 
-- Go 1.25 或更高版本
+- Go 1.26 或更高版本
 - Git
 - 仅重新生成 Windows 资源时需要 `github.com/akavel/rsrc`
 
