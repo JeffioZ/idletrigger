@@ -109,5 +109,6 @@
   "tip_exit": "Exit the tray app and stop Stay Awake, idle monitoring, hotkeys, and theme scheduling.",
   "menu_theme_enable": "Auto Switch",
   "menu_nosleep_enable": "Enable Stay Awake",
-  "msg_idle_warning_test": "Idle Warning Preview"
+  "msg_idle_warning_test": "Idle Warning Preview",
+  "about_text": "IdleTrigger v1.3\n\nStay Awake    Prevent system sleep, keep screen on\nIdle Monitor  Auto-trigger sleep/hibernate/shutdown/lock\n              after N minutes of inactivity\nGlobal Hotkeys Win+Shift+S/L/N\nDay/Night     Auto-switch light/dark by time or sunrise\nBattery Aware Auto-disable on battery\nProcess Watch Auto-enable for specific apps\n\nhttps://github.com/JeffioZ/idletrigger"
 }
