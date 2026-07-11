@@ -98,10 +98,14 @@ go build -trimpath -ldflags="-H windowsgui" -o dist/IdleTrigger-x64-dev.exe .
 .\dist\IdleTrigger-x64-dev.exe
 
 # 托盘程序启动后，在第二个终端中执行：
-.\dist\IdleTrigger-x64-dev.exe nosleep on
-.\dist\IdleTrigger-x64-dev.exe nosleep status
-.\dist\IdleTrigger-x64-dev.exe monitor on
+cmd /c .\dist\IdleTrigger-x64-dev.exe nosleep on
+cmd /c .\dist\IdleTrigger-x64-dev.exe nosleep status
+cmd /c .\dist\IdleTrigger-x64-dev.exe monitor on
 ```
+
+开发构建使用 Windows GUI 子系统，避免启动托盘程序时闪出控制台窗口。验证 CLI
+输出时，请通过 `cmd /c` 执行，或用 `Start-Process` 重定向 stdout/stderr；
+PowerShell 直接运行 GUI 子系统 EXE 时，可能在输出完成绑定前就返回。
 
 制作文档截图时，可在启动 EXE 前设置 `IDLETRIGGER_CAPTURE_MODE=1`，再从托盘图标打开浮层。截图模式会把控制浮层显示为普通顶层应用窗口，便于截图工具选中整窗；该模式仅用于文档截图和视觉检查。
 

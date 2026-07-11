@@ -98,10 +98,15 @@ go build -trimpath -ldflags="-H windowsgui" -o dist/IdleTrigger-x64-dev.exe .
 .\dist\IdleTrigger-x64-dev.exe
 
 # In a second terminal after the tray app starts:
-.\dist\IdleTrigger-x64-dev.exe nosleep on
-.\dist\IdleTrigger-x64-dev.exe nosleep status
-.\dist\IdleTrigger-x64-dev.exe monitor on
+cmd /c .\dist\IdleTrigger-x64-dev.exe nosleep on
+cmd /c .\dist\IdleTrigger-x64-dev.exe nosleep status
+cmd /c .\dist\IdleTrigger-x64-dev.exe monitor on
 ```
+
+The dev build uses the Windows GUI subsystem so tray startup does not flash a
+console window. For CLI output checks, run commands through `cmd /c` or redirect
+stdout/stderr with `Start-Process`; direct PowerShell invocation of GUI-subsystem
+EXEs can return before output is attached.
 
 For documentation screenshots, set `IDLETRIGGER_CAPTURE_MODE=1` before launching the EXE, then open the panel from the tray icon. Capture mode shows the panel as a regular top-level app window so screenshot tools can select the whole window. It is only intended for documentation and visual checks.
 
