@@ -1,104 +1,104 @@
-# Build Instructions
+# Build IdleTrigger
 
-> [简体中文](BUILD.zh-CN.md)
+[简体中文](BUILD.zh-CN.md)
 
-## Prerequisites
+## Requirements
 
-- Go 1.25 or newer
+- Go 1.25 or later
 - Git
-- Python 3 only when regenerating icons
-- `github.com/akavel/rsrc` module only when regenerating Windows resources
+- `github.com/akavel/rsrc` only when regenerating Windows resources
+
+IdleTrigger targets Windows 10 / Windows Server 2016 and later. The repository produces both `windows/amd64` and `windows/386` binaries.
+
+Windows 7 is not supported by the main build. Go 1.20 was the last Go release to run there; a future compatibility build should be a separately maintained Go 1.20 branch with matching dependency versions and real-device validation.
 
 ```powershell
 go version
 go mod download
 ```
 
-IdleTrigger targets Windows 10 / Server 2016 or newer. Both `windows/386`
-and `windows/amd64` are supported.
-
-Windows 7 is not supported by the current build: Go 1.20 was the final Go
-release that ran on Windows 7. If real demand appears, maintain a separate
-legacy build based on Go 1.20 with compatible dependency versions and test it
-on Windows 7; do not lower the main build's toolchain.
-
 ## Build
 
-The repository contains architecture-specific `.syso` resources for 386 and
-amd64, so either build includes the application icon, manifest, and Windows
-version information. Regenerate resources when the release version changes so
-Explorer's file properties match the in-app version.
+The checked-in architecture-specific `.syso` files contain the application icon, manifest, and Windows version metadata. Regenerate them whenever the release version changes so Explorer properties and the app version agree.
 
 ```powershell
 $env:CGO_ENABLED = "0"
-$env:GOARCH = "amd64" # or "386"
+$env:GOARCH = "amd64" # "386" for 32-bit Windows
 $version = "dev"
 $ldflags = "-s -w -H windowsgui -X github.com/JeffioZ/idletrigger/internal/version.Value=$version"
 $output = if ($env:GOARCH -eq "amd64") { "IdleTrigger-x64.exe" } else { "IdleTrigger-x86.exe" }
-go build -trimpath -ldflags=$ldflags -o $output .
+go build -trimpath "-ldflags=$ldflags" -o $output .
 ```
 
-`CGO_ENABLED=0` produces a self-contained executable that only depends on
-Windows system DLLs. `-H windowsgui` prevents a console window from flashing
-when the tray application starts.
+`CGO_ENABLED=0` keeps the binary self-contained. `-H windowsgui` prevents a console window when launching the tray app.
 
 ## Verify
 
+Run these checks before a release:
+
 ```powershell
-go test ./...
+go test -count=1 ./...
 go vet ./...
 gofmt -l .
 go mod verify
 ```
 
-The release workflow performs test/vet first, builds both architectures, and
-publishes `SHA256SUMS.txt` with the executables.
-
-## Offline Build
-
-Run `go mod vendor` while dependencies are available, then copy the repository
-including `vendor/` to the offline machine:
+Build both targets explicitly:
 
 ```powershell
 $env:CGO_ENABLED = "0"
+$version = "dev"
+$ldflags = "-s -w -H windowsgui -X github.com/JeffioZ/idletrigger/internal/version.Value=$version"
+
 $env:GOARCH = "amd64"
-go build -mod=vendor -trimpath -ldflags="-s -w -H windowsgui" -o IdleTrigger-x64.exe .
+go build -trimpath "-ldflags=$ldflags" -o IdleTrigger-x64.exe .
+
+$env:GOARCH = "386"
+go build -trimpath "-ldflags=$ldflags" -o IdleTrigger-x86.exe .
 ```
 
-## Regenerate Icons and Resources
+The release workflow runs test and vet, produces both executables, and publishes `SHA256SUMS.txt`.
 
-The icon generator uses only the Python standard library. It stores each ICO
-size as a PNG-compressed frame, supported by the Windows 10+ target platform:
+## Regenerate Resources
+
+When `assets/app.ico` changes, generate matching tray icon variants first:
 
 ```powershell
-python scripts/gen_icon.py assets
+go run ./scripts/gen_tray_theme_icons assets
 ```
 
-Regenerate both architectures. Use the same version string for this command and
-for `-X github.com/JeffioZ/idletrigger/internal/version.Value=...` during the
-release build:
+Then regenerate both architecture resources. Use the identical version value in the resource command and release build:
 
 ```powershell
 $version = "1.3.0"
 go run ./scripts/gen_resource.go -version $version
 ```
 
-Commit `app.ico`, the three tray ICO files, `assets/manifest.xml`, the resource
-generator, and both `.syso` files together so checked-in resources remain
-reproducible.
+Commit `app.ico`, both tray ICO files, `assets/manifest.xml`, the generators, and both `.syso` files together. That keeps shipped resources reproducible.
+
+## Offline Build
+
+Vendor dependencies while online, then copy the repository including `vendor/` to the offline machine:
+
+```powershell
+go mod vendor
+
+$env:CGO_ENABLED = "0"
+$env:GOARCH = "amd64"
+go build -mod=vendor -trimpath -ldflags="-s -w -H windowsgui" -o IdleTrigger-x64.exe .
+```
 
 ## Development Loop
 
 ```powershell
 go test ./...
 go build -o IdleTrigger-dev.exe .
-./IdleTrigger-dev.exe
+.\IdleTrigger-dev.exe
 
-# In a second terminal while the tray is running:
-./IdleTrigger-dev.exe nosleep on
-./IdleTrigger-dev.exe nosleep status
-./IdleTrigger-dev.exe monitor on
+# In a second terminal after the tray app starts:
+.\IdleTrigger-dev.exe nosleep on
+.\IdleTrigger-dev.exe nosleep status
+.\IdleTrigger-dev.exe monitor on
 ```
 
-UPX compression and code signing are optional release steps. Do not compress
-debug builds because it makes diagnostics and antivirus analysis harder.
+Code signing is an optional release step. Do not pack debug builds with UPX: it complicates diagnostics and can increase antivirus scrutiny.

@@ -1,201 +1,113 @@
 # IdleTrigger
 
-> 📖 [简体中文](README.zh-CN.md)
+[简体中文](README.zh-CN.md)
 
-**System idle monitor, power scheduler & sleep preventer for Windows**
+**A lightweight Windows tray utility for idle actions, stay-awake control, and scheduled theme switching.**
 
-A lightweight, single-EXE utility that lives in your system tray.  It can:
+IdleTrigger is a single executable with no runtime dependencies beyond Windows system DLLs. It stays out of the way in the notification area and keeps its settings in a readable TOML file beside the executable.
 
-- **Prevent sleep** — keep the system awake by resetting the Windows idle timer
-- **Auto-trigger** — sleep / hibernate / shutdown / lock after idle timeout
-- **One-shot CLI** — trigger actions from terminal, scripts, or AI agents
-- **IPC** — CLI commands seamlessly communicate with the running tray instance
+## What It Does
 
-## Features
+- **Idle monitor**: after a chosen period without keyboard or mouse input, lock, sleep, hibernate, shut down, or restart the PC.
+- **Pre-action warning**: show a non-activating warning before an idle action; mouse or keyboard input, or closing the warning, cancels the pending action.
+- **Stay Awake**: prevent automatic sleep, optionally keeping the display on.
+- **Day/Night theme**: switch Windows themes at fixed times or from calculated sunrise and sunset; optionally use dark mode on battery.
+- **Quick actions**: lock, sleep, hibernate, shut down, or restart from the control panel or command line.
+- **Automation**: control a running tray instance through a per-session named pipe.
 
-- **System tray** — click the icon to open a compact control panel
-- **Stay Awake** — prevent Windows from sleeping, optionally keep screen on
-- **Idle monitor** — auto-trigger after N minutes of no keyboard/mouse input
-  (5 / 10 / 30 / 60 / 120 min, configurable from the control panel)
-- **Global hotkeys** — `Win+Shift+S` sleep / `+L` lock / `+N` toggle stay-awake
-- **Battery awareness** — auto-disable stay-awake when on battery
-- **Process watching** — auto-enable stay-awake when specific apps are running
-- **IPC named pipe** — CLI commands talk to the running tray instance
-- **Capability detection** — unavailable actions (e.g. hibernate) are auto-disabled
-- **Single EXE** — self-contained and dependent only on Windows system DLLs
-- **Plain-text config** — `IdleTrigger.toml` next to the EXE, edit with Notepad
-- **Multi-language** — English / Simplified Chinese. Auto-detects OS language (Simplified Chinese on zh-CN Windows, English otherwise), manually switchable from the control panel
-- **DPI & dark mode** — Per-Monitor V2, native system dialogs and DPI-aware control panel
-- **Inline help** — Control-panel tooltips explain each feature and point to advanced TOML settings when needed
-- **Platform**: Windows 10 / Server 2016 or newer, 32-bit and 64-bit builds
+## Requirements
+
+- Windows 10 / Windows Server 2016 or later
+- x64 build for most PCs; x86 build for 32-bit Windows
+- Theme switching requires Windows Personalize settings. It may be unavailable on Server Core or policy-managed desktops.
+
+Windows 7 is intentionally not supported by the main build. See [BUILD.md](BUILD.md) for the compatibility rationale.
 
 ## Quick Start
 
-1. Download `IdleTrigger-x64.exe` from [Releases](https://github.com/JeffioZ/idletrigger/releases)
-2. Double-click → the blue standby indicator appears in the tray
-3. Click the tray icon to configure; or edit `IdleTrigger.toml`
+1. Download `IdleTrigger-x64.exe` from [Releases](https://github.com/JeffioZ/idletrigger/releases).
+2. Run it. The app appears in the notification area without opening a main window.
+3. Left-click the tray icon to open or close the control panel. Right-click it for the native **Open** and **Exit** menu.
+4. Use the panel for common settings; edit `IdleTrigger.toml` beside the EXE for advanced settings.
 
-`IdleTrigger-x64.exe` is the native 64-bit build and is recommended for most
-users. `IdleTrigger-x86.exe` is the 32-bit compatibility build. Both provide
-the same features.
+The control panel follows Windows light/dark mode, responds to DPI changes, and closes when it loses focus. Tooltips explain each available option.
 
-## CLI Usage
+## Idle Monitor
 
-```
-IdleTrigger sleep                 Suspend system
-IdleTrigger hibernate             Hibernate system
-IdleTrigger shutdown              Shut down system
-IdleTrigger lock                  Lock workstation
+The idle monitor is enabled by default with a 30-minute timeout and Sleep as its action. Available panel timeouts are:
 
-IdleTrigger nosleep on            Keep system awake
-IdleTrigger nosleep on --screen   Keep awake + screen on
-IdleTrigger nosleep off           Restore normal power management
-IdleTrigger nosleep toggle        Toggle stay-awake
-IdleTrigger nosleep status        Show stay-awake state
+`1, 2, 3, 5, 10, 15, 20, 25, 30, 45 minutes; 1, 2, 3, 4, 5 hours`.
 
-IdleTrigger monitor on            Enable idle monitor (IPC → tray)
-IdleTrigger monitor off           Disable idle monitor (IPC → tray)
+The monitor uses Windows `GetLastInputInfo` to observe real keyboard and mouse activity. A newly started or re-enabled monitor begins a fresh timeout; it never acts immediately because the machine had already been idle before IdleTrigger started. After an action is triggered, the timeout is reset before monitoring continues.
 
-IdleTrigger autostart enable      Enable auto-start on login
-IdleTrigger autostart disable     Disable auto-start
-IdleTrigger autostart status      Show auto-start state
+Enable the warning to receive a non-activating prompt before the action. Any keyboard or mouse input cancels the pending action; closing the prompt does the same. Set `idle_warning_seconds = 0` for silent operation.
 
-IdleTrigger config:reload         Reload config (via IPC)
-IdleTrigger status                Show full system state
-IdleTrigger version               Print version
-```
+## Command Line
 
-Run without arguments to launch the system-tray GUI.
+Run the EXE without arguments to launch the tray app.
 
-**AI agent / script integration**: when the tray is running, `nosleep` and
-`monitor` commands are forwarded through a per-session named pipe
-(`\\.\pipe\IdleTrigger-<session>`).
-The tray must be running for stateful `nosleep` and `monitor` control.
-One-shot actions (`sleep`, `lock`, …) execute directly.
+```text
+IdleTrigger sleep | hibernate | shutdown | restart | lock
 
-## Configuration (`IdleTrigger.toml`)
+IdleTrigger nosleep on [--screen]
+IdleTrigger nosleep off | toggle | status
 
-```toml
-# IdleTrigger Configuration
-# Edit directly; tray picks up changes on restart (or via CLI "config:reload").
+IdleTrigger monitor on | off
 
-language = "auto"                  # "auto" (follow OS), "en", "zh-CN"
-idle_timeout_minutes = 30          # 0 = disable idle monitor
-idle_action = "sleep"              # sleep | hibernate | shutdown | lock
-idle_warning_seconds = 30          # pre-trigger notification; 0 = off
-
-nosleep_enabled = false            # stay awake
-keep_screen_on = false             # also keep display on
-nosleep_on_battery = false         # allow stay-awake on battery power
-nosleep_battery_threshold = 20     # min battery % for stay-awake
-
-hotkeys_enabled = false            # Win+Shift+S/L/N
-
-process_watch_enabled = false      # auto stay-awake when apps run
-process_watch_list = []            # e.g. ["chrome.exe", "powerpnt.exe"]
-
-logging_enabled = false            # debug log to IdleTrigger.log
-
-theme_switch_enabled = false       # auto theme switch
-theme_mode = "sunrise"               # "fixed" or "sunrise"
-theme_light_time = "07:00"
-theme_dark_time = "19:00"
-theme_latitude = 0                 # 0 = auto-detect from timezone
-theme_longitude = 0
-theme_dark_on_battery = true
-theme_skip_fullscreen = true
-
+IdleTrigger autostart enable | disable | status
+IdleTrigger config:reload
+IdleTrigger status
+IdleTrigger version
 ```
 
-Auto-start is stored in the current user's Windows Run registry key and is
-managed through the control panel or CLI, not through TOML. When logging is
-enabled, `IdleTrigger.log` is written next to the EXE (falling back to
-`%TEMP%`), rotated at 5 MiB, and retained once as `IdleTrigger.log.1`.
+`nosleep`, `monitor`, and `config:reload` forward to the active tray instance through `\\.\pipe\IdleTrigger-<session>`. Start the tray app first for these stateful commands. One-shot power actions execute directly.
 
-## Project Structure
+## Configuration
 
-```
-IdleTrigger/
-├── main.go                          # Entry point: CLI vs GUI dispatch
-├── IdleTrigger.example.toml         # Full configuration example
-├── assets/
-│   ├── app.ico                      # EXE icon (16–256, 9 native sizes)
-│   ├── icon.go                      # go:embed bridges
-│   ├── icon_default.ico             # Tray: standby bolt (blue)
-│   ├── icon_monitor.ico             # Tray: monitoring bolt (amber)
-│   ├── icon_active.ico              # Tray: keep-awake bolt (green)
-│   ├── manifest.xml                 # DPI & dark mode manifest
-├── scripts/
-│   ├── gen_icon.py                  # Icon generator (dev-only)
-│   └── gen_resource.go              # Windows icon/manifest/version resources
-├── internal/
-│   ├── actions/actions.go           # Win32: Sleep, Hibernate, Shutdown, Restart, Lock
-│   ├── autostart/autostart.go       # Registry Run-key management
-│   ├── cli/cli.go                   # CLI dispatch + IPC client
-│   ├── config/config.go             # TOML config load/save
-│   ├── darkmode/darkmode.go         # uxtheme ordinal 135/136
-│   ├── dialog/dialog.go             # MessageBox dialogs
-│   ├── dpi/dpi.go                   # Per-Monitor V2
-│   ├── hotkey/hotkey.go             # Global hotkeys (Win+Shift+S/L/N)
-│   ├── i18n/                        # Multi-language (en, zh-CN)
-│   │   ├── i18n.go
-│   │   └── locales/{en,zh-CN}.json
-│   ├── ipc/ipc.go                   # Named-pipe IPC: Server + Client
-│   ├── monitor/monitor.go           # GetLastInputInfo idle detection
-│   ├── nosleep/nosleep.go           # SetThreadExecutionState
-│   ├── notify/notify.go             # Balloon-tip notifications
-│   ├── power/power.go               # Battery status + sleep capabilities
-│   ├── processwatcher/processwatcher.go  # Process-list watcher
-│   ├── popup/popup.go                # DPI-aware tray control panel
-│   ├── systray/                      # Local Windows tray implementation (MIT)
-│   ├── themeswitch/themeswitch.go   # Fixed/sunrise theme scheduler
-│   └── tray/tray.go                 # Tray integration + serialized state
-├── rsrc_windows_386.syso            # 32-bit resource: icon + manifest + version info
-├── rsrc_windows_amd64.syso          # 64-bit resource: icon + manifest + version info
-├── .github/workflows/release.yml    # Verified dual-architecture release
-├── ROADMAP.md                       # Release checklist and plans
-├── go.mod  go.sum  LICENSE  .gitattributes  .gitignore
-├── README.md  README.zh-CN.md  BUILD.md  BUILD.zh-CN.md
+IdleTrigger creates and maintains `IdleTrigger.toml` next to the EXE. It adds missing keys and refreshed comments when the bundled configuration template changes, while retaining valid existing values. It does not rewrite the file on every run.
+
+Use [IdleTrigger.example.toml](IdleTrigger.example.toml) as the complete, bilingual field reference. After manually editing the file, restart IdleTrigger or run:
+
+```powershell
+.\IdleTrigger-x64.exe config:reload
 ```
 
-## Control Panel Reference
+Auto-start is stored in the current user's Windows Run registry key and is managed by the panel or CLI, not TOML.
 
+## Logging
+
+Enable **Debug Log** in the panel or set `logging_enabled = true`. The log is written next to the EXE, with `%TEMP%` as a fallback. It rotates at 5 MiB and retains one previous file as `IdleTrigger.log.1`.
+
+Each line includes a startup session identifier, making separate runs easy to distinguish:
+
+```text
+[2026-07-11 12:34:56.789] [session:18a0f0-2b4c] Idle monitor started
 ```
-Lock / Sleep / Hibernate / Shut Down / Restart
 
-Stay Awake
-  ☐ Enable Stay Awake
-  ☐ Process Watch
+## Build and Development
 
-Idle Monitor
-  ☐ Enable
-  Timeout: 5 / 10 / 30 / 60 / 120 minutes
-  Trigger: Sleep / Hibernate / Shut Down / Lock
+See [BUILD.md](BUILD.md) for prerequisites, dual-architecture builds, resource generation, and verification commands.
 
-Day/Night
-  Light HH:MM / Dark HH:MM
-  ☐ Auto Switch  ☐ Pause Fullscreen  ☐ Dark on Battery
-  Switch / Refresh Theme
+## Project Layout
 
-☐ Global Hotkeys  ☐ Start with Windows  ☐ Debug Log
-Language: English / 简体中文
-
-IdleTrigger <version>
-Edit Config / Exit
+```text
+assets/                  Application icon, manifest, tray icon variants, resource tools
+internal/actions/        Windows lock, sleep, hibernate, shutdown, and restart actions
+internal/config/         TOML load, validation, migration, and atomic save
+internal/idlewarning/    Non-activating, DPI-aware idle warning overlay
+internal/monitor/        Keyboard/mouse idle tracking and trigger lifecycle
+internal/popup/          Native DPI-aware control panel
+internal/systray/        Local Windows notification-area implementation
+internal/themeswitch/    Fixed-time and sunrise/sunset theme scheduler
+internal/tray/           Serialized application state and feature coordination
+scripts/                 Resource and themed-icon generators
 ```
 
 ## Acknowledgments
 
-- [getlantern/systray](https://github.com/getlantern/systray) — Windows tray implementation derived from v1.2.2 (MIT), adapted locally to route errors through IdleTrigger logging
-- [BurntSushi/toml](https://github.com/BurntSushi/toml) — TOML parser for Go
-- [golang.org/x/sys](https://golang.org/x/sys) — Windows API bindings
-- [NoSleep](https://github.com/CHerSun/NoSleep) — inspiration for the sleep-prevention feature
-
-## Development
-
-This project was built via **Vibe Coding** — an AI-assisted
-development workflow. All code, documentation, and design decisions
-were created collaboratively between human direction and AI generation.
+- [getlantern/systray](https://github.com/getlantern/systray): local Windows tray implementation derived from v1.2.2 (MIT)
+- [BurntSushi/toml](https://github.com/BurntSushi/toml): TOML parser
+- [golang.org/x/sys](https://pkg.go.dev/golang.org/x/sys): Windows API bindings
 
 ## License
 

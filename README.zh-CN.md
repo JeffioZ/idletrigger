@@ -1,192 +1,113 @@
 # IdleTrigger
 
-> 📖 [English](README.md)
+[English](README.md)
 
-**Windows 系统空闲监测、电源管理及防休眠工具**
+**轻量级 Windows 托盘工具：空闲动作、保持唤醒和昼夜主题切换。**
 
-轻量级单文件工具，驻留系统托盘。它可以：
+IdleTrigger 是一个仅依赖 Windows 系统 DLL 的单文件程序。它驻留在通知区域，常用设置在浮层中完成，完整配置保存在 EXE 同目录的可读 TOML 文件中。
 
-- **阻止休眠** — 保持系统唤醒，重置 Windows 空闲计时器
-- **自动触发** — 空闲超时后自动执行睡眠 / 休眠 / 关机 / 锁定
-- **命令行调用** — 从终端、脚本或 AI agent 触发动作
-- **进程间通信** — CLI 命令与运行中的托盘实例无缝通信
+## 能做什么
 
-## 功能特性
+- **空闲监测**：键盘、鼠标无操作达到设定时长后，锁定、睡眠、休眠、关机或重启。
+- **执行前预警**：动作前显示不抢焦点的预警；移动鼠标、按任意键或关闭预警即可取消本次动作。
+- **保持唤醒**：阻止系统自动睡眠，并可选保持屏幕常亮。
+- **昼夜模式**：按固定时间或日出日落切换 Windows 深浅色主题；可选电池供电时使用深色。
+- **快速操作**：从浮层或命令行执行锁定、睡眠、休眠、关机、重启。
+- **自动化控制**：通过当前会话的命名管道控制已运行的托盘实例。
 
-- **系统托盘** — 点击图标打开紧凑控制面板，无主窗口
-- **保持唤醒** — 阻止 Windows 自动休眠，可选屏幕常亮
-- **空闲监测** — 键鼠无操作 N 分钟后自动触发
-  （5 / 10 / 30 / 60 / 120 分钟，控制面板可配）
-- **全局热键** — `Win+Shift+S` 睡眠 / `+L` 锁定 / `+N` 切换保持唤醒
-- **电池感知** — 使用电池时自动禁用保持唤醒
-- **进程关联** — 检测到指定应用运行时自动启用保持唤醒
-- **IPC 命名管道** — CLI 与运行中的托盘实例通信
-- **能力检测** — 不可用的功能（如休眠）自动禁用
-- **单文件 EXE** — 自包含，仅依赖 Windows 系统 DLL；复制即用，免安装
-- **明文配置** — `IdleTrigger.toml` 位于 EXE 同目录
-- **多语言** — 简体中文 / English。默认跟随系统语言（简体中文 Windows 显示中文，其余显示英文），控制面板可手动切换
-- **DPI 和深色模式** — Per-Monitor V2，系统原生对话框和支持 DPI 的控制面板
-- **入口说明** — 控制面板各功能入口提供 tooltip，说明功能作用；需要高级设置的功能会提示配置项位置
-- **系统支持**：Windows 10 / Server 2016 及以上，提供 32 位和 64 位构建
+## 系统要求
+
+- Windows 10 / Windows Server 2016 及以上
+- 大多数电脑使用 x64 构建；32 位 Windows 使用 x86 构建
+- 昼夜主题依赖 Windows 个性化设置；Server Core 或被策略管理的桌面可能不可用
+
+主构建不支持 Windows 7，兼容性原因见 [BUILD.zh-CN.md](BUILD.zh-CN.md)。
 
 ## 快速开始
 
-1. 从 [Releases](https://github.com/JeffioZ/idletrigger/releases) 下载 `IdleTrigger-x64.exe`
-2. 双击运行 → 托盘出现蓝色待命状态图标
-3. 点击托盘图标配置；或直接编辑 `IdleTrigger.toml`
+1. 从 [Releases](https://github.com/JeffioZ/idletrigger/releases) 下载 `IdleTrigger-x64.exe`。
+2. 双击运行，程序会驻留在通知区域，不显示主窗口。
+3. 左键托盘图标打开或关闭浮层；右键使用原生的“打开”和“退出”菜单。
+4. 常用设置在浮层中完成；高级设置可编辑 EXE 同目录的 `IdleTrigger.toml`。
 
-`IdleTrigger-x64.exe` 是原生 64 位构建，推荐大多数用户使用；
-`IdleTrigger-x86.exe` 是 32 位兼容构建。两者功能一致。
+浮层会跟随 Windows 深浅色和 DPI 变化，失焦自动收起。每项功能入口均有 tooltip 说明。
 
-## CLI 命令行用法
+## 空闲监测
 
-```
-IdleTrigger sleep                 进入睡眠
-IdleTrigger hibernate             进入休眠
-IdleTrigger shutdown              关闭系统
-IdleTrigger lock                  锁定屏幕
+默认启用空闲监测，超时 30 分钟，动作为睡眠。浮层可选时长为：
 
-IdleTrigger nosleep on            保持系统唤醒
-IdleTrigger nosleep on --screen   保持唤醒 + 屏幕常亮
-IdleTrigger nosleep off           恢复正常电源管理
-IdleTrigger nosleep toggle        切换保持唤醒
-IdleTrigger nosleep status        查看保持唤醒状态
+`1、2、3、5、10、15、20、25、30、45 分钟；1、2、3、4、5 小时`。
 
-IdleTrigger monitor on            启用空闲监测（IPC → 托盘）
-IdleTrigger monitor off           禁用空闲监测（IPC → 托盘）
+空闲监测通过 Windows `GetLastInputInfo` 识别真实键盘和鼠标操作。程序刚启动、重新启用监测时会从新的计时周期开始，不会因为启动前系统已经空闲而立刻执行。动作触发后会先重置计时，再继续监测。
 
-IdleTrigger autostart enable      启用开机自启
-IdleTrigger autostart disable     禁用开机自启
-IdleTrigger autostart status      查看开机自启状态
+开启预警后，动作前会显示不抢焦点的提示。鼠标、键盘操作或关闭提示都会取消本次动作；将 `idle_warning_seconds` 设为 `0` 可完全静默执行。
 
-IdleTrigger config:reload         重载配置（通过 IPC）
-IdleTrigger status                查看完整系统状态
-IdleTrigger version               显示版本
-```
+## 命令行
 
-不带参数运行即启动系统托盘 GUI 模式。
+不带参数运行 EXE 即启动托盘程序。
 
-**AI agent / 脚本集成**：托盘运行时，`nosleep` 和 `monitor` 命令
-通过当前登录会话专用的命名管道（`\\.\pipe\IdleTrigger-<session>`）转发。
-`nosleep` 和 `monitor` 属于持续状态控制，执行时需要托盘进程正在运行。
-一次性动作直接执行。
+```text
+IdleTrigger sleep | hibernate | shutdown | restart | lock
 
-## 配置文件 (`IdleTrigger.toml`)
+IdleTrigger nosleep on [--screen]
+IdleTrigger nosleep off | toggle | status
 
-```toml
-# IdleTrigger 配置文件
-# 可直接编辑；重启生效（或通过 CLI "config:reload" 热加载）。
+IdleTrigger monitor on | off
 
-language = "auto"                  # "auto"（跟随系统）, "en", "zh-CN"
-idle_timeout_minutes = 30          # 0 = 禁用空闲监测
-idle_action = "sleep"              # sleep | hibernate | shutdown | lock
-idle_warning_seconds = 30          # 触发前通知秒数；0 = 关闭
-
-nosleep_enabled = false            # 保持唤醒
-keep_screen_on = false             # 同步保持屏幕常亮
-nosleep_on_battery = false         # 电池供电时仍保持唤醒
-nosleep_battery_threshold = 20     # 最低电量百分比
-
-hotkeys_enabled = false            # Win+Shift+S/L/N
-
-process_watch_enabled = false      # 进程关联自动唤醒
-process_watch_list = []            # 例如 ["chrome.exe", "powerpnt.exe"]
-
-logging_enabled = false            # 调试日志输出
-
-theme_switch_enabled = false       # 自动主题切换
-theme_mode = "sunrise"               # "fixed" 或 "sunrise"
-theme_light_time = "07:00"
-theme_dark_time = "19:00"
-theme_latitude = 0                 # 0 = 根据时区自动检测
-theme_longitude = 0
-theme_dark_on_battery = true
-theme_skip_fullscreen = true
-
+IdleTrigger autostart enable | disable | status
+IdleTrigger config:reload
+IdleTrigger status
+IdleTrigger version
 ```
 
-开机自启保存在当前用户的 Windows Run 注册表项中，仅通过控制面板或 CLI
-管理，不属于 TOML 配置。启用日志后，程序优先在 EXE 同目录写入
-`IdleTrigger.log`，目录不可写时回退到 `%TEMP%`；达到 5 MiB 后轮转，并保留
-一份 `IdleTrigger.log.1`。
+`nosleep`、`monitor` 与 `config:reload` 会通过 `\\.\pipe\IdleTrigger-<session>` 转发给运行中的托盘实例，因此需要先启动托盘程序。一次性电源动作直接执行。
+
+## 配置
+
+IdleTrigger 会在 EXE 同目录创建并维护 `IdleTrigger.toml`。配置模板更新时，程序会补齐缺失字段、更新说明注释，并保留已有的有效配置值；不会在每次启动时重复改写文件。
+
+完整的中英文字段说明见 [IdleTrigger.example.toml](IdleTrigger.example.toml)。手动编辑配置后，重启 IdleTrigger 或运行：
+
+```powershell
+.\IdleTrigger-x64.exe config:reload
+```
+
+开机自启保存在当前用户的 Windows Run 注册表项中，由浮层或 CLI 管理，不属于 TOML 配置。
+
+## 日志
+
+在浮层开启“调试日志”，或将 `logging_enabled = true`。日志优先写入 EXE 同目录，目录不可写时回退到 `%TEMP%`；文件达到 5 MiB 后轮转，并保留一份 `IdleTrigger.log.1`。
+
+每行日志包含启动会话标识，便于区分不同运行周期：
+
+```text
+[2026-07-11 12:34:56.789] [session:18a0f0-2b4c] Idle monitor started
+```
+
+## 构建与开发
+
+前置条件、双架构构建、资源生成和验证命令见 [BUILD.zh-CN.md](BUILD.zh-CN.md)。
 
 ## 项目结构
 
-```
-IdleTrigger/
-├── main.go                          # 入口：CLI / GUI 双模式调度
-├── IdleTrigger.example.toml         # 完整配置示例
-├── assets/
-│   ├── app.ico                      # EXE 图标（16–256，共 9 个原生尺寸）
-│   ├── icon.go                      # go:embed 内嵌桥接
-│   ├── icon_default.ico             # 托盘：待命闪电（蓝色）
-│   ├── icon_monitor.ico             # 托盘：监测闪电（琥珀色）
-│   ├── icon_active.ico              # 托盘：保持唤醒闪电（绿色）
-│   ├── manifest.xml                 # DPI 和深色模式清单
-├── scripts/
-│   ├── gen_icon.py                  # 图标生成脚本（仅开发用）
-│   └── gen_resource.go              # Windows 图标/manifest/版本资源生成
-├── internal/
-│   ├── actions/actions.go           # Win32 系统动作：睡眠/休眠/关机/重启/锁定
-│   ├── autostart/autostart.go       # 注册表 Run 键管理
-│   ├── cli/cli.go                   # CLI 命令分发 + IPC 客户端
-│   ├── config/config.go             # TOML 配置读写
-│   ├── darkmode/darkmode.go         # uxtheme 序号 135/136
-│   ├── dialog/dialog.go             # MessageBox 对话框
-│   ├── dpi/dpi.go                   # Per-Monitor V2
-│   ├── hotkey/hotkey.go             # 全局热键
-│   ├── i18n/                        # 多语言
-│   │   ├── i18n.go
-│   │   └── locales/{en,zh-CN}.json
-│   ├── ipc/ipc.go                   # 命名管道 IPC
-│   ├── monitor/monitor.go           # GetLastInputInfo 空闲检测
-│   ├── nosleep/nosleep.go           # SetThreadExecutionState
-│   ├── notify/notify.go             # 气泡通知
-│   ├── power/power.go               # 电池状态 + 睡眠能力检测
-│   ├── processwatcher/processwatcher.go  # 进程列表监测
-│   ├── popup/popup.go                # 支持 DPI 的托盘控制面板
-│   ├── systray/                      # 本地 Windows 托盘实现（MIT）
-│   ├── themeswitch/themeswitch.go   # 固定时间/日出日落主题调度
-│   └── tray/tray.go                 # 托盘集成和串行状态管理
-├── rsrc_windows_386.syso            # 32 位资源：图标 + manifest + 版本信息
-├── rsrc_windows_amd64.syso          # 64 位资源：图标 + manifest + 版本信息
-├── .github/workflows/release.yml    # 双架构验证与发布
-├── ROADMAP.md                       # 发布清单与后续计划
-├── go.mod  go.sum  LICENSE  .gitattributes  .gitignore
-├── README.md  README.zh-CN.md  BUILD.md  BUILD.zh-CN.md
-```
-
-## 控制面板参考
-
-```
-锁定 / 睡眠 / 休眠 / 关机 / 重启
-
-保持唤醒
-  ☐ 启用保持唤醒
-  ☐ 进程关联
-
-空闲监测
-  ☐ 启用
-  超时时间：5 / 10 / 30 / 60 / 120 分钟
-  超时动作：睡眠 / 休眠 / 关机 / 锁定
-
-昼夜模式
-  浅色 HH:MM / 深色 HH:MM
-  ☐ 启用自动切换  ☐ 全屏暂不切换  ☐ 使用电池深色
-  切换主题 / 刷新主题
-
-☐ 全局热键  ☐ 开机自启  ☐ 调试日志
-语言：English / 简体中文
-
-IdleTrigger <version>
-编辑配置 / 退出
+```text
+assets/                  应用图标、manifest、托盘图标变体和资源工具
+internal/actions/        锁定、睡眠、休眠、关机、重启等 Windows 动作
+internal/config/         TOML 读取、校验、迁移和原子保存
+internal/idlewarning/    不抢焦点、支持 DPI 的空闲预警浮层
+internal/monitor/        键盘/鼠标空闲跟踪和触发生命周期
+internal/popup/          原生、支持 DPI 的控制浮层
+internal/systray/        本地 Windows 通知区域实现
+internal/themeswitch/    固定时间和日出日落主题调度
+internal/tray/           串行应用状态和功能协调
+scripts/                 资源和主题托盘图标生成器
 ```
 
 ## 致谢
 
-- [getlantern/systray](https://github.com/getlantern/systray) — Windows 托盘实现基于 v1.2.2（MIT）调整，并将内部错误接入 IdleTrigger 日志
-- [BurntSushi/toml](https://github.com/BurntSushi/toml) — Go 语言 TOML 解析器
-- [golang.org/x/sys](https://golang.org/x/sys) — Windows API 绑定
+- [getlantern/systray](https://github.com/getlantern/systray)：本地 Windows 托盘实现基于 v1.2.2（MIT）调整
+- [BurntSushi/toml](https://github.com/BurntSushi/toml)：TOML 解析器
+- [golang.org/x/sys](https://pkg.go.dev/golang.org/x/sys)：Windows API 绑定
 
 ## 许可证
 
