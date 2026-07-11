@@ -61,7 +61,7 @@ type stateRequest struct {
 // Run starts the system-tray loop. Blocks until Exit.
 func Run(cfg config.Config, cbs Callbacks) {
 	systray.SetErrorHandler(func(format string, args ...interface{}) {
-		mylog.Info("Systray: "+format, args...)
+		mylog.Info("Systray: %s", fmt.Sprintf(format, args...))
 	})
 
 	s := &trayState{
