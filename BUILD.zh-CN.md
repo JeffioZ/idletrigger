@@ -57,7 +57,7 @@ $env:GOARCH = "386"
 go build -trimpath "-ldflags=$ldflags" -o dist/IdleTrigger-x86.exe .
 ```
 
-发布工作流会先运行 test 与 vet，再生成两种 EXE，并发布 `SHA256SUMS.txt`。
+发布工作流会先运行格式、依赖、test 与 vet 检查，再生成两种 EXE，并发布 `SHA256SUMS.txt`。
 
 ## 重新生成资源
 

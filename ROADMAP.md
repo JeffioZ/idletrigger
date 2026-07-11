@@ -42,7 +42,7 @@
 - [ ] 自动升级：检查 GitHub Releases 最新版本、下载对应架构 EXE、校验 SHA256、下次启动原子替换
 - [ ] 自动升级安全策略：仅升级稳定 tag，展示版本、大小、校验和与发布说明，失败可回滚
 - [ ] Windows 实机自动化冒烟测试：托盘、通知、热键、IPC
-- [ ] CI 增加 race detector（需配置 MinGW-w64）和 `govulncheck`
+- [ ] CI 增加 race detector（需配置 MinGW-w64）
 - [ ] 用 `PowerCreateRequest/PowerSetRequest` 替换旧的线程执行状态 API
 
 ### 中优先级

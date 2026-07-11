@@ -57,7 +57,7 @@ $env:GOARCH = "386"
 go build -trimpath "-ldflags=$ldflags" -o dist/IdleTrigger-x86.exe .
 ```
 
-The release workflow runs test and vet, produces both executables, and publishes `SHA256SUMS.txt`.
+The release workflow runs formatting, module, test, and vet checks, produces both executables, and publishes `SHA256SUMS.txt`.
 
 ## Regenerate Resources
 
