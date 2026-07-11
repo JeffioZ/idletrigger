@@ -26,12 +26,14 @@ jobs:
 
       - name: Generate .syso
         run: |
-          go run ./scripts/gen_resource.go -version ${{ github.ref_name }}
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          go run ./scripts/gen_resource.go -version $version
 
       - name: Build
         run: |
           $env:CGO_ENABLED = "0"
-          $ldflags = "-s -w -H windowsgui -X github.com/JeffioZ/idletrigger/internal/version.Value=${{ github.ref_name }}"
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          $ldflags = "-s -w -H windowsgui -X github.com/JeffioZ/idletrigger/internal/version.Value=$version"
           $env:GOARCH = "386"
           go build -trimpath -ldflags "$ldflags" -o IdleTrigger-x86.exe .
           $env:GOARCH = "amd64"
@@ -58,11 +60,10 @@ jobs:
 
             ### Highlights
 
-            - Added a Debug Log toggle to the tray control panel.
-            - Added inline tooltips for control-panel actions, including hints for advanced TOML settings.
-            - Removed the About dialog and now shows the app version directly in the control panel.
-            - Improved tray tooltip formatting and status coverage.
-            - Updated English and Simplified Chinese documentation to match the current UI.
+            - Refined the native tray control panel and idle-warning overlay for light/dark mode, DPI scaling, multilingual text, and multi-monitor positioning.
+            - Made idle monitoring reset safely on startup, activity, warning cancellation, and completed actions.
+            - Added an idle-action warning cancellation path and startup session IDs in debug logs.
+            - Improved configuration annotation migration, tray status text, CLI parity, and English/Simplified Chinese documentation.
 
             Download the native 64-bit build `IdleTrigger-x64.exe` (recommended) or
             the 32-bit compatibility build `IdleTrigger-x86.exe` — no installation needed.
@@ -73,11 +74,10 @@ jobs:
 
             ### 更新重点
 
-            - 托盘控制面板新增“调试日志”开关。
-            - 控制面板各功能入口新增 tooltip，说明功能作用和高级 TOML 配置位置。
-            - 移除“关于”弹窗，改为在控制面板内直接展示应用版本号。
-            - 优化托盘 tooltip 的格式和状态覆盖范围。
-            - 更新英文和简体中文文档，使其与当前界面保持一致。
+            - 优化原生托盘控制浮层与空闲预警浮层，适配深浅色、DPI、多语言和多显示器定位。
+            - 空闲监测会在启动、用户活动、取消预警和动作执行后安全重置计时。
+            - 空闲动作预警支持取消，并在调试日志中增加启动会话标识。
+            - 完善配置注释迁移、托盘状态文案、CLI 一致性及中英文文档。
 
             下载原生 64 位版本 `IdleTrigger-x64.exe`（推荐），或下载 32 位兼容版本
             `IdleTrigger-x86.exe`。无需安装，直接运行即可。

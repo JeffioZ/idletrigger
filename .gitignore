@@ -1,5 +1,6 @@
 # Build artifacts
 /IdleTrigger*.exe
+/dist/
 
 
 # Runtime config (generated next to the EXE)
