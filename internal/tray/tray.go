@@ -461,9 +461,6 @@ func (s *trayState) toggleNoSleep() {
 	s.saveConfig()
 }
 
-// applyCapabilities disables menu items for sleep/hibernate if the
-// system does not support them, and adjusts the idle-action options.
-
 // ---- process watcher --------------------------------------------------
 
 func (s *trayState) startProcessWatcher() {
