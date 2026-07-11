@@ -66,8 +66,71 @@ func TestTooltipStaysWithinTrayLimit(t *testing.T) {
 		if strings.Contains(got, "…") {
 			t.Fatalf("tooltip should not be hard-truncated for %s: %q", lang, got)
 		}
-		if length := len([]rune(got)); length > 127 {
+		if strings.Contains(got, "·") {
+			t.Fatalf("tooltip should avoid separator truncation risk for %s: %q", lang, got)
+		}
+		if hasDanglingTooltipSuffix(got) {
+			t.Fatalf("tooltip has dangling suffix for %s: %q", lang, got)
+		}
+		if length := len([]rune(got)); length > 120 {
 			t.Fatalf("tooltip is too long for %s: %d %q", lang, length, got)
 		}
 	}
+}
+
+func TestTooltipKeepsOnlyOperationalStates(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Language = "zh-CN"
+	cfg.ThemeSwitchEnabled = false
+	cfg.HotkeysEnabled = true
+	cfg.AutostartEnabled = true
+	cfg.LoggingEnabled = true
+	state := trayState{cfg: cfg, lang: "zh-CN"}
+
+	got := state.buildTooltip()
+	lines := strings.Split(got, "\n")
+	if len(lines) != 4 {
+		t.Fatalf("tooltip should keep status lines visible: %q", got)
+	}
+	if lines[0] != "IdleTrigger" {
+		t.Fatalf("tooltip title = %q, want IdleTrigger", lines[0])
+	}
+	if !strings.Contains(got, "主题：关") {
+		t.Fatalf("theme should remain visible: %q", got)
+	}
+	for _, omitted := range []string{"热键", "自启", "日志"} {
+		if strings.Contains(got, omitted) {
+			t.Fatalf("non-operational setting %q should not be in tooltip: %q", omitted, got)
+		}
+	}
+}
+
+func TestTooltipTitleAddsReleaseVersion(t *testing.T) {
+	if got := tooltipTitle("1.3.5"); got != "IdleTrigger v1.3.5" {
+		t.Fatalf("release tooltip title = %q", got)
+	}
+	if got := tooltipTitle("dev"); got != "IdleTrigger" {
+		t.Fatalf("development tooltip title = %q", got)
+	}
+}
+
+func TestIdleSuspendedByProcessKeepAwake(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Language = "zh-CN"
+	cfg.ProcessWatchEnabled = true
+	state := trayState{cfg: cfg, lang: "zh-CN", processNoSleep: true}
+	if !state.idleSuspended() {
+		t.Fatal("process keep-awake should suspend the configured idle monitor")
+	}
+	if got := state.buildTooltip(); !strings.Contains(got, "空闲监测：已暂停") {
+		t.Fatalf("tooltip should expose idle suspension: %q", got)
+	}
+}
+
+func hasDanglingTooltipSuffix(value string) bool {
+	return strings.HasSuffix(value, " ") ||
+		strings.HasSuffix(value, "·") ||
+		strings.HasSuffix(value, ":") ||
+		strings.HasSuffix(value, "：") ||
+		strings.HasSuffix(value, "/")
 }

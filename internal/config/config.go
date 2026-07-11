@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -25,6 +27,8 @@ const (
 	ActionLock      Action = "lock"
 )
 
+const configTemplateVersion = 3
+
 // Config holds all user-configurable settings.
 type Config struct {
 	// Language for UI strings: "auto" (follow OS), "en", "zh-CN".
@@ -37,8 +41,8 @@ type Config struct {
 	// IdleAction is the system action to trigger when idle timeout expires.
 	IdleAction Action `toml:"idle_action"`
 
-	// IdleWarningSeconds — show a notification this many seconds before the
-	// idle action fires. 0 disables the warning.  Default: 30.
+	// IdleWarningSeconds controls the in-app warning shown before the idle
+	// action fires. 0 disables it for silent operation. Default: 30.
 	IdleWarningSeconds int `toml:"idle_warning_seconds"`
 
 	// NoSleepEnabled prevents the system from sleeping automatically.
@@ -134,16 +138,20 @@ func Path() (string, error) {
 // Load reads and parses the config file.  If the file does not exist the
 // factory defaults are returned and the file is created.
 func Load() (Config, error) {
-	cfg := DefaultConfig()
 	p, err := Path()
 	if err != nil {
-		return cfg, err
+		return DefaultConfig(), err
 	}
+	return loadFrom(p)
+}
+
+func loadFrom(p string) (Config, error) {
+	cfg := DefaultConfig()
 	data, err := os.ReadFile(p)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			// First run — write defaults and return them.
-			if saveErr := Save(cfg); saveErr != nil {
+			if saveErr := saveTo(p, cfg); saveErr != nil {
 				return cfg, saveErr
 			}
 			return cfg, nil
@@ -156,7 +164,34 @@ func Load() (Config, error) {
 	if err := cfg.Validate(); err != nil {
 		return cfg, fmt.Errorf("validate config: %w", err)
 	}
+	if needsAnnotatedTOMLRefresh(data) {
+		if err := saveTo(p, cfg); err != nil {
+			return cfg, fmt.Errorf("refresh config annotations: %w", err)
+		}
+	}
 	return cfg, nil
+}
+
+func needsAnnotatedTOMLRefresh(data []byte) bool {
+	text := string(data)
+	if !strings.Contains(text, configTemplateVersionMarker()) {
+		return true
+	}
+	for _, marker := range []string{
+		"# -- 保持唤醒 / Stay Awake --",
+		"# -- 空闲监测 / Idle Monitor --",
+		"# -- 昼夜主题 / Day/Night Theme --",
+		"# -- 设置 / Settings --",
+	} {
+		if !strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func configTemplateVersionMarker() string {
+	return fmt.Sprintf("# config_template_version = %d", configTemplateVersion)
 }
 
 // Validate checks values that can otherwise lead to unsafe or surprising
@@ -225,14 +260,7 @@ func saveTo(p string, cfg Config) error {
 		}
 	}()
 
-	if _, err := fmt.Fprintf(f, "# %s\n", i18n.T(cfg.Language, "config_header")); err != nil {
-		return fmt.Errorf("write config header: %w", err)
-	}
-	if _, err := fmt.Fprintf(f, "# %s\n\n", i18n.T(cfg.Language, "config_edit_hint")); err != nil {
-		return fmt.Errorf("write config header: %w", err)
-	}
-
-	if err := toml.NewEncoder(f).Encode(cfg); err != nil {
+	if _, err := f.WriteString(renderAnnotatedTOML(cfg)); err != nil {
 		return fmt.Errorf("encode config: %w", err)
 	}
 	if err := f.Sync(); err != nil {
@@ -246,4 +274,80 @@ func saveTo(p string, cfg Config) error {
 	}
 	ok = true
 	return nil
+}
+
+func renderAnnotatedTOML(cfg Config) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s\n", configTemplateVersionMarker())
+	fmt.Fprintf(&b, "# %s\n", i18n.T(cfg.Language, "config_header"))
+	fmt.Fprintf(&b, "# %s\n\n", i18n.T(cfg.Language, "config_edit_hint"))
+
+	b.WriteString("# -- 保持唤醒 / Stay Awake --\n")
+	b.WriteString("# 手动启用保持唤醒，阻止系统自动睡眠 / Manually keep the system awake and prevent automatic sleep\n")
+	fmt.Fprintf(&b, "nosleep_enabled = %t\n", cfg.NoSleepEnabled)
+	b.WriteString("# 保持唤醒时同步保持屏幕常亮 / Keep the display on while Stay Awake is active\n")
+	fmt.Fprintf(&b, "keep_screen_on = %t\n", cfg.KeepScreenOn)
+	b.WriteString("# 电池供电时仍允许保持唤醒 / Allow Stay Awake while running on battery\n")
+	fmt.Fprintf(&b, "nosleep_on_battery = %t\n", cfg.NoSleepOnBattery)
+	b.WriteString("# 电池电量低于此百分比时强制关闭保持唤醒 / Force-disable Stay Awake below this battery percentage\n")
+	fmt.Fprintf(&b, "nosleep_battery_threshold = %d\n", cfg.NoSleepBatteryThreshold)
+	b.WriteString("# 检测到指定进程运行时自动保持唤醒 / Auto-enable Stay Awake while any listed process is running\n")
+	fmt.Fprintf(&b, "process_watch_enabled = %t\n", cfg.ProcessWatchEnabled)
+	b.WriteString("# 不区分大小写的 .exe 文件名，例如 [\"chrome.exe\", \"powerpnt.exe\"] / Case-insensitive .exe names, e.g. [\"chrome.exe\", \"powerpnt.exe\"]\n")
+	fmt.Fprintf(&b, "process_watch_list = %s\n\n", tomlStringList(cfg.ProcessWatchList))
+
+	b.WriteString("# -- 空闲监测 / Idle Monitor --\n")
+	b.WriteString("# 无键鼠操作多少分钟后触发动作，设为 0 禁用 / Minutes of keyboard/mouse inactivity before triggering, 0 = disabled\n")
+	fmt.Fprintf(&b, "idle_timeout_minutes = %d\n", cfg.IdleTimeoutMinutes)
+	b.WriteString("# 空闲超时后执行的动作 / Action to run after idle timeout: \"sleep\", \"hibernate\", \"shutdown\", \"lock\"\n")
+	fmt.Fprintf(&b, "idle_action = %s\n", tomlString(string(cfg.IdleAction)))
+	b.WriteString("# 触发前多少秒显示不抢焦点的应用内预警；键鼠操作或关闭预警会取消本次动作，设为 0 静默执行 / Non-activating in-app warning seconds before trigger; keyboard/mouse input or closing it cancels this action, 0 = silent\n")
+	fmt.Fprintf(&b, "idle_warning_seconds = %d\n\n", cfg.IdleWarningSeconds)
+
+	b.WriteString("# -- 昼夜主题 / Day/Night Theme --\n")
+	b.WriteString("# 启用按时间自动切换 Windows 深浅色 / Automatically switch Windows light/dark theme by schedule\n")
+	fmt.Fprintf(&b, "theme_switch_enabled = %t\n", cfg.ThemeSwitchEnabled)
+	b.WriteString("# 切换模式：\"fixed\" 使用下方固定时间；\"sunrise\" 根据日出日落计算 / Mode: \"fixed\" uses times below; \"sunrise\" calculates sunrise/sunset\n")
+	fmt.Fprintf(&b, "theme_mode = %s\n", tomlString(cfg.ThemeMode))
+	b.WriteString("# 浅色开始时间，HH:MM，fixed 模式使用 / Light theme start time, HH:MM, used by fixed mode\n")
+	fmt.Fprintf(&b, "theme_light_time = %s\n", tomlString(cfg.ThemeLightTime))
+	b.WriteString("# 深色开始时间，HH:MM，fixed 模式使用 / Dark theme start time, HH:MM, used by fixed mode\n")
+	fmt.Fprintf(&b, "theme_dark_time = %s\n", tomlString(cfg.ThemeDarkTime))
+	b.WriteString("# 日出日落计算纬度，范围 -90 到 90；经纬度都为 0 时按时区估算 / Latitude for sunrise mode, -90..90; if both lat/lon are 0, estimate from timezone\n")
+	fmt.Fprintf(&b, "theme_latitude = %s\n", tomlFloat(cfg.ThemeLatitude))
+	b.WriteString("# 日出日落计算经度，范围 -180 到 180；经纬度都为 0 时按时区估算 / Longitude for sunrise mode, -180..180; if both lat/lon are 0, estimate from timezone\n")
+	fmt.Fprintf(&b, "theme_longitude = %s\n", tomlFloat(cfg.ThemeLongitude))
+	b.WriteString("# 电池供电时自动切换深色，接入电源后按当前计划恢复 / Switch to dark on battery, then restore by schedule on AC power\n")
+	fmt.Fprintf(&b, "theme_dark_on_battery = %t\n", cfg.ThemeDarkOnBattery)
+	b.WriteString("# 全屏应用或游戏运行时暂不自动切换主题 / Pause automatic theme switching during fullscreen apps/games\n")
+	fmt.Fprintf(&b, "theme_skip_fullscreen = %t\n\n", cfg.ThemeSkipFullscreen)
+
+	b.WriteString("# -- 设置 / Settings --\n")
+	b.WriteString("# 启用全局热键：Win+Shift+S 睡眠，Win+Shift+L 锁定，Win+Shift+N 切换保持唤醒 / Enable global hotkeys: Win+Shift+S sleep, Win+Shift+L lock, Win+Shift+N toggle Stay Awake\n")
+	fmt.Fprintf(&b, "hotkeys_enabled = %t\n", cfg.HotkeysEnabled)
+	b.WriteString("# 将调试日志写入 EXE 同目录的 IdleTrigger.log；每行带启动会话标识 / Write debug logs to IdleTrigger.log next to the EXE; each line includes a startup session ID\n")
+	fmt.Fprintf(&b, "logging_enabled = %t\n", cfg.LoggingEnabled)
+	b.WriteString("# 界面语言：\"auto\" 跟随系统，\"en\" 英文，\"zh-CN\" 简体中文 / UI language: \"auto\" follows OS, \"en\" English, \"zh-CN\" Simplified Chinese\n")
+	fmt.Fprintf(&b, "language = %s\n", tomlString(cfg.Language))
+
+	return b.String()
+}
+
+func tomlString(value string) string {
+	return strconv.Quote(value)
+}
+
+func tomlStringList(values []string) string {
+	if len(values) == 0 {
+		return "[]"
+	}
+	quoted := make([]string, 0, len(values))
+	for _, value := range values {
+		quoted = append(quoted, tomlString(value))
+	}
+	return "[" + strings.Join(quoted, ", ") + "]"
+}
+
+func tomlFloat(value float64) string {
+	return strconv.FormatFloat(value, 'f', -1, 64)
 }

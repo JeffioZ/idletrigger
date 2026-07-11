@@ -46,6 +46,10 @@ func Run(lang string) {
 		fmt.Println(i18n.T(lang, "msg_shutting_down"))
 		exitOnErr(lang, actions.Shutdown())
 
+	case "restart":
+		fmt.Println(i18n.T(lang, "msg_restarting"))
+		exitOnErr(lang, actions.Restart())
+
 	case "lock":
 		fmt.Println(i18n.T(lang, "msg_locking"))
 		exitOnErr(lang, actions.Lock())

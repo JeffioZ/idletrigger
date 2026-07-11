@@ -9,6 +9,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -202,6 +203,9 @@ type winTray struct {
 	muNID sync.RWMutex
 	wcex  *wndClassEx
 
+	uiTasks   []func()
+	muUITasks sync.Mutex
+
 	wmSystrayMessage,
 	wmTaskbarCreated uint32
 }
@@ -229,7 +233,7 @@ func (t *winTray) setIcon(src string) error {
 // Shell_NotifyIcon: https://msdn.microsoft.com/en-us/library/windows/desktop/bb762159(v=vs.85).aspx
 func (t *winTray) setTooltip(src string) error {
 	const NIF_TIP = 0x00000004
-	src = strings.TrimSpace(src)
+	src = fitTooltip(src, len(t.nid.Tip)-1)
 	b, err := windows.UTF16FromString(src)
 	if err != nil {
 		return err
@@ -252,7 +256,95 @@ func (t *winTray) setTooltip(src string) error {
 	return t.nid.modify()
 }
 
+func fitTooltip(src string, maxUTF16 int) string {
+	src = strings.TrimSpace(src)
+	if maxUTF16 <= 0 {
+		return ""
+	}
+	units := 0
+	var out []rune
+	for _, r := range src {
+		width := 1
+		if r > 0xFFFF {
+			width = 2
+		}
+		if units+width > maxUTF16 {
+			break
+		}
+		out = append(out, r)
+		units += width
+	}
+	return trimTooltipSuffix(string(out))
+}
+
+func trimTooltipSuffix(src string) string {
+	return strings.TrimRight(strings.TrimSpace(src), " \t\r\n·:：/-")
+}
+
 var wt winTray
+
+const wmRunUITask = 0x8001
+
+// Post runs fn on the tray window's UI thread. It is intended for transient
+// UI such as notifications that must be painted by a Win32 message loop.
+func Post(fn func()) bool {
+	if fn == nil {
+		return false
+	}
+	wt.muUITasks.Lock()
+	if wt.window == 0 {
+		wt.muUITasks.Unlock()
+		return false
+	}
+	wt.uiTasks = append(wt.uiTasks, fn)
+	window := wt.window
+	wt.muUITasks.Unlock()
+	result, _, _ := pPostMessage.Call(uintptr(window), wmRunUITask, 0, 0)
+	return result != 0
+}
+
+// PostAndWait runs fn on the tray UI thread and waits for it to finish.
+// It must not be called from the tray UI thread itself.
+func PostAndWait(fn func()) bool {
+	if fn == nil {
+		return false
+	}
+	done := make(chan struct{})
+	if !Post(func() {
+		defer close(done)
+		fn()
+	}) {
+		return false
+	}
+	<-done
+	return true
+}
+
+// WindowHandle returns the hidden native window that owns the notification
+// icon. Transient app windows can use it as an owner to stay out of Alt+Tab
+// without opting into the legacy tool-window title bar.
+func WindowHandle() windows.Handle {
+	wt.muUITasks.Lock()
+	defer wt.muUITasks.Unlock()
+	return wt.window
+}
+
+func (t *winTray) drainUITasks() {
+	t.muUITasks.Lock()
+	tasks := t.uiTasks
+	t.uiTasks = nil
+	t.muUITasks.Unlock()
+	for _, task := range tasks {
+		func() {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					reportError("tray UI task panic: %v\n%s", recovered, debug.Stack())
+				}
+			}()
+			task()
+		}()
+	}
+}
 
 // WindowProc callback function that processes messages sent to a window.
 // https://msdn.microsoft.com/en-us/library/windows/desktop/ms633573(v=vs.85).aspx
@@ -267,6 +359,8 @@ func (t *winTray) wndProc(hWnd windows.Handle, message uint32, wParam, lParam ui
 		WM_DESTROY        = 0x0002
 	)
 	switch message {
+	case wmRunUITask:
+		t.drainUITasks()
 	case WM_COMMAND:
 		menuItemId := int32(wParam)
 		// https://docs.microsoft.com/en-us/windows/win32/menurc/wm-command#menus
@@ -300,11 +394,7 @@ func (t *winTray) wndProc(hWnd windows.Handle, message uint32, wParam, lParam ui
 				t.showMenu()
 			}
 		case WM_RBUTTONUP:
-			if OnLeftClick != nil {
-				OnLeftClick()
-			} else {
-				t.showMenu()
-			}
+			t.showMenu()
 		}
 	case t.wmTaskbarCreated: // on explorer.exe restarts
 		t.muNID.Lock()
@@ -456,7 +546,11 @@ func (t *winTray) initInstance() error {
 }
 
 func (t *winTray) createMenu() error {
-	const MIM_APPLYTOSUBMENUS = 0x80000000 // Settings apply to the menu and all of its submenus
+	const (
+		MIM_STYLE           = 0x00000010
+		MIM_APPLYTOSUBMENUS = 0x80000000 // Settings apply to the menu and all of its submenus.
+		MNS_NOCHECK         = 0x80000000 // No checkbox column: this menu contains plain commands only.
+	)
 
 	menuHandle, _, err := pCreatePopupMenu.Call()
 	if menuHandle == 0 {
@@ -471,7 +565,8 @@ func (t *winTray) createMenu() error {
 		ContextHelpID          uint32
 		MenuData               uintptr
 	}{
-		Mask: MIM_APPLYTOSUBMENUS,
+		Mask:  MIM_STYLE | MIM_APPLYTOSUBMENUS,
+		Style: MNS_NOCHECK,
 	}
 	mi.Size = uint32(unsafe.Sizeof(mi))
 

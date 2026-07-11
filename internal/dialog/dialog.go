@@ -10,7 +10,6 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func Info(title, heading, body string) { show(title, compose(heading, body), 0x40) }
 func Warn(title, heading, body string) { show(title, compose(heading, body), 0x30) }
 
 func compose(heading, body string) string {
