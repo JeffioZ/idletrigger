@@ -1003,3 +1003,35 @@ func (s *trayState) applyLogging() {
 	mylog.Info("Debug logging disabled from control panel")
 	mylog.Close()
 }
+
+func (s *trayState) watchConfig() {
+	cfgPath, err := config.Path()
+	if err != nil {
+		return
+	}
+	var lastMod time.Time
+	if info, err := os.Stat(cfgPath); err == nil {
+		lastMod = info.ModTime()
+	}
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		info, err := os.Stat(cfgPath)
+		if err != nil {
+			continue
+		}
+		if info.ModTime().After(lastMod) {
+			lastMod = info.ModTime()
+			newCfg, err := config.Load()
+			if err != nil {
+				mylog.Info("config reload failed: %v", err)
+				continue
+			}
+			s.cfg = newCfg
+			s.lang = s.cfg.Language
+			s.reconcileRuntime()
+			s.updateIcon()
+			mylog.Info("config reloaded from disk")
+		}
+	}
+}

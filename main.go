@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
 
 	"golang.org/x/sys/windows"
 
@@ -22,12 +25,19 @@ func main() {
 	darkmode.Enable()
 
 	isCLI := false
+	startupDelay := 0
 	for _, a := range os.Args[1:] {
 		if a == "--minimized" {
 			isCLI = false
-			break
+		} else if strings.HasPrefix(a, "--delay=") {
+			v, err := strconv.Atoi(strings.TrimPrefix(a, "--delay="))
+			if err == nil && v > 0 && v <= 60 {
+				startupDelay = v
+			}
+			continue
+		} else {
+			isCLI = true
 		}
-		isCLI = true
 	}
 
 	cfg, err := config.Load()
@@ -48,6 +58,7 @@ func main() {
 	defer mylog.Close()
 	mylog.Info("IdleTrigger starting: version=%s mode=GUI", version.Value)
 
+	if startupDelay > 0 { time.Sleep(time.Duration(startupDelay) * time.Second) }
 	tray.Run(cfg, tray.Callbacks{})
 }
 
