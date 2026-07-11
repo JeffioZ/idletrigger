@@ -13,9 +13,10 @@ import (
 )
 
 var (
-	mu sync.Mutex
-	w  io.WriteCloser
-	on bool
+	mu        sync.Mutex
+	w         io.WriteCloser
+	on        bool
+	sessionID string
 )
 
 const maxLogSize = 5 << 20
@@ -32,8 +33,10 @@ func Init(enabled bool, exeDir string) {
 	}
 	on = enabled
 	if !on {
+		sessionID = ""
 		return
 	}
+	sessionID = fmt.Sprintf("%x-%x", time.Now().UnixNano(), os.Getpid())
 
 	path := filepath.Join(exeDir, "IdleTrigger.log")
 	rotate(path)
@@ -63,6 +66,7 @@ func Close() {
 		w = nil
 	}
 	on = false
+	sessionID = ""
 }
 
 // Info writes a timestamped informational message.
@@ -81,7 +85,7 @@ func write(msg string) {
 
 func writeLocked(msg string) {
 	ts := time.Now().Format("2006-01-02 15:04:05.000")
-	fmt.Fprintf(w, "[%s] %s\n", ts, msg)
+	fmt.Fprintf(w, "[%s] [session:%s] %s\n", ts, sessionID, msg)
 }
 
 func rotate(path string) {

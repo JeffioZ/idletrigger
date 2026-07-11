@@ -2,31 +2,23 @@ package popup
 
 import "testing"
 
-func TestTimeoutIndex(t *testing.T) {
-	for index, timeout := range []int{5, 10, 30, 60, 120} {
-		if got := timeoutIndex(timeout); got != index {
-			t.Fatalf("timeoutIndex(%d) = %d, want %d", timeout, got, index)
-		}
+func TestTimeoutChoices(t *testing.T) {
+	choices, selected := timeoutChoices(30, true)
+	if len(choices) != 15 || choices[selected].minutes != 30 || choices[selected].label != "30 分钟" {
+		t.Fatalf("unexpected preset choices: %#v, selected=%d", choices, selected)
 	}
-	if got := timeoutIndex(15); got != 2 {
-		t.Fatalf("timeoutIndex fallback = %d, want 2", got)
+
+	choices, selected = timeoutChoices(90, false)
+	if len(choices) != 16 || choices[selected].minutes != 90 || choices[selected].label != "90 minutes" {
+		t.Fatalf("custom timeout was not preserved: %#v, selected=%d", choices, selected)
 	}
 }
 
-func TestActionIndex(t *testing.T) {
-	for index, action := range []string{"sleep", "hibernate", "shutdown", "lock"} {
-		if got := actionIndex(action); got != index {
-			t.Fatalf("actionIndex(%q) = %d, want %d", action, got, index)
-		}
+func TestFormatTimeout(t *testing.T) {
+	if got := formatTimeout(60, false); got != "1 hour" {
+		t.Fatalf("formatTimeout(60) = %q", got)
 	}
-	if got := actionIndex("invalid"); got != 0 {
-		t.Fatalf("actionIndex fallback = %d, want 0", got)
-	}
-}
-
-func TestTimeoutLabelsUseLocalization(t *testing.T) {
-	labels := timeoutLabels(func(key string) string { return "translated:" + key })
-	if labels[0] != "translated:menu_timeout_5" || labels[4] != "translated:menu_timeout_120" {
-		t.Fatalf("unexpected localized labels: %#v", labels)
+	if got := formatTimeout(120, true); got != "2 小时" {
+		t.Fatalf("formatTimeout(120) = %q", got)
 	}
 }

@@ -16,11 +16,11 @@ import (
 	"github.com/JeffioZ/idletrigger/internal/dialog"
 	"github.com/JeffioZ/idletrigger/internal/hotkey"
 	"github.com/JeffioZ/idletrigger/internal/i18n"
+	"github.com/JeffioZ/idletrigger/internal/idlewarning"
 	"github.com/JeffioZ/idletrigger/internal/ipc"
 	mylog "github.com/JeffioZ/idletrigger/internal/log"
 	"github.com/JeffioZ/idletrigger/internal/monitor"
 	"github.com/JeffioZ/idletrigger/internal/nosleep"
-	"github.com/JeffioZ/idletrigger/internal/notify"
 	"github.com/JeffioZ/idletrigger/internal/popup"
 	"github.com/JeffioZ/idletrigger/internal/power"
 	"github.com/JeffioZ/idletrigger/internal/processwatcher"
@@ -31,27 +31,6 @@ import (
 
 type Callbacks struct {
 	OnConfigChanged func(config.Config)
-}
-
-var timeoutOptions = []struct {
-	minutes int
-	key     string
-}{
-	{5, "menu_timeout_5"},
-	{10, "menu_timeout_10"},
-	{30, "menu_timeout_30"},
-	{60, "menu_timeout_60"},
-	{120, "menu_timeout_120"},
-}
-
-var actionOptions = []struct {
-	action config.Action
-	key    string
-}{
-	{config.ActionSleep, "menu_action_sleep"},
-	{config.ActionHibernate, "menu_action_hibernate"},
-	{config.ActionShutdown, "menu_action_shutdown"},
-	{config.ActionLock, "menu_action_lock"},
 }
 
 type trayState struct {
@@ -67,10 +46,9 @@ type trayState struct {
 	themeSched     *themeswitch.Scheduler
 	processNoSleep bool
 	batteryBlocked bool
-
-	// All menu items that display localised text — updated on language switch.
-
-	// menu items (action items for capability checking)
+	trayThemeDark  bool
+	menuOpen       *systray.MenuItem
+	menuExit       *systray.MenuItem
 }
 
 type stateRequest struct {
@@ -92,6 +70,19 @@ func Run(cfg config.Config, cbs Callbacks) {
 	}
 
 	onReady := func() {
+		s.menuOpen = systray.AddMenuItem(i18n.T(s.lang, "menu_open_panel"), "")
+		s.menuExit = systray.AddMenuItem(i18n.T(s.lang, "menu_exit"), "")
+		go func() {
+			for range s.menuOpen.ClickedCh {
+				systray.Post(s.showPopup)
+			}
+		}()
+		go func() {
+			for range s.menuExit.ClickedCh {
+				systray.Quit()
+			}
+		}()
+
 		if enabled, updated, err := autostart.EnsureCurrent(); err == nil {
 			s.cfg.AutostartEnabled = enabled
 			if updated {
@@ -179,87 +170,79 @@ func (s *trayState) call(fn func() string) string {
 // ---- icon state -------------------------------------------------------
 
 func (s *trayState) updateIcon() {
-	if nosleep.IsEnabled() {
-		systray.SetIcon(assets.IconActive)
-	} else if s.cfg.IdleTimeoutMinutes > 0 {
-		systray.SetIcon(assets.IconMonitor)
+	darkTheme := themeswitch.Current() == themeswitch.ModeDark
+	if darkTheme {
+		systray.SetIcon(assets.IconTrayLight)
 	} else {
-		systray.SetIcon(assets.IconDefault)
+		systray.SetIcon(assets.IconTrayDark)
 	}
+	s.trayThemeDark = darkTheme
 	systray.SetTooltip(s.buildTooltip())
 }
 
-func (s *trayState) buildTooltip() string {
-	lines := []string{"IdleTrigger"}
-	coreLine := s.tooltipStatusShort("tooltip_nosleep", s.cfg.NoSleepEnabled)
-	if s.cfg.IdleTimeoutMinutes > 0 {
-		act := i18n.T(s.lang, actionTranslationKey(s.cfg.IdleAction))
-		coreLine += " · " + s.tooltipPair("tooltip_idle", fmt.Sprintf(i18n.T(s.lang, "status_monitor_active"), s.cfg.IdleTimeoutMinutes, act))
-	} else {
-		coreLine += " · " + s.tooltipStatusShort("tooltip_idle", false)
+func (s *trayState) refreshTrayThemeIcon() {
+	if (themeswitch.Current() == themeswitch.ModeDark) != s.trayThemeDark {
+		s.updateIcon()
 	}
-	lines = append(lines, coreLine)
-	lines = append(lines, s.tooltipPair("tooltip_theme", s.themeTooltipValueShort()))
-	lines = append(lines, strings.Join([]string{
-		s.tooltipStatusShort("tooltip_process", s.cfg.ProcessWatchEnabled),
-		s.tooltipStatusShort("tooltip_hotkeys", s.cfg.HotkeysEnabled),
-		s.tooltipStatusShort("tooltip_autostart", s.cfg.AutostartEnabled),
-		s.tooltipStatusShort("tooltip_logging", s.cfg.LoggingEnabled),
-	}, " · "))
+}
+
+func (s *trayState) buildTooltip() string {
+	lines := []string{tooltipTitle(version.Value)}
+	lines = append(lines, s.statusLine("tooltip_nosleep", shortStatus(s.lang, nosleep.IsEnabled())))
+	if s.idleSuspended() {
+		lines = append(lines, s.statusLine("tooltip_idle", i18n.T(s.lang, "status_paused")))
+	} else if s.cfg.IdleTimeoutMinutes > 0 {
+		lines = append(lines, s.statusLine("tooltip_idle", fmt.Sprintf("%d%s %s", s.cfg.IdleTimeoutMinutes, shortMinuteUnit(s.lang), i18n.T(s.lang, actionTranslationKey(s.cfg.IdleAction)))))
+	} else {
+		lines = append(lines, s.statusLine("tooltip_idle", shortStatus(s.lang, false)))
+	}
+	lines = append(lines, s.statusLine("tooltip_theme", s.themeTooltipValueShort()))
+	if s.cfg.ProcessWatchEnabled {
+		lines = append(lines, s.statusLine("tooltip_process", shortStatus(s.lang, s.processNoSleep)))
+	}
 	return tooltipText(lines)
 }
 
-func (s *trayState) tooltipStatus(labelKey string, enabled bool) string {
-	value := i18n.T(s.lang, "status_disabled")
+func tooltipTitle(appVersion string) string {
+	if appVersion == "" || appVersion == "dev" {
+		return "IdleTrigger"
+	}
+	return "IdleTrigger v" + appVersion
+}
+
+func shortStatus(lang string, enabled bool) string {
 	if enabled {
-		value = i18n.T(s.lang, "status_enabled")
+		return i18n.T(lang, "status_short_on")
 	}
-	return s.statusLine(labelKey, value)
+	return i18n.T(lang, "status_short_off")
 }
 
-func (s *trayState) tooltipStatusShort(labelKey string, enabled bool) string {
-	value := i18n.T(s.lang, "status_short_off")
-	if enabled {
-		value = i18n.T(s.lang, "status_short_on")
+func shortMinuteUnit(lang string) string {
+	if i18n.ResolveLanguage(lang) == "zh-CN" {
+		return "分"
 	}
-	return s.tooltipPair(labelKey, value)
-}
-
-func (s *trayState) tooltipPair(labelKey, value string) string {
-	return fmt.Sprintf("%s %s", i18n.T(s.lang, labelKey), value)
-}
-
-func (s *trayState) themeTooltipValue() string {
-	if !s.cfg.ThemeSwitchEnabled {
-		return i18n.T(s.lang, "status_disabled")
-	}
-	parts := []string{i18n.T(s.lang, "status_enabled")}
-	if s.cfg.ThemeMode == "sunrise" {
-		parts = append(parts, i18n.T(s.lang, "menu_theme_sunrise"))
-	} else {
-		parts = append(parts, s.cfg.ThemeLightTime+"/"+s.cfg.ThemeDarkTime)
-	}
-	if schedule := s.themeScheduleText(); schedule != "" {
-		parts = append(parts, schedule)
-	}
-	if s.cfg.ThemeDarkOnBattery {
-		parts = append(parts, i18n.T(s.lang, "menu_theme_battery_dark"))
-	}
-	if s.cfg.ThemeSkipFullscreen {
-		parts = append(parts, i18n.T(s.lang, "menu_theme_skip_fullscreen"))
-	}
-	return strings.Join(parts, " ")
+	return "m"
 }
 
 func (s *trayState) themeTooltipValueShort() string {
 	if !s.cfg.ThemeSwitchEnabled {
 		return i18n.T(s.lang, "status_short_off")
 	}
-	parts := []string{i18n.T(s.lang, "status_short_on")}
 	if schedule := s.themeScheduleText(); schedule != "" {
-		parts = append(parts, schedule)
+		return i18n.T(s.lang, "status_short_on") + " " + compactThemeSchedule(schedule)
 	}
-	return strings.Join(parts, " · ")
+	return i18n.T(s.lang, "status_short_on")
+}
+
+func compactThemeSchedule(schedule string) string {
+	replacer := strings.NewReplacer(
+		"浅色 ", "浅",
+		"深色 ", "深",
+		"Light ", "L",
+		"Dark ", "D",
+		" / ", "/",
+	)
+	return replacer.Replace(schedule)
 }
 
 func (s *trayState) themeScheduleText() string {
@@ -298,31 +281,51 @@ func (s *trayState) startMonitor() {
 	action := s.cfg.IdleAction
 	lang := s.lang
 	warningSeconds := s.cfg.IdleWarningSeconds
+	idlewarning.SetOnDismiss(func() {
+		s.post(func() {
+			if s.mon != nil && s.cfg.IdleTimeoutMinutes > 0 {
+				s.startMonitor()
+			}
+		})
+	})
 
 	s.mon = monitor.New(threshold, warnOffset,
-		// onWarning — show balloon notification
+		// Show a non-activating in-app warning. Legacy notification-area
+		// balloons are silently suppressed on many Windows 11 configurations.
 		func() {
 			actName := i18n.T(lang, actionTranslationKey(action))
 			msg := fmt.Sprintf(i18n.T(lang, "msg_idle_warning"), actName, warningSeconds)
 			title := i18n.T(lang, "app_title")
-			if err := notify.Show(title, msg, warningSeconds); err != nil {
-				mylog.Info("Idle warning notification failed: %v", err)
-			}
+			mylog.Info("Idle warning displayed: action=%s seconds=%d", action, warningSeconds)
+			idlewarning.Show(title, msg)
 		},
-		// onTrigger
+		// Execute directly from the monitor goroutine. Waiting for the tray
+		// state queue would make an overdue power action depend on UI work.
 		func() {
-			s.post(func() {
-				if err := executeAction(action); err != nil {
-					s.showError(actionTranslationKey(action), err)
-				}
-			})
+			// The warning must be gone before a power action takes effect.
+			systray.PostAndWait(idlewarning.Hide)
+			idleFor, idleErr := monitor.IdleDuration()
+			if idleErr != nil {
+				mylog.Info("Idle monitor trigger reached, but idle duration lookup failed: %v", idleErr)
+			} else {
+				mylog.Info("Idle monitor trigger reached: idle=%s action=%s", idleFor.Round(time.Second), action)
+			}
+			if err := executeAction(action); err != nil {
+				mylog.Info("Idle monitor action failed: action=%s error=%v", action, err)
+				s.post(func() { s.showError(actionTranslationKey(action), err) })
+				return
+			}
+			mylog.Info("Idle monitor action accepted: action=%s", action)
 		},
-		0, // default poll interval
+		time.Second,
 	)
+	s.mon.SetOnActivity(func() { systray.Post(idlewarning.Hide) })
 	s.mon.Start()
 }
 
 func (s *trayState) stopMonitor() {
+	idlewarning.SetOnDismiss(nil)
+	systray.Post(idlewarning.Hide)
 	if s.mon != nil {
 		s.mon.Stop()
 		s.mon = nil
@@ -347,6 +350,13 @@ func (s *trayState) reconcileRuntime() {
 
 func noSleepRequested(cfg config.Config, processRequested bool) bool {
 	return cfg.NoSleepEnabled || processRequested
+}
+
+// idleSuspended reports the intentional conflict resolution between process
+// based keep-awake and the idle action. The saved idle setting is retained so
+// it resumes automatically after the watched process exits.
+func (s *trayState) idleSuspended() bool {
+	return s.cfg.IdleTimeoutMinutes > 0 && s.processNoSleep && s.mon == nil
 }
 
 // ---- hotkeys ----------------------------------------------------------
@@ -472,6 +482,7 @@ func (s *trayState) refreshBatteryPolicy() {
 	if s.themeSched != nil {
 		s.themeSched.CheckNow()
 	}
+	s.refreshTrayThemeIcon()
 	if blocked == s.batteryBlocked {
 		return
 	}
@@ -736,6 +747,12 @@ func (s *trayState) switchLanguage(lang string) {
 func (s *trayState) applyLanguage() {
 	T := func(key string) string { return i18n.T(s.lang, key) }
 	systray.SetTitle(T("app_title"))
+	if s.menuOpen != nil {
+		s.menuOpen.SetTitle(T("menu_open_panel"))
+	}
+	if s.menuExit != nil {
+		s.menuExit.SetTitle(T("menu_exit"))
+	}
 	s.updateIcon()
 }
 
@@ -797,6 +814,8 @@ func (s *trayState) showPopup() {
 				NoSleepEnabled:      s.cfg.NoSleepEnabled,
 				ProcessWatchEnabled: s.cfg.ProcessWatchEnabled,
 				IdleEnabled:         s.cfg.IdleTimeoutMinutes > 0,
+				IdlePaused:          s.idleSuspended(),
+				IdleWarningEnabled:  s.cfg.IdleWarningSeconds > 0,
 				IdleTimeout:         s.cfg.IdleTimeoutMinutes,
 				IdleAction:          string(s.cfg.IdleAction),
 				ThemeSwitchEnabled:  s.cfg.ThemeSwitchEnabled,
@@ -808,6 +827,7 @@ func (s *trayState) showPopup() {
 				IsChinese:           i18n.ResolveLanguage(s.lang) == "zh-CN",
 				ThemeSchedule:       s.themeScheduleText(),
 				AppVersion:          version.Value,
+				Owner:               systray.WindowHandle(),
 			},
 			lang: s.lang,
 		}
@@ -860,10 +880,9 @@ func (s *trayState) handlePopupAction(action popup.Action, value int) {
 		s.updateIcon()
 		s.saveConfig()
 	case popup.ActIdleTimeout:
-		times := []int{5, 10, 30, 60, 120}
-		if value >= 0 && value < len(times) {
+		if value > 0 && value <= 7*24*60 {
 			s.cfg.NoSleepEnabled = false
-			s.cfg.IdleTimeoutMinutes = times[value]
+			s.cfg.IdleTimeoutMinutes = value
 			s.reconcileRuntime()
 			s.updateIcon()
 			s.saveConfig()
@@ -875,6 +894,14 @@ func (s *trayState) handlePopupAction(action popup.Action, value int) {
 			s.reconcileRuntime()
 			s.saveConfig()
 		}
+	case popup.ActIdleWarningToggle:
+		if s.cfg.IdleWarningSeconds > 0 {
+			s.cfg.IdleWarningSeconds = 0
+		} else {
+			s.cfg.IdleWarningSeconds = 30
+		}
+		s.reconcileRuntime()
+		s.saveConfig()
 	case popup.ActThemeToggle:
 		s.cfg.ThemeSwitchEnabled = !s.cfg.ThemeSwitchEnabled
 		if s.cfg.ThemeSwitchEnabled {
@@ -960,7 +987,9 @@ func (s *trayState) runThemeOperation(actionKey string, fn func() error) {
 	go func() {
 		if err := fn(); err != nil {
 			s.post(func() { s.showError(actionKey, err) })
+			return
 		}
+		s.post(func() { s.refreshTrayThemeIcon() })
 	}()
 }
 
