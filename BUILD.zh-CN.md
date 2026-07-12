@@ -35,13 +35,25 @@ go build -trimpath "-ldflags=$ldflags" -o $output .
 
 ## 验证
 
-发布前执行：
+在 Windows PowerShell 5.1 或更高版本中执行本地标准检查：
 
 ```powershell
-go test -count=1 ./...
-go vet ./...
-gofmt -l .
-go mod verify
+.\scripts\check.ps1
+```
+
+已安装 `golangci-lint` 时脚本会执行它；未安装时会明确打印 `SKIPPED`。
+联网时可执行可选漏洞扫描：
+
+```powershell
+.\scripts\check.ps1 -Vulncheck
+```
+
+未传 `-Vulncheck` 时不会执行漏洞扫描，脚本会明确提示。若系统缓存目录不可写，
+可在当前 shell 中先设置以下可选的用户本地缓存路径：
+
+```powershell
+$env:GOCACHE = Join-Path $env:LOCALAPPDATA "IdleTrigger\cache\go-build"
+$env:GOLANGCI_LINT_CACHE = Join-Path $env:LOCALAPPDATA "IdleTrigger\cache\golangci-lint"
 ```
 
 并显式构建两种架构：

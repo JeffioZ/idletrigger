@@ -35,13 +35,26 @@ go build -trimpath "-ldflags=$ldflags" -o $output .
 
 ## Verify
 
-Run these checks before a release:
+Run the standard local checks in Windows PowerShell 5.1 or later:
 
 ```powershell
-go test -count=1 ./...
-go vet ./...
-gofmt -l .
-go mod verify
+.\scripts\check.ps1
+```
+
+`golangci-lint` is run when installed; otherwise the script prints `SKIPPED`.
+Run the optional vulnerability scan while online:
+
+```powershell
+.\scripts\check.ps1 -Vulncheck
+```
+
+Without `-Vulncheck`, the vulnerability scan is not run and the script reports
+that explicitly. If the system caches are not writable, set optional user-local
+cache paths for the current shell before running the script:
+
+```powershell
+$env:GOCACHE = Join-Path $env:LOCALAPPDATA "IdleTrigger\cache\go-build"
+$env:GOLANGCI_LINT_CACHE = Join-Path $env:LOCALAPPDATA "IdleTrigger\cache\golangci-lint"
 ```
 
 Build both targets explicitly:
