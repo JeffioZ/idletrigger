@@ -19,12 +19,13 @@ go mod download
 
 ## 构建
 
-仓库中的架构专用 `.syso` 文件包含应用图标、manifest 与 Windows 版本信息。发布版本号变化时，必须重新生成资源，使资源管理器属性页与应用版本保持一致。
+架构专用 `.syso` 文件包含应用图标、manifest 与 Windows 版本信息。它们是生成型构建产物，不提交到仓库。构建前先重新生成资源，使资源管理器属性页与应用版本保持一致。
 
 ```powershell
 $env:CGO_ENABLED = "0"
 $env:GOARCH = "amd64" # 32 位 Windows 使用 "386"
 $version = "dev"
+go run ./scripts/gen_resource.go -version $version
 $ldflags = "-s -w -H windowsgui -X github.com/JeffioZ/idletrigger/internal/version.Value=$version"
 $output = if ($env:GOARCH -eq "amd64") { "IdleTrigger-x64.exe" } else { "IdleTrigger-x86.exe" }
 go build -trimpath "-ldflags=$ldflags" -o $output .
@@ -48,6 +49,7 @@ go mod verify
 ```powershell
 $env:CGO_ENABLED = "0"
 $version = "dev"
+go run ./scripts/gen_resource.go -version $version
 $ldflags = "-s -w -H windowsgui -X github.com/JeffioZ/idletrigger/internal/version.Value=$version"
 
 $env:GOARCH = "amd64"
@@ -75,7 +77,7 @@ $version = "1.3.0"
 go run ./scripts/gen_resource.go -version $version
 ```
 
-请将 `app.ico`、两个托盘 ICO、`assets/manifest.xml`、生成器和两份 `.syso` 一并提交，确保发布资源可复现。
+请将 `app.ico`、两个托盘 ICO、`assets/manifest.xml` 和生成器一并提交。不要提交 `.syso` 文件；发布工作流会按 tag 版本自动重新生成。
 
 ## 离线构建
 
@@ -86,6 +88,7 @@ go mod vendor
 
 $env:CGO_ENABLED = "0"
 $env:GOARCH = "amd64"
+go run ./scripts/gen_resource.go -version dev
 go build -mod=vendor -trimpath -ldflags="-s -w -H windowsgui" -o dist/IdleTrigger-x64.exe .
 ```
 
@@ -93,6 +96,7 @@ go build -mod=vendor -trimpath -ldflags="-s -w -H windowsgui" -o dist/IdleTrigge
 
 ```powershell
 go test ./...
+go run ./scripts/gen_resource.go -version dev
 $env:CGO_ENABLED = "0"
 $env:GOARCH = "amd64"
 go build -trimpath -ldflags="-H windowsgui" -o dist/IdleTrigger-x64-dev.exe .

@@ -1,6 +1,7 @@
 # Build artifacts
 /IdleTrigger*.exe
 /dist/
+/rsrc_windows_*.syso
 *.test
 *.prof
 coverage.out

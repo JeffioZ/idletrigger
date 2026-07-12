@@ -19,12 +19,13 @@ go mod download
 
 ## Build
 
-The checked-in architecture-specific `.syso` files contain the application icon, manifest, and Windows version metadata. Regenerate them whenever the release version changes so Explorer properties and the app version agree.
+The architecture-specific `.syso` files contain the application icon, manifest, and Windows version metadata. They are generated build artifacts and are not committed. Regenerate them before building so Explorer properties and the app version agree.
 
 ```powershell
 $env:CGO_ENABLED = "0"
 $env:GOARCH = "amd64" # "386" for 32-bit Windows
 $version = "dev"
+go run ./scripts/gen_resource.go -version $version
 $ldflags = "-s -w -H windowsgui -X github.com/JeffioZ/idletrigger/internal/version.Value=$version"
 $output = if ($env:GOARCH -eq "amd64") { "IdleTrigger-x64.exe" } else { "IdleTrigger-x86.exe" }
 go build -trimpath "-ldflags=$ldflags" -o $output .
@@ -48,6 +49,7 @@ Build both targets explicitly:
 ```powershell
 $env:CGO_ENABLED = "0"
 $version = "dev"
+go run ./scripts/gen_resource.go -version $version
 $ldflags = "-s -w -H windowsgui -X github.com/JeffioZ/idletrigger/internal/version.Value=$version"
 
 $env:GOARCH = "amd64"
@@ -76,7 +78,7 @@ $version = "1.3.0"
 go run ./scripts/gen_resource.go -version $version
 ```
 
-Commit `app.ico`, both tray ICO files, `assets/manifest.xml`, the generators, and both `.syso` files together. That keeps shipped resources reproducible.
+Commit `app.ico`, both tray ICO files, `assets/manifest.xml`, and the generators together. Do not commit `.syso` files; the release workflow regenerates them from the tag version.
 
 ## Offline Build
 
@@ -87,6 +89,7 @@ go mod vendor
 
 $env:CGO_ENABLED = "0"
 $env:GOARCH = "amd64"
+go run ./scripts/gen_resource.go -version dev
 go build -mod=vendor -trimpath -ldflags="-s -w -H windowsgui" -o dist/IdleTrigger-x64.exe .
 ```
 
@@ -94,6 +97,7 @@ go build -mod=vendor -trimpath -ldflags="-s -w -H windowsgui" -o dist/IdleTrigge
 
 ```powershell
 go test ./...
+go run ./scripts/gen_resource.go -version dev
 $env:CGO_ENABLED = "0"
 $env:GOARCH = "amd64"
 go build -trimpath -ldflags="-H windowsgui" -o dist/IdleTrigger-x64-dev.exe .
