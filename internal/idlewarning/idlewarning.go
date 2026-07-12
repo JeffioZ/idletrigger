@@ -80,34 +80,39 @@ var (
 	user32 = windows.NewLazySystemDLL("user32.dll")
 	gdi32  = windows.NewLazySystemDLL("gdi32.dll")
 
-	pCreateWindowEx    = user32.NewProc("CreateWindowExW")
-	pDestroyWindow     = user32.NewProc("DestroyWindow")
-	pDefWindowProc     = user32.NewProc("DefWindowProcW")
-	pRegisterClassEx   = user32.NewProc("RegisterClassExW")
-	pGetCursorPos      = user32.NewProc("GetCursorPos")
-	pMonitorFromWindow = user32.NewProc("MonitorFromWindow")
-	pGetMonitorInfo    = user32.NewProc("GetMonitorInfoW")
-	pSetWindowPos      = user32.NewProc("SetWindowPos")
-	pUpdateWindow      = user32.NewProc("UpdateWindow")
-	pBeginPaint        = user32.NewProc("BeginPaint")
-	pEndPaint          = user32.NewProc("EndPaint")
-	pGetClientRect     = user32.NewProc("GetClientRect")
-	pGetDC             = user32.NewProc("GetDC")
-	pReleaseDC         = user32.NewProc("ReleaseDC")
-	pInvalidateRect    = user32.NewProc("InvalidateRect")
-	pTrackMouseEvent   = user32.NewProc("TrackMouseEvent")
-	pFillRect          = user32.NewProc("FillRect")
-	pFrameRect         = user32.NewProc("FrameRect")
-	pDrawText          = user32.NewProc("DrawTextW")
-	pSetTextColor      = gdi32.NewProc("SetTextColor")
-	pSetBkMode         = gdi32.NewProc("SetBkMode")
-	pGetDpiForWindow   = user32.NewProc("GetDpiForWindow")
-	pDeleteObject      = gdi32.NewProc("DeleteObject")
-	pCreateBrush       = gdi32.NewProc("CreateSolidBrush")
-	pCreatePen         = gdi32.NewProc("CreatePen")
-	pMoveToEx          = gdi32.NewProc("MoveToEx")
-	pLineTo            = gdi32.NewProc("LineTo")
-	pSelectObject      = gdi32.NewProc("SelectObject")
+	pCreateWindowEx         = user32.NewProc("CreateWindowExW")
+	pDestroyWindow          = user32.NewProc("DestroyWindow")
+	pDefWindowProc          = user32.NewProc("DefWindowProcW")
+	pRegisterClassEx        = user32.NewProc("RegisterClassExW")
+	pGetCursorPos           = user32.NewProc("GetCursorPos")
+	pMonitorFromWindow      = user32.NewProc("MonitorFromWindow")
+	pGetMonitorInfo         = user32.NewProc("GetMonitorInfoW")
+	pSetWindowPos           = user32.NewProc("SetWindowPos")
+	pUpdateWindow           = user32.NewProc("UpdateWindow")
+	pBeginPaint             = user32.NewProc("BeginPaint")
+	pEndPaint               = user32.NewProc("EndPaint")
+	pGetClientRect          = user32.NewProc("GetClientRect")
+	pGetDC                  = user32.NewProc("GetDC")
+	pReleaseDC              = user32.NewProc("ReleaseDC")
+	pInvalidateRect         = user32.NewProc("InvalidateRect")
+	pTrackMouseEvent        = user32.NewProc("TrackMouseEvent")
+	pFillRect               = user32.NewProc("FillRect")
+	pFrameRect              = user32.NewProc("FrameRect")
+	pDrawText               = user32.NewProc("DrawTextW")
+	pSetTextColor           = gdi32.NewProc("SetTextColor")
+	pSetBkMode              = gdi32.NewProc("SetBkMode")
+	pGetDpiForWindow        = user32.NewProc("GetDpiForWindow")
+	pDeleteObject           = gdi32.NewProc("DeleteObject")
+	pCreateBrush            = gdi32.NewProc("CreateSolidBrush")
+	pCreatePen              = gdi32.NewProc("CreatePen")
+	pCreateCompatibleDC     = gdi32.NewProc("CreateCompatibleDC")
+	pCreateCompatibleBitmap = gdi32.NewProc("CreateCompatibleBitmap")
+	pDeleteDC               = gdi32.NewProc("DeleteDC")
+	pMoveToEx               = gdi32.NewProc("MoveToEx")
+	pLineTo                 = gdi32.NewProc("LineTo")
+	pSelectObject           = gdi32.NewProc("SelectObject")
+	pSetStretchBltMode      = gdi32.NewProc("SetStretchBltMode")
+	pStretchBlt             = gdi32.NewProc("StretchBlt")
 
 	classOnce  sync.Once
 	classErr   error
@@ -466,11 +471,13 @@ func paint(hwnd windows.Handle) {
 	pSetBkMode.Call(dc, transparent)
 	close := closeRect(hwnd)
 	closeText := palette.CloseText
+	closeBackground := palette.WindowBackground
 	if closeHot {
 		fill := palette.CloseHover
 		if closeDown {
 			fill = palette.ClosePressed
 		}
+		closeBackground = fill
 		closeBrush := makeBrush(fill)
 		pFillRect.Call(dc, uintptr(unsafe.Pointer(&close)), uintptr(closeBrush))
 		pDeleteObject.Call(uintptr(closeBrush))
@@ -480,7 +487,7 @@ func paint(hwnd windows.Handle) {
 	drawText(dc, title, rect{Left: content.Left + margin + sc(10), Top: content.Top + titleTop, Right: close.Left - sc(6), Bottom: content.Top + titleBottom}, titleFont, dtLeft)
 	pSetTextColor.Call(dc, uintptr(palette.SecondaryText))
 	drawText(dc, body, rect{Left: content.Left + margin + sc(10), Top: content.Top + sc(47), Right: content.Right - margin, Bottom: content.Bottom - sc(14)}, bodyFont, dtLeft|dtWordBreak)
-	drawCloseGlyph(dc, close, closeText)
+	drawCloseGlyph(dc, close, closeText, closeBackground)
 }
 
 func closeRect(hwnd windows.Handle) rect {
@@ -507,12 +514,19 @@ func pointInRect(point point, bounds rect) bool {
 	return point.X >= bounds.Left && point.X < bounds.Right && point.Y >= bounds.Top && point.Y < bounds.Bottom
 }
 
-func drawCloseGlyph(dc uintptr, bounds rect, color uint32) {
+func drawCloseGlyph(dc uintptr, bounds rect, color, background uint32) {
 	// This is a graphic element, not text. Do not rely on the private-use
 	// U+E711 glyph from Segoe MDL2 Assets: GDI can silently substitute another
 	// font when it is absent, leaving a tofu box on customized Windows images.
 	size := bounds.Bottom - bounds.Top
 	inset, stroke := closeGlyphMetrics(size)
+	if drawCloseGlyphSupersampled(dc, bounds, color, background, inset, stroke) {
+		return
+	}
+	drawCloseGlyphGDI(dc, bounds, color, inset, stroke)
+}
+
+func drawCloseGlyphGDI(dc uintptr, bounds rect, color uint32, inset, stroke int32) {
 	pen, _, _ := pCreatePen.Call(0, uintptr(stroke), uintptr(color))
 	if pen == 0 {
 		return
@@ -526,6 +540,54 @@ func drawCloseGlyph(dc uintptr, bounds rect, color uint32) {
 	pLineTo.Call(dc, uintptr(x2), uintptr(y2))
 	pMoveToEx.Call(dc, uintptr(x2), uintptr(y1), 0)
 	pLineTo.Call(dc, uintptr(x1), uintptr(y2))
+}
+
+func drawCloseGlyphSupersampled(dc uintptr, bounds rect, color, background uint32, inset, stroke int32) bool {
+	const (
+		scale    = int32(4)
+		halftone = 4
+		srcCopy  = 0x00CC0020
+	)
+	width, height := bounds.Right-bounds.Left, bounds.Bottom-bounds.Top
+	if width <= 0 || height <= 0 {
+		return false
+	}
+	memDC, _, _ := pCreateCompatibleDC.Call(dc)
+	if memDC == 0 {
+		return false
+	}
+	defer pDeleteDC.Call(memDC)
+	bitmap, _, _ := pCreateCompatibleBitmap.Call(dc, uintptr(width*scale), uintptr(height*scale))
+	if bitmap == 0 {
+		return false
+	}
+	defer pDeleteObject.Call(bitmap)
+	oldBitmap, _, _ := pSelectObject.Call(memDC, bitmap)
+	defer pSelectObject.Call(memDC, oldBitmap)
+	brush := makeBrush(background)
+	if brush == 0 {
+		return false
+	}
+	defer pDeleteObject.Call(uintptr(brush))
+	highBounds := rect{Right: width * scale, Bottom: height * scale}
+	pFillRect.Call(memDC, uintptr(unsafe.Pointer(&highBounds)), uintptr(brush))
+	pen, _, _ := pCreatePen.Call(0, uintptr(stroke*scale), uintptr(color))
+	if pen == 0 {
+		return false
+	}
+	defer pDeleteObject.Call(pen)
+	oldPen, _, _ := pSelectObject.Call(memDC, pen)
+	defer pSelectObject.Call(memDC, oldPen)
+	x1, y1 := inset*scale, inset*scale
+	x2, y2 := (width-inset-1)*scale, (height-inset-1)*scale
+	pMoveToEx.Call(memDC, uintptr(x1), uintptr(y1), 0)
+	pLineTo.Call(memDC, uintptr(x2), uintptr(y2))
+	pMoveToEx.Call(memDC, uintptr(x2), uintptr(y1), 0)
+	pLineTo.Call(memDC, uintptr(x1), uintptr(y2))
+	oldMode, _, _ := pSetStretchBltMode.Call(dc, halftone)
+	defer pSetStretchBltMode.Call(dc, oldMode)
+	result, _, _ := pStretchBlt.Call(dc, uintptr(bounds.Left), uintptr(bounds.Top), uintptr(width), uintptr(height), memDC, 0, 0, uintptr(width*scale), uintptr(height*scale), srcCopy)
+	return result != 0
 }
 
 func closeGlyphMetrics(size int32) (inset, stroke int32) {
