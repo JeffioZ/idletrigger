@@ -142,6 +142,7 @@ const (
 	wsClipSiblings     = 0x04000000
 	wsChild            = 0x40000000
 	wsVisible          = 0x10000000
+	wsTabStop          = 0x00010000
 	wsVScroll          = 0x00200000
 	wsOverlappedWindow = wsOverlapped | wsCaption | wsSysMenu | wsThickFrame | wsMinimizeBox | wsMaximizeBox
 	bsOwnerDraw        = 0x0000000B
@@ -163,6 +164,7 @@ const (
 
 	odsSelected     = 0x0001
 	odsDisabled     = 0x0004
+	odsFocus        = 0x0010
 	odsHotlight     = 0x0040
 	odsComboBoxEdit = 0x1000
 	dtCenter        = 0x00000001
@@ -706,7 +708,7 @@ func (p *panel) build() error {
 		return err
 	}
 	button := func(text string, x, y, width, height int, id uint16) error {
-		hwnd, err := p.child("BUTTON", text, wsChild|wsVisible|bsOwnerDraw, x, y, width, height, id, p.font)
+		hwnd, err := p.child("BUTTON", text, wsChild|wsVisible|wsTabStop|bsOwnerDraw, x, y, width, height, id, p.font)
 		if err != nil {
 			return err
 		}
@@ -714,7 +716,7 @@ func (p *panel) build() error {
 		return err
 	}
 	combo := func(x, y, width, height int, current int) error {
-		hwnd, err := p.child("COMBOBOX", "", wsChild|wsVisible|wsClipSiblings|wsVScroll|cbsDropDownList|cbsOwnerDrawFix|cbsHasStrings, x, y, width, height, idIdleTimeout, p.font)
+		hwnd, err := p.child("COMBOBOX", "", wsChild|wsVisible|wsTabStop|wsClipSiblings|wsVScroll|cbsDropDownList|cbsOwnerDrawFix|cbsHasStrings, x, y, width, height, idIdleTimeout, p.font)
 		if err != nil {
 			return err
 		}
@@ -1367,6 +1369,26 @@ func (p *panel) drawButton(item *drawItem) {
 	}
 	pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&item.Rect)), uintptr(brush))
 	pFrameRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&item.Rect)), uintptr(p.borderBrush))
+	// Owner-drawn buttons do not get the native focus cue automatically. Keep
+	// a visible inset outline so keyboard navigation remains discoverable in
+	// both themes without changing the selected/on color semantics.
+	if item.ItemState&odsFocus != 0 {
+		focus := item.Rect
+		inset := int32(p.sc(2))
+		focus.Left += inset
+		focus.Top += inset
+		focus.Right -= inset
+		focus.Bottom -= inset
+		if focus.Left < focus.Right && focus.Top < focus.Bottom {
+			focusBrush := p.accentBrush
+			if selected {
+				// An accent outline disappears into an enabled/selected button.
+				// The surface color keeps focus equally visible in both themes.
+				focusBrush = p.surfaceBrush
+			}
+			pFrameRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&focus)), uintptr(focusBrush))
+		}
+	}
 	pSetTextColor.Call(uintptr(item.HDC), uintptr(textColor))
 	pSetBkMode.Call(uintptr(item.HDC), transparent)
 	old, _, _ := pSelectObject.Call(uintptr(item.HDC), uintptr(p.font))

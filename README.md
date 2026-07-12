@@ -32,6 +32,13 @@ Windows 7 is intentionally not supported by the main build. See [BUILD.md](BUILD
 
 The control panel follows Windows light/dark mode, responds to DPI changes, and closes when it loses focus. Tooltips explain each available option.
 
+## Using the Control Panel
+
+- Blue controls are enabled or selected; neutral controls are available but not selected. **Exit** is red because it stops all IdleTrigger features.
+- **Quick Actions** run immediately. Save your work before choosing Sleep, Hibernate, Shut Down, or Restart.
+- Use the mouse or `Tab` / `Shift+Tab` to move between controls, then press `Space` to activate the focused control. The keyboard focus has a visible outline.
+- The compact panel exposes routine choices only. Use **Edit Config** for advanced settings such as process lists, locations, and detailed theme rules.
+
 ## Screenshots
 
 <img src="docs/images/panel-en-light.png" alt="IdleTrigger control panel in English light mode" width="420">
