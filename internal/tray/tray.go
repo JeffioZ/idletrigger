@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -15,6 +14,7 @@ import (
 	"github.com/JeffioZ/idletrigger/internal/actions"
 	"github.com/JeffioZ/idletrigger/internal/autostart"
 	"github.com/JeffioZ/idletrigger/internal/config"
+	"github.com/JeffioZ/idletrigger/internal/devtools"
 	"github.com/JeffioZ/idletrigger/internal/dialog"
 	"github.com/JeffioZ/idletrigger/internal/hotkey"
 	"github.com/JeffioZ/idletrigger/internal/i18n"
@@ -34,12 +34,14 @@ import (
 type Callbacks struct {
 	OnConfigChanged  func(config.Config)
 	ShowPopupOnStart bool
+	DeveloperTools   devtools.Config
 }
 
 type trayState struct {
 	cfg       config.Config
 	lang      string
 	callbacks Callbacks
+	devtools  devtools.Config
 	stateCh   chan stateRequest
 
 	mon *monitor.Monitor
@@ -72,6 +74,7 @@ func Run(cfg config.Config, cbs Callbacks) {
 		cfg:       cfg,
 		lang:      cfg.Language,
 		callbacks: cbs,
+		devtools:  cbs.DeveloperTools,
 		stateCh:   make(chan stateRequest, 64),
 	}
 
@@ -202,6 +205,8 @@ func (s *trayState) buildTooltip() string {
 	lines = append(lines, s.statusLine("tooltip_nosleep", shortStatus(s.lang, nosleep.IsEnabled())))
 	if s.idleSuspended() {
 		lines = append(lines, s.statusLine("tooltip_idle", i18n.T(s.lang, "status_paused")))
+	} else if s.devtools.IdleMonitorEnabled() && s.mon != nil {
+		lines = append(lines, s.statusLine("tooltip_idle", s.developerIdleMonitorStatus()))
 	} else if s.cfg.IdleTimeoutMinutes > 0 {
 		lines = append(lines, s.statusLine("tooltip_idle", fmt.Sprintf("%d%s %s", s.cfg.IdleTimeoutMinutes, shortMinuteUnit(s.lang), i18n.T(s.lang, actionTranslationKey(s.cfg.IdleAction)))))
 	} else {
@@ -332,41 +337,38 @@ func tooltipText(lines []string) string {
 
 func (s *trayState) startMonitor() {
 	s.stopMonitor()
-	if s.cfg.IdleTimeoutMinutes <= 0 {
+	if !s.idleMonitorRequested() {
 		return
 	}
-	threshold := time.Duration(s.cfg.IdleTimeoutMinutes) * time.Minute
-	if testThreshold := idleTestThreshold(); testThreshold > 0 {
-		threshold = testThreshold
-		mylog.Info("Idle monitor test threshold override active: threshold=%s source=IDLETRIGGER_IDLE_TEST_SECONDS", threshold)
+	threshold, warnOffset, action, developerTest := s.effectiveIdleMonitorSettings()
+	if developerTest {
+		mylog.Info("Developer tools idle-monitor test active: effective_threshold=%s effective_action=lock effective_warning=%s config_unchanged=true", threshold, warnOffset)
 	}
-	warnOffset := time.Duration(s.cfg.IdleWarningSeconds) * time.Second
 	snap, snapErr := monitor.Snapshot()
 	if snapErr != nil {
 		mylog.Info("Idle monitor starting: config_timeout_min=%d effective_threshold=%s warning=%s action=%s idle_snapshot_error=%v",
-			s.cfg.IdleTimeoutMinutes, threshold, warnOffset, string(s.cfg.IdleAction), snapErr)
+			s.cfg.IdleTimeoutMinutes, threshold, warnOffset, string(action), snapErr)
 	} else {
 		mylog.Info("Idle monitor starting: config_timeout_min=%d effective_threshold=%s warning=%s action=%s tick_now=%d tick32=%d last_input=%d raw_delta_ms=%d idle=%s",
-			s.cfg.IdleTimeoutMinutes, threshold, warnOffset, string(s.cfg.IdleAction), snap.NowTick64, snap.NowTick32, snap.LastInputTick, snap.RawDeltaMS, snap.Idle.Round(time.Second))
+			s.cfg.IdleTimeoutMinutes, threshold, warnOffset, string(action), snap.NowTick64, snap.NowTick32, snap.LastInputTick, snap.RawDeltaMS, snap.Idle.Round(time.Second))
 	}
 	mylog.Info("Idle monitor input policy: ignore_keepalive_input=%v periodic_window=%s..%s periodic_tolerance=%s periodic_required=%d",
 		s.cfg.IdleIgnoreKeepaliveInput, 20*time.Second, 2*time.Minute, 5*time.Second, 3)
-	action := s.cfg.IdleAction
 	lang := s.lang
-	warningSeconds := s.cfg.IdleWarningSeconds
+	warningSeconds := int(warnOffset / time.Second)
 	processWatchEnabled := s.cfg.ProcessWatchEnabled
 	processListCount := len(effectiveProcessWatchList(s.cfg))
 	noSleepEnabled := s.cfg.NoSleepEnabled
 	keepScreenOn := s.cfg.KeepScreenOn
 	ignoreKeepaliveInput := s.cfg.IdleIgnoreKeepaliveInput
 	sampleLogInterval := 5 * time.Second
-	if idleTestThreshold() > 0 {
+	if developerTest {
 		sampleLogInterval = 2 * time.Second
 	}
 	var lastSampleLog time.Time
 	idlewarning.SetOnDismiss(func() {
 		s.post(func() {
-			if s.mon != nil && s.cfg.IdleTimeoutMinutes > 0 {
+			if s.mon != nil && s.idleMonitorRequested() {
 				s.startMonitor()
 			}
 		})
@@ -452,6 +454,9 @@ func (s *trayState) reconcileRuntime() {
 	mylog.Info("Runtime reconcile: nosleep_enabled=%v process_watch_enabled=%v process_list_count=%d process_match=%v wants_nosleep=%v battery_blocked=%v idle_timeout_min=%d monitor_running=%v",
 		s.cfg.NoSleepEnabled, s.cfg.ProcessWatchEnabled, len(effectiveProcessWatchList(s.cfg)), s.processNoSleep, wantsNoSleep, s.batteryBlocked, s.cfg.IdleTimeoutMinutes, s.mon != nil)
 	if wantsNoSleep && !s.batteryBlocked {
+		if s.devtools.IdleMonitorEnabled() {
+			mylog.Info("Developer tools idle-monitor test suppressed: Stay Awake remains mutually exclusive; config_unchanged=true")
+		}
 		s.stopMonitor()
 		if err := nosleep.Enable(s.cfg.KeepScreenOn); err != nil {
 			mylog.Info("Stay Awake enable failed: keep_screen_on=%v error=%v", s.cfg.KeepScreenOn, err)
@@ -463,7 +468,7 @@ func (s *trayState) reconcileRuntime() {
 	}
 
 	nosleep.Disable()
-	if s.cfg.IdleTimeoutMinutes > 0 {
+	if s.idleMonitorRequested() {
 		s.startMonitor()
 	} else {
 		s.stopMonitor()
@@ -483,7 +488,22 @@ func noSleepRequested(cfg config.Config, processRequested bool) bool {
 // idleSuspended reports the intentional conflict resolution between effective
 // keep-awake and the idle action.
 func (s *trayState) idleSuspended() bool {
-	return s.cfg.IdleTimeoutMinutes > 0 && noSleepRequested(s.cfg, s.processNoSleep) && s.mon == nil
+	return s.idleMonitorRequested() && noSleepRequested(s.cfg, s.processNoSleep) && s.mon == nil
+}
+
+func (s *trayState) idleMonitorRequested() bool {
+	return s.cfg.IdleTimeoutMinutes > 0 || s.devtools.IdleMonitorEnabled()
+}
+
+func (s *trayState) effectiveIdleMonitorSettings() (time.Duration, time.Duration, config.Action, bool) {
+	if s.devtools.IdleMonitorEnabled() {
+		return time.Duration(s.devtools.IdleMonitorSeconds) * time.Second, 5 * time.Second, config.ActionLock, true
+	}
+	return time.Duration(s.cfg.IdleTimeoutMinutes) * time.Minute, time.Duration(s.cfg.IdleWarningSeconds) * time.Second, s.cfg.IdleAction, false
+}
+
+func (s *trayState) developerIdleMonitorStatus() string {
+	return fmt.Sprintf(i18n.T(s.lang, "status_monitor_test_active"), s.devtools.IdleMonitorSeconds, i18n.T(s.lang, "menu_action_lock"))
 }
 
 // ---- hotkeys ----------------------------------------------------------
@@ -913,6 +933,9 @@ func (s *trayState) statusLine(labelKey, value string) string {
 
 func (s *trayState) monitorStatusText() string {
 	if s.mon != nil {
+		if s.devtools.IdleMonitorEnabled() {
+			return s.developerIdleMonitorStatus()
+		}
 		return fmt.Sprintf(
 			i18n.T(s.lang, "status_monitor_active"),
 			s.cfg.IdleTimeoutMinutes,
@@ -1034,7 +1057,7 @@ func (s *trayState) openPopup(refresh bool) {
 			state: popup.State{
 				NoSleepEnabled:           s.cfg.NoSleepEnabled,
 				ProcessWatchEnabled:      s.cfg.ProcessWatchEnabled,
-				IdleEnabled:              s.cfg.IdleTimeoutMinutes > 0,
+				IdleEnabled:              s.idleMonitorRequested(),
 				IdlePaused:               s.idleSuspended(),
 				IdleWarningEnabled:       s.cfg.IdleWarningSeconds > 0,
 				IdleIgnoreKeepaliveInput: s.cfg.IdleIgnoreKeepaliveInput,
@@ -1053,6 +1076,8 @@ func (s *trayState) openPopup(refresh bool) {
 				ThemeSchedule:            s.themeScheduleText(true),
 				AppVersion:               version.Value,
 				Owner:                    systray.WindowHandle(),
+				DeveloperCapturePanel:    s.devtools.CapturePanel,
+				DeveloperWarningPreview:  s.devtools.WarningPreview,
 			},
 			lang: s.lang,
 		}
@@ -1229,19 +1254,6 @@ func (s *trayState) handlePopupAction(action popup.Action, value int) {
 		popup.Destroy()
 		systray.Quit()
 	}
-}
-
-func idleTestThreshold() time.Duration {
-	raw := strings.TrimSpace(os.Getenv("IDLETRIGGER_IDLE_TEST_SECONDS"))
-	if raw == "" {
-		return 0
-	}
-	seconds, err := strconv.Atoi(raw)
-	if err != nil || seconds <= 0 || seconds > 3600 {
-		mylog.Info("Ignoring invalid IDLETRIGGER_IDLE_TEST_SECONDS=%q", raw)
-		return 0
-	}
-	return time.Duration(seconds) * time.Second
 }
 
 func (s *trayState) restartThemeScheduler() {

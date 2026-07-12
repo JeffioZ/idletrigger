@@ -81,6 +81,7 @@
   "status_ac_power": "AC power",
   "status_battery": "Battery %d%%",
   "status_monitor_active": "%d min → %s",
+  "status_monitor_test_active": "Test %ds → %s",
   "menu_theme_switch": "Day/Night",
   "theme_schedule_format": "Light %s / Dark %s",
   "theme_schedule_source_format": "%s · %s",

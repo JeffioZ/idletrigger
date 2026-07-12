@@ -1,7 +1,6 @@
 package inputdiag
 
 import (
-	"os"
 	"runtime"
 	"sync"
 	"unsafe"
@@ -77,10 +76,10 @@ type session struct {
 
 var active *session
 
-// Start enables input-source diagnostics when requested through the
-// IDLETRIGGER_INPUT_DIAGNOSTICS environment variable.
-func Start() func() {
-	if os.Getenv("IDLETRIGGER_INPUT_DIAGNOSTICS") != "1" {
+// Start enables developer-tools input tracing when requested by the central
+// startup resolver.
+func Start(enabled bool) func() {
+	if !enabled {
 		return nil
 	}
 	s := &session{ready: make(chan struct{}), done: make(chan struct{})}
@@ -91,7 +90,7 @@ func Start() func() {
 		s.stop()
 		return nil
 	}
-	mylog.Info("Input diagnostics enabled by IDLETRIGGER_INPUT_DIAGNOSTICS")
+	mylog.Info("Developer tools input trace enabled: recording keyboard key codes, injection flags, and mouse metadata to the debug log")
 	return s.stop
 }
 
@@ -141,7 +140,7 @@ func (s *session) stop() {
 	if active == s {
 		active = nil
 	}
-	mylog.Info("Input diagnostics stopped")
+	mylog.Info("Developer tools input trace stopped")
 }
 
 func keyboardProc(nCode int, wParam, lParam uintptr) uintptr {

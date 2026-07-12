@@ -3,7 +3,6 @@ package popup
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"syscall"
@@ -112,6 +111,7 @@ type State struct {
 	ThemeSchedule                                                string
 	AppVersion                                                   string
 	Owner                                                        windows.Handle
+	DeveloperCapturePanel, DeveloperWarningPreview               bool
 }
 
 type LangFunc func(key string) string
@@ -361,6 +361,8 @@ type panel struct {
 	idlePaused                      bool
 	processWatchList                []string
 	processWatchActive              bool
+	developerCapturePanel           bool
+	developerWarningPreview         bool
 	themeSchedule                   string
 	timeoutOptions                  []timeoutChoice
 	style, exStyle                  uint32
@@ -398,22 +400,24 @@ func Refresh(state State, onAction OnAction, langFn LangFunc) error {
 
 func createPanel(state State, onAction OnAction, langFn LangFunc) error {
 	p := &panel{
-		onAction:           onAction,
-		lang:               langFn,
-		scale:              1,
-		themeSchedule:      state.ThemeSchedule,
-		appVersion:         state.AppVersion,
-		idlePaused:         state.IdlePaused,
-		idleTimeout:        state.IdleTimeout,
-		isChinese:          state.IsChinese,
-		owner:              state.Owner,
-		processWatchList:   append([]string(nil), state.ProcessWatchList...),
-		processWatchActive: state.ProcessWatchActive,
-		controls:           make(map[uint16]windows.Handle),
-		labels:             make(map[uint16]string),
-		staticKinds:        make(map[uint16]staticKind),
-		nextStaticID:       700,
-		tooltips:           make(map[uint16][]uint16),
+		onAction:                onAction,
+		lang:                    langFn,
+		scale:                   1,
+		themeSchedule:           state.ThemeSchedule,
+		appVersion:              state.AppVersion,
+		idlePaused:              state.IdlePaused,
+		idleTimeout:             state.IdleTimeout,
+		isChinese:               state.IsChinese,
+		owner:                   state.Owner,
+		processWatchList:        append([]string(nil), state.ProcessWatchList...),
+		processWatchActive:      state.ProcessWatchActive,
+		developerCapturePanel:   state.DeveloperCapturePanel,
+		developerWarningPreview: state.DeveloperWarningPreview,
+		controls:                make(map[uint16]windows.Handle),
+		labels:                  make(map[uint16]string),
+		staticKinds:             make(map[uint16]staticKind),
+		nextStaticID:            700,
+		tooltips:                make(map[uint16][]uint16),
 		toggles: map[uint16]bool{
 			idNoSleep: state.NoSleepEnabled, idProcess: state.ProcessWatchEnabled,
 			idIdle: state.IdleEnabled && !state.IdlePaused, idIdleWarning: state.IdleWarningEnabled,
@@ -546,7 +550,7 @@ func (p *panel) create() error {
 	style := uint32(wsPopup | wsCaption | wsSysMenu | wsClipChildren)
 	exStyle := uint32(wsExTopmost | wsExComposited)
 	owner := uintptr(p.owner)
-	if captureMode() {
+	if p.developerCapturePanel {
 		// Capture mode uses a normal app window shape so screenshot tools can
 		// detect the whole panel instead of treating it as a transient tray popup.
 		style = uint32(wsOverlappedWindow | wsClipChildren)
@@ -577,10 +581,6 @@ func (p *panel) create() error {
 	p.position(style, exStyle)
 	pSetForeground.Call(uintptr(p.hwnd))
 	return nil
-}
-
-func captureMode() bool {
-	return os.Getenv("IDLETRIGGER_CAPTURE_MODE") == "1"
 }
 
 func (p *panel) createTooltip() {
@@ -923,7 +923,7 @@ func (p *panel) build() error {
 		return err
 	}
 	y += sectionH + labelGap
-	if os.Getenv("IDLETRIGGER_DEV") == "1" {
+	if p.developerWarningPreview {
 		height, err := choiceRow(pad, y, baseW-2*pad, []string{p.text("msg_idle_warning_test")}, []uint16{idTestWarning})
 		if err != nil {
 			return err
@@ -1185,7 +1185,7 @@ func (p *panel) position(style, exStyle uint32) {
 	}
 	x, y := panelOrigin(info.Work, width, height, int32(p.sc(16)))
 	insertAfter := ^uintptr(0)
-	if captureMode() {
+	if p.developerCapturePanel {
 		insertAfter = 0
 	}
 	pSetWindowPos.Call(uintptr(p.hwnd), insertAfter, uintptr(x), uintptr(y), uintptr(width), uintptr(height), swpShowWindow)
@@ -1196,7 +1196,7 @@ func wndProc(hwnd windows.Handle, msg uint32, wp, lp uintptr) uintptr {
 	if p != nil {
 		switch msg {
 		case wmActivate:
-			if uint16(wp) == waInactive && !captureMode() {
+			if uint16(wp) == waInactive && !p.developerCapturePanel {
 				Hide()
 				return 0
 			}

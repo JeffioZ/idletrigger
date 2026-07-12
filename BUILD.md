@@ -127,6 +127,4 @@ console window. For CLI output checks, run commands through `cmd /c` or redirect
 stdout/stderr with `Start-Process`; direct PowerShell invocation of GUI-subsystem
 EXEs can return before output is attached.
 
-For documentation screenshots, set `IDLETRIGGER_CAPTURE_MODE=1` before launching the EXE, then open the panel from the tray icon. Capture mode shows the panel as a regular top-level app window so screenshot tools can select the whole window. It is only intended for documentation and visual checks.
-
 Code signing is an optional release step. Do not pack debug builds with UPX: it complicates diagnostics and can increase antivirus scrutiny.

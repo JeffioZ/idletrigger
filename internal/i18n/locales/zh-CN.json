@@ -81,6 +81,7 @@
   "status_ac_power": "交流电源",
   "status_battery": "电池 %d%%",
   "status_monitor_active": "%d 分钟 → %s",
+  "status_monitor_test_active": "测试 %d 秒 → %s",
   "menu_theme_switch": "昼夜模式",
   "theme_schedule_format": "浅色 %s / 深色 %s",
   "theme_schedule_source_format": "%s · %s",

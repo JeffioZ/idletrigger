@@ -3,8 +3,10 @@ package tray
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/JeffioZ/idletrigger/internal/config"
+	"github.com/JeffioZ/idletrigger/internal/devtools"
 	"github.com/JeffioZ/idletrigger/internal/power"
 )
 
@@ -30,6 +32,38 @@ func TestNoSleepRequestSources(t *testing.T) {
 	}
 	if !noSleepRequested(cfg, true) {
 		t.Fatal("matching process should allow enabled Stay Awake")
+	}
+}
+
+func TestDeveloperIdleMonitorUsesSafeRuntimeSettings(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.IdleTimeoutMinutes = 0
+	cfg.IdleAction = config.ActionShutdown
+	state := trayState{
+		cfg:      cfg,
+		devtools: devtools.Config{Enabled: true, IdleMonitorSeconds: 10},
+	}
+	if !state.idleMonitorRequested() {
+		t.Fatal("developer idle monitor should run even when config monitor is disabled")
+	}
+	threshold, warning, action, active := state.effectiveIdleMonitorSettings()
+	if !active || threshold != 10*time.Second || warning != 5*time.Second || action != config.ActionLock {
+		t.Fatalf("developer idle settings = %s/%s/%s/%v", threshold, warning, action, active)
+	}
+	if state.cfg.IdleTimeoutMinutes != 0 || state.cfg.IdleAction != config.ActionShutdown {
+		t.Fatalf("developer idle monitor changed config: %+v", state.cfg)
+	}
+}
+
+func TestDeveloperIdleMonitorStillRespectsStayAwakeMutualExclusion(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.NoSleepEnabled = true
+	state := trayState{
+		cfg:      cfg,
+		devtools: devtools.Config{Enabled: true, IdleMonitorSeconds: 10},
+	}
+	if !state.idleSuspended() {
+		t.Fatal("developer idle monitor must remain suspended by Stay Awake")
 	}
 }
 

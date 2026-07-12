@@ -73,7 +73,7 @@ func TestRunDiagnosticsIdlePrintsSnapshot(t *testing.T) {
 }
 
 func TestRunDiagnosticsInvalidArgsUsesLocalizedUsage(t *testing.T) {
-	if lang := os.Getenv("IDLETRIGGER_DIAGNOSTICS_CHILD_LANG"); lang != "" {
+	if lang := os.Getenv("IDLETRIGGER_TEST_DIAGNOSTICS_CHILD_LANG"); lang != "" {
 		withArgs(t, []string{"IdleTrigger", "diagnostics"}, func() {
 			Run(lang)
 		})
@@ -89,7 +89,7 @@ func TestRunDiagnosticsInvalidArgsUsesLocalizedUsage(t *testing.T) {
 	} {
 		t.Run(tt.lang, func(t *testing.T) {
 			cmd := exec.Command(os.Args[0], "-test.run=^TestRunDiagnosticsInvalidArgsUsesLocalizedUsage$")
-			cmd.Env = append(os.Environ(), "IDLETRIGGER_DIAGNOSTICS_CHILD_LANG="+tt.lang)
+			cmd.Env = append(os.Environ(), "IDLETRIGGER_TEST_DIAGNOSTICS_CHILD_LANG="+tt.lang)
 			output, err := cmd.CombinedOutput()
 			if err == nil {
 				t.Fatal("diagnostics with missing subcommand succeeded")

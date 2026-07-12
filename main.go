@@ -13,6 +13,7 @@ import (
 	"github.com/JeffioZ/idletrigger/internal/cli"
 	"github.com/JeffioZ/idletrigger/internal/config"
 	"github.com/JeffioZ/idletrigger/internal/darkmode"
+	"github.com/JeffioZ/idletrigger/internal/devtools"
 	"github.com/JeffioZ/idletrigger/internal/dpi"
 	"github.com/JeffioZ/idletrigger/internal/i18n"
 	"github.com/JeffioZ/idletrigger/internal/inputdiag"
@@ -26,6 +27,7 @@ import (
 func main() {
 	dpi.Enable()
 	darkmode.Enable()
+	developerTools := devtools.Load()
 
 	isCLI := false
 	startMinimized := false
@@ -78,16 +80,19 @@ func main() {
 
 	// GUI mode
 	exePath, _ := os.Executable()
-	if os.Getenv("IDLETRIGGER_DEBUG_LOG") == "1" {
+	if developerTools.ForceLog {
 		cfg.LoggingEnabled = true
 	}
 	mylog.Init(cfg.LoggingEnabled, filepath.Dir(exePath))
 	defer mylog.Close()
 	mylog.Info("IdleTrigger starting: version=%s mode=GUI", version.Value)
-	if os.Getenv("IDLETRIGGER_DEBUG_LOG") == "1" {
-		mylog.Info("Debug logging enabled by IDLETRIGGER_DEBUG_LOG")
+	if developerTools.Enabled {
+		mylog.Info("Developer tools active: modes=%s idle_monitor_seconds=%d config_overrides=runtime_only", developerTools.Summary(), developerTools.IdleMonitorSeconds)
 	}
-	if stopInputDiagnostics := inputdiag.Start(); stopInputDiagnostics != nil {
+	for _, notice := range developerTools.Notices {
+		mylog.Info("%s", notice)
+	}
+	if stopInputDiagnostics := inputdiag.Start(developerTools.InputTrace); stopInputDiagnostics != nil {
 		defer stopInputDiagnostics()
 	}
 	if configLoadErr != nil {
@@ -97,7 +102,7 @@ func main() {
 	if startupDelay > 0 {
 		time.Sleep(time.Duration(startupDelay) * time.Second)
 	}
-	tray.Run(cfg, tray.Callbacks{ShowPopupOnStart: !startMinimized})
+	tray.Run(cfg, tray.Callbacks{ShowPopupOnStart: !startMinimized, DeveloperTools: developerTools})
 }
 
 func enableConsoleOutput() {
