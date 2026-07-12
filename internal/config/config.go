@@ -49,9 +49,6 @@ type Config struct {
 	// IdleIgnoreKeepaliveInput keeps IdleTrigger's own idle timer running when
 	// Windows reports stable low-frequency keepalive input. Default: false.
 	IdleIgnoreKeepaliveInput bool `toml:"idle_ignore_keepalive_input"`
-	// IdleIgnorePeriodicInput is accepted for compatibility with development
-	// builds that used this temporary name. It is not rendered back to TOML.
-	IdleIgnorePeriodicInput bool `toml:"idle_ignore_periodic_input"`
 
 	// NoSleepEnabled prevents the system from sleeping automatically.
 	NoSleepEnabled bool `toml:"nosleep_enabled"`
@@ -228,9 +225,6 @@ func NormalizeConfig(cfg Config) Config {
 	}
 	if cfg.IdleWarningSeconds < 0 || cfg.IdleWarningSeconds > 3600 {
 		cfg.IdleWarningSeconds = d.IdleWarningSeconds
-	}
-	if cfg.IdleIgnorePeriodicInput {
-		cfg.IdleIgnoreKeepaliveInput = true
 	}
 	if cfg.NoSleepBatteryThreshold < 0 || cfg.NoSleepBatteryThreshold > 100 {
 		cfg.NoSleepBatteryThreshold = d.NoSleepBatteryThreshold

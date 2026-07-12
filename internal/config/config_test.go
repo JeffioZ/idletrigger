@@ -245,34 +245,6 @@ func TestLoadFromRefreshesExistingPlainConfig(t *testing.T) {
 	}
 }
 
-func TestLoadFromMigratesTemporaryPeriodicInputName(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "IdleTrigger.toml")
-	plain := strings.Join([]string{
-		"idle_timeout_minutes = 5",
-		"idle_ignore_periodic_input = true",
-	}, "\n")
-	if err := os.WriteFile(path, []byte(plain), 0600); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg, err := loadFrom(path)
-	if err != nil {
-		t.Fatalf("loadFrom: %v", err)
-	}
-	if !cfg.IdleIgnoreKeepaliveInput {
-		t.Fatalf("temporary periodic input field was not migrated: %+v", cfg)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(data)
-	if !strings.Contains(text, "idle_ignore_keepalive_input = true") ||
-		strings.Contains(text, "idle_ignore_periodic_input =") {
-		t.Fatalf("migrated config should render only the keepalive field:\n%s", text)
-	}
-}
-
 func TestLoadFromKeepsMalformedConfig(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "IdleTrigger.toml")
 	broken := []byte("idle_timeout_minutes = [")
