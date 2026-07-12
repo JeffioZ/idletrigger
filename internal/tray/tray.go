@@ -47,6 +47,8 @@ type trayState struct {
 	hotkeyMgr      *hotkey.Manager
 	procWatch      *processwatcher.Watcher
 	themeSched     *themeswitch.Scheduler
+	batteryStop    chan struct{}
+	batteryDone    chan struct{}
 	processNoSleep bool
 	batteryBlocked bool
 	trayThemeDark  bool
@@ -125,7 +127,7 @@ func Run(cfg config.Config, cbs Callbacks) {
 				mylog.Info("IPC server stopped: %v", err)
 			}
 		}()
-		go s.batteryLoop()
+		s.syncBatteryLoop()
 		go s.watchConfig()
 		if cbs.ShowPopupOnStart {
 			systray.Post(s.showPopup)
@@ -143,6 +145,7 @@ func Run(cfg config.Config, cbs Callbacks) {
 			s.stopHotkeys()
 			s.stopProcessWatcher()
 			s.stopThemeScheduler()
+			s.stopBatteryLoop()
 			nosleep.Disable()
 			return ""
 		})
@@ -443,6 +446,7 @@ func (s *trayState) stopMonitor() {
 }
 
 func (s *trayState) reconcileRuntime() {
+	s.syncBatteryLoop()
 	wantsNoSleep := noSleepRequested(s.cfg, s.processNoSleep)
 	mylog.Info("Runtime reconcile: nosleep_enabled=%v process_watch_enabled=%v process_list_count=%d process_match=%v wants_nosleep=%v battery_blocked=%v idle_timeout_min=%d monitor_running=%v",
 		s.cfg.NoSleepEnabled, s.cfg.ProcessWatchEnabled, len(effectiveProcessWatchList(s.cfg)), s.processNoSleep, wantsNoSleep, s.batteryBlocked, s.cfg.IdleTimeoutMinutes, s.mon != nil)
@@ -621,15 +625,54 @@ func effectiveProcessWatchList(cfg config.Config) []string {
 
 // ---- battery awareness ------------------------------------------------
 
+// syncBatteryLoop keeps the periodic battery poll dormant when neither
+// battery-aware feature is enabled. Windows power broadcasts still deliver
+// immediate changes; this loop catches battery-percentage threshold crossings.
+func (s *trayState) syncBatteryLoop() {
+	if s.cfg.NoSleepEnabled || s.cfg.ThemeSwitchEnabled {
+		if s.batteryStop != nil {
+			return
+		}
+		s.batteryStop = make(chan struct{})
+		s.batteryDone = make(chan struct{})
+		go s.batteryLoop(s.batteryStop, s.batteryDone)
+		return
+	}
+	s.stopBatteryLoop()
+}
+
+func (s *trayState) stopBatteryLoop() {
+	if s.batteryStop == nil {
+		return
+	}
+	close(s.batteryStop)
+	<-s.batteryDone
+	s.batteryStop = nil
+	s.batteryDone = nil
+}
+
 // batteryLoop periodically checks power state and auto-disables NoSleep
 // when the system switches to battery or drops below the configured threshold.
 // It also nudges the theme scheduler so dark-on-battery reacts within a few
 // seconds instead of waiting for the regular theme schedule tick.
-func (s *trayState) batteryLoop() {
+func (s *trayState) batteryLoop(stopCh <-chan struct{}, doneCh chan<- struct{}) {
 	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
-	for range ticker.C {
-		s.post(func() { s.refreshBatteryPolicy() })
+	defer close(doneCh)
+	for {
+		select {
+		case <-stopCh:
+			return
+		case <-ticker.C:
+			select {
+			case s.stateCh <- stateRequest{fn: func() string {
+				s.refreshBatteryPolicy()
+				return ""
+			}}:
+			case <-stopCh:
+				return
+			}
+		}
 	}
 }
 
@@ -1099,6 +1142,7 @@ func (s *trayState) handlePopupAction(action popup.Action, value int) {
 		} else {
 			s.stopThemeScheduler()
 		}
+		s.syncBatteryLoop()
 		s.updateIcon()
 		s.refreshPopupThemeSchedule()
 		s.saveConfig()

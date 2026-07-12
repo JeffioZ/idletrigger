@@ -33,6 +33,29 @@ func TestNoSleepRequestSources(t *testing.T) {
 	}
 }
 
+func TestBatteryLoopIsLazy(t *testing.T) {
+	s := &trayState{
+		cfg:     config.DefaultConfig(),
+		stateCh: make(chan stateRequest, 1),
+	}
+	s.syncBatteryLoop()
+	if s.batteryStop != nil {
+		t.Fatal("battery loop started with all battery-aware features disabled")
+	}
+
+	s.cfg.NoSleepEnabled = true
+	s.syncBatteryLoop()
+	if s.batteryStop == nil {
+		t.Fatal("battery loop did not start for Stay Awake")
+	}
+
+	s.cfg.NoSleepEnabled = false
+	s.syncBatteryLoop()
+	if s.batteryStop != nil {
+		t.Fatal("battery loop did not stop after Stay Awake was disabled")
+	}
+}
+
 func TestBatteryPolicyBlocksAndRestores(t *testing.T) {
 	cfg := config.DefaultConfig()
 	battery := power.Status{Battery: true, Percent: 80, Valid: true}
