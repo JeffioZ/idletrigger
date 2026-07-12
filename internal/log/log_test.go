@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestInfoWritesSessionLines(t *testing.T) {
@@ -35,6 +36,15 @@ func TestDisabledLoggingDoesNotCreateFile(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(dir, "IdleTrigger.log")); !os.IsNotExist(err) {
 		t.Fatalf("disabled logging created file or returned unexpected error: %v", err)
+	}
+}
+
+func BenchmarkInfoDisabled(b *testing.B) {
+	Init(false, b.TempDir())
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		Info("idle monitor sample: idle=%s threshold=%s tick=%d", time.Second, time.Minute, i)
 	}
 }
 

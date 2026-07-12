@@ -76,16 +76,12 @@ func Close() {
 
 // Info writes a timestamped informational message.
 func Info(format string, args ...interface{}) {
-	write(fmt.Sprintf(format, args...))
-}
-
-func write(msg string) {
 	mu.Lock()
 	defer mu.Unlock()
 	if !on || w == nil {
 		return
 	}
-	writeLocked(msg)
+	writeLocked(fmt.Sprintf(format, args...))
 }
 
 func writeLocked(msg string) {
