@@ -61,9 +61,10 @@ go build -trimpath "-ldflags=$ldflags" -o dist/IdleTrigger-x86.exe .
 
 ## 重新生成资源
 
-更新 `assets/app.ico` 后，先生成相应的托盘图标变体：
+主图标与两套托盘图标采用独立图稿。更新时先生成主 ICO，再生成专门适配任务栏的托盘变体：
 
 ```powershell
+go run ./scripts/gen_app_icon/main.go assets
 go run ./scripts/gen_tray_theme_icons assets
 ```
 

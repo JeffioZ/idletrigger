@@ -61,9 +61,11 @@ The release workflow runs formatting, module, test, and vet checks, produces bot
 
 ## Regenerate Resources
 
-When `assets/app.ico` changes, generate matching tray icon variants first:
+The application icon and the two taskbar icons have separate artwork. Regenerate
+the application ICO first, then the purpose-built taskbar variants:
 
 ```powershell
+go run ./scripts/gen_app_icon/main.go assets
 go run ./scripts/gen_tray_theme_icons assets
 ```
 
