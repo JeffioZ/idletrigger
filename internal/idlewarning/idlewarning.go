@@ -13,6 +13,7 @@ import (
 	mylog "github.com/JeffioZ/idletrigger/internal/log"
 	"github.com/JeffioZ/idletrigger/internal/systray"
 	"github.com/JeffioZ/idletrigger/internal/themeswitch"
+	"github.com/JeffioZ/idletrigger/internal/uicolors"
 	"github.com/JeffioZ/idletrigger/internal/uifont"
 )
 
@@ -53,7 +54,6 @@ const (
 	wmMouseLeave     = 0x02A3
 	wmDpiChanged     = 0x02E0
 	wsPopup          = 0x80000000
-	wsBorder         = 0x00800000
 	wsExTool         = 0x00000080
 	wsExTopmost      = 0x00000008
 	wsExNoActivate   = 0x08000000
@@ -68,6 +68,9 @@ const (
 	transparent      = 1
 	tmeLeave         = 0x00000002
 	warningMinHeight = 92
+	// Replaces the former WS_BORDER non-client edge. Keeping this one physical
+	// pixel inside the client rect preserves the old content and hit-test area.
+	warningBorderInset = 1
 )
 
 var (
@@ -91,6 +94,7 @@ var (
 	pInvalidateRect    = user32.NewProc("InvalidateRect")
 	pTrackMouseEvent   = user32.NewProc("TrackMouseEvent")
 	pFillRect          = user32.NewProc("FillRect")
+	pFrameRect         = user32.NewProc("FrameRect")
 	pDrawText          = user32.NewProc("DrawTextW")
 	pSetTextColor      = gdi32.NewProc("SetTextColor")
 	pSetBkMode         = gdi32.NewProc("SetBkMode")
@@ -218,7 +222,7 @@ func showNow(titleText, bodyText string, seq uint64) {
 	pGetCursorPos.Call(uintptr(unsafe.Pointer(&cursor)))
 	hwnd, _, _ := pCreateWindowEx.Call(
 		wsExTool|wsExTopmost|wsExNoActivate,
-		uintptr(unsafe.Pointer(class)), uintptr(unsafe.Pointer(caption)), wsPopup|wsBorder,
+		uintptr(unsafe.Pointer(class)), uintptr(unsafe.Pointer(caption)), wsPopup,
 		uintptr(cursor.X), uintptr(cursor.Y), 1, 1, 0, 0, 0, 0,
 	)
 	if hwnd == 0 {
@@ -429,17 +433,14 @@ func paint(hwnd windows.Handle) {
 	var client rect
 	pGetClientRect.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&client)))
 	dark := themeswitch.Current() == themeswitch.ModeDark
-	background, foreground, muted, accent := rgb(246, 248, 250), rgb(25, 30, 36), rgb(99, 108, 118), rgb(0, 111, 177)
-	closeForeground, closeHover, closePressed := rgb(99, 108, 118), rgb(255, 239, 240), rgb(255, 207, 211)
-	closeActiveText := rgb(190, 24, 34)
-	if dark {
-		background, foreground, muted, accent = rgb(31, 34, 38), rgb(244, 247, 250), rgb(174, 182, 191), rgb(47, 151, 208)
-		closeForeground, closeHover, closePressed = rgb(174, 182, 191), rgb(68, 43, 49), rgb(88, 50, 57)
-		closeActiveText = rgb(255, 162, 168)
-	}
-	brush := makeBrush(background)
+	palette := uicolors.ForTheme(dark)
+	brush := makeBrush(palette.Background)
 	defer pDeleteObject.Call(uintptr(brush))
 	pFillRect.Call(dc, uintptr(unsafe.Pointer(&client)), uintptr(brush))
+	borderBrush := makeBrush(palette.Border)
+	pFrameRect.Call(dc, uintptr(unsafe.Pointer(&client)), uintptr(borderBrush))
+	pDeleteObject.Call(uintptr(borderBrush))
+	content := warningContentRect(client)
 	sc := func(v int32) int32 { return scaleForWindow(hwnd, v) }
 	margin := sc(16)
 	titleTop, titleBottom := sc(15), sc(42)
@@ -450,36 +451,44 @@ func paint(hwnd windows.Handle) {
 	// its layout rectangle. Compensate for that GDI ascent so the accent aligns
 	// with the title the user actually sees, rather than only with its bounds.
 	accentTop := titleTop + (titleBottom-titleTop-accentHeight)/2 - sc(3)
-	accentRect := rect{Left: margin, Top: accentTop, Right: margin + sc(3), Bottom: accentTop + accentHeight}
-	accentBrush := makeBrush(accent)
+	accentRect := rect{Left: content.Left + margin, Top: content.Top + accentTop, Right: content.Left + margin + sc(3), Bottom: content.Top + accentTop + accentHeight}
+	accentBrush := makeBrush(palette.Accent)
 	pFillRect.Call(dc, uintptr(unsafe.Pointer(&accentRect)), uintptr(accentBrush))
 	pDeleteObject.Call(uintptr(accentBrush))
 	pSetBkMode.Call(dc, transparent)
 	close := closeRect(hwnd)
-	closeText := closeForeground
+	closeText := palette.MutedText
 	if closeHot {
-		fill := closeHover
+		fill := palette.DangerHover
 		if closeDown {
-			fill = closePressed
+			fill = palette.DangerPressed
 		}
 		closeBrush := makeBrush(fill)
 		pFillRect.Call(dc, uintptr(unsafe.Pointer(&close)), uintptr(closeBrush))
 		pDeleteObject.Call(uintptr(closeBrush))
-		closeText = closeActiveText
+		closeText = palette.DangerText
 	}
-	pSetTextColor.Call(dc, uintptr(foreground))
-	drawText(dc, title, rect{Left: margin + sc(10), Top: titleTop, Right: close.Left - sc(6), Bottom: titleBottom}, titleFont, dtLeft)
-	pSetTextColor.Call(dc, uintptr(muted))
-	drawText(dc, body, rect{Left: margin + sc(10), Top: sc(47), Right: client.Right - margin, Bottom: client.Bottom - sc(14)}, bodyFont, dtLeft|dtWordBreak)
+	pSetTextColor.Call(dc, uintptr(palette.Text))
+	drawText(dc, title, rect{Left: content.Left + margin + sc(10), Top: content.Top + titleTop, Right: close.Left - sc(6), Bottom: content.Top + titleBottom}, titleFont, dtLeft)
+	pSetTextColor.Call(dc, uintptr(palette.MutedText))
+	drawText(dc, body, rect{Left: content.Left + margin + sc(10), Top: content.Top + sc(47), Right: content.Right - margin, Bottom: content.Bottom - sc(14)}, bodyFont, dtLeft|dtWordBreak)
 	drawCloseGlyph(dc, close, closeText)
 }
 
 func closeRect(hwnd windows.Handle) rect {
 	var client rect
 	pGetClientRect.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&client)))
+	client = warningContentRect(client)
 	size := scaleForWindow(hwnd, 28)
 	margin := scaleForWindow(hwnd, 8)
 	return rect{Left: client.Right - margin - size, Top: margin, Right: client.Right - margin, Bottom: margin + size}
+}
+
+func warningContentRect(client rect) rect {
+	if client.Right-client.Left <= 2*warningBorderInset || client.Bottom-client.Top <= 2*warningBorderInset {
+		return client
+	}
+	return rect{Left: client.Left + warningBorderInset, Top: client.Top + warningBorderInset, Right: client.Right - warningBorderInset, Bottom: client.Bottom - warningBorderInset}
 }
 
 func pointInRect(point point, bounds rect) bool {
@@ -531,5 +540,3 @@ func makeBrush(color uint32) windows.Handle {
 	result, _, _ := pCreateBrush.Call(uintptr(color))
 	return windows.Handle(result)
 }
-
-func rgb(r, g, b byte) uint32 { return uint32(r) | uint32(g)<<8 | uint32(b)<<16 }

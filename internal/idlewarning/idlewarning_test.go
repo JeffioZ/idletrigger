@@ -28,3 +28,11 @@ func TestCloseGlyphMetricsScaleWithoutFonts(t *testing.T) {
 		t.Fatalf("small glyph stroke = %d", stroke)
 	}
 }
+
+func TestWarningContentRectPreservesFormerBorderInset(t *testing.T) {
+	got := warningContentRect(rect{Left: 0, Top: 0, Right: 348, Bottom: 92})
+	want := rect{Left: 1, Top: 1, Right: 347, Bottom: 91}
+	if got != want {
+		t.Fatalf("warningContentRect() = %#v, want %#v", got, want)
+	}
+}

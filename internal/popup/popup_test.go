@@ -66,12 +66,12 @@ func TestButtonRoleMappingCoversEveryPanelAction(t *testing.T) {
 	}
 }
 
-func TestFocusOutlineKeepsSelectedButtonsContrasted(t *testing.T) {
-	if focusOutlineUsesSurface(false) {
-		t.Fatal("inactive button should keep the accent focus outline")
+func TestFocusOutlineKeepsSelectedButtonsDistinct(t *testing.T) {
+	if focusOutlineUsesLightOnAccent(false) {
+		t.Fatal("inactive button should use the standard focus outline")
 	}
-	if !focusOutlineUsesSurface(true) {
-		t.Fatal("active button should use the surface focus outline")
+	if !focusOutlineUsesLightOnAccent(true) {
+		t.Fatal("active button should use the dedicated selected-control focus outline")
 	}
 }
 

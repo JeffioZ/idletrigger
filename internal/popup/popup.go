@@ -13,6 +13,7 @@ import (
 	"github.com/JeffioZ/idletrigger/internal/idlewarning"
 	mylog "github.com/JeffioZ/idletrigger/internal/log"
 	"github.com/JeffioZ/idletrigger/internal/themeswitch"
+	"github.com/JeffioZ/idletrigger/internal/uicolors"
 	"github.com/JeffioZ/idletrigger/internal/uifont"
 )
 
@@ -297,11 +298,6 @@ var (
 	buttonProc = windows.NewCallback(buttonWndProc)
 )
 
-type colors struct {
-	background, surface, hover, border, accent, accentHover, pressed, text, mutedText, accentText, disabled uint32
-	danger, dangerHover, dangerPressed, dangerText                                                          uint32
-}
-
 type staticKind uint8
 
 const (
@@ -333,6 +329,8 @@ type panel struct {
 	accentHoverBrush                windows.Handle
 	pressedBrush                    windows.Handle
 	disabledBrush                   windows.Handle
+	focusBrush                      windows.Handle
+	focusOnAccentBrush              windows.Handle
 	dangerBrush                     windows.Handle
 	dangerHoverBrush                windows.Handle
 	dangerPressedBrush              windows.Handle
@@ -346,7 +344,7 @@ type panel struct {
 	owner                           windows.Handle
 	largeIcon, smallIcon            windows.Handle
 	tooltip                         windows.Handle
-	palette                         colors
+	palette                         uicolors.Palette
 	fontChoice                      uifont.Choice
 	controls                        map[uint16]windows.Handle
 	labels                          map[uint16]string
@@ -1051,7 +1049,7 @@ func (p *panel) visualState(id uint16) buttonVisualState {
 	return visualStateForButton(id, p.toggles[id], p.selected[id], p.disabled[id])
 }
 
-func focusOutlineUsesSurface(active bool) bool { return active }
+func focusOutlineUsesLightOnAccent(active bool) bool { return active }
 
 func actionID(value string) uint16 {
 	for i, action := range []string{"sleep", "hibernate", "shutdown", "lock"} {
@@ -1209,12 +1207,12 @@ func wndProc(hwnd windows.Handle, msg uint32, wp, lp uintptr) uintptr {
 			p.fill(windows.Handle(wp), p.backgroundBrush)
 			return 1
 		case wmCtlColorStatic:
-			pSetTextColor.Call(wp, uintptr(p.palette.text))
+			pSetTextColor.Call(wp, uintptr(p.palette.Text))
 			pSetBkMode.Call(wp, transparent)
 			return uintptr(p.backgroundBrush)
 		case wmCtlColorEdit, wmCtlColorListBox:
-			pSetTextColor.Call(wp, uintptr(p.palette.text))
-			pSetBkColor.Call(wp, uintptr(p.palette.surface))
+			pSetTextColor.Call(wp, uintptr(p.palette.Text))
+			pSetBkColor.Call(wp, uintptr(p.palette.Surface))
 			return uintptr(p.surfaceBrush)
 		case wmDrawItem:
 			if lp != 0 {
@@ -1411,23 +1409,21 @@ func (p *panel) handleTimeoutSelection() {
 
 func (p *panel) refreshTheme(invalidate bool) {
 	dark := themeswitch.Current() == themeswitch.ModeDark
-	if dark {
-		p.palette = colors{background: rgb(31, 34, 38), surface: rgb(43, 48, 54), hover: rgb(54, 61, 69), border: rgb(76, 85, 95), accent: rgb(20, 132, 194), accentHover: rgb(47, 151, 208), pressed: rgb(11, 107, 164), text: rgb(244, 247, 250), mutedText: rgb(174, 182, 191), accentText: rgb(255, 255, 255), disabled: rgb(40, 44, 49), danger: rgb(88, 34, 39), dangerHover: rgb(116, 43, 50), dangerPressed: rgb(72, 28, 33), dangerText: rgb(255, 162, 168)}
-	} else {
-		p.palette = colors{background: rgb(246, 248, 250), surface: rgb(255, 255, 255), hover: rgb(235, 243, 249), border: rgb(202, 211, 220), accent: rgb(0, 111, 177), accentHover: rgb(0, 126, 198), pressed: rgb(0, 91, 151), text: rgb(25, 30, 36), mutedText: rgb(99, 108, 118), accentText: rgb(255, 255, 255), disabled: rgb(238, 242, 245), danger: rgb(255, 239, 240), dangerHover: rgb(255, 225, 228), dangerPressed: rgb(255, 207, 211), dangerText: rgb(190, 24, 34)}
-	}
+	p.palette = uicolors.ForTheme(dark)
 	p.releaseBrushes()
-	p.backgroundBrush = makeBrush(p.palette.background)
-	p.surfaceBrush = makeBrush(p.palette.surface)
-	p.hoverBrush = makeBrush(p.palette.hover)
-	p.borderBrush = makeBrush(p.palette.border)
-	p.accentBrush = makeBrush(p.palette.accent)
-	p.accentHoverBrush = makeBrush(p.palette.accentHover)
-	p.pressedBrush = makeBrush(p.palette.pressed)
-	p.disabledBrush = makeBrush(p.palette.disabled)
-	p.dangerBrush = makeBrush(p.palette.danger)
-	p.dangerHoverBrush = makeBrush(p.palette.dangerHover)
-	p.dangerPressedBrush = makeBrush(p.palette.dangerPressed)
+	p.backgroundBrush = makeBrush(p.palette.Background)
+	p.surfaceBrush = makeBrush(p.palette.Surface)
+	p.hoverBrush = makeBrush(p.palette.Hover)
+	p.borderBrush = makeBrush(p.palette.Border)
+	p.accentBrush = makeBrush(p.palette.Accent)
+	p.accentHoverBrush = makeBrush(p.palette.AccentHover)
+	p.pressedBrush = makeBrush(p.palette.Pressed)
+	p.disabledBrush = makeBrush(p.palette.Disabled)
+	p.focusBrush = makeBrush(p.palette.Focus)
+	p.focusOnAccentBrush = makeBrush(p.palette.FocusOnAccent)
+	p.dangerBrush = makeBrush(p.palette.Danger)
+	p.dangerHoverBrush = makeBrush(p.palette.DangerHover)
+	p.dangerPressedBrush = makeBrush(p.palette.DangerPressed)
 	p.applyFrameTheme(dark)
 	p.applyComboTheme(p.controls[idIdleTimeout], dark)
 	p.applyTooltipTheme(dark)
@@ -1464,8 +1460,8 @@ func (p *panel) applyTooltipTheme(dark bool) {
 	} else {
 		pSetWindowTheme.Call(uintptr(p.tooltip), 0, 0)
 	}
-	pSendMessage.Call(uintptr(p.tooltip), ttmSetTipBkColor, uintptr(p.palette.surface), 0)
-	pSendMessage.Call(uintptr(p.tooltip), ttmSetTipTextColor, uintptr(p.palette.text), 0)
+	pSendMessage.Call(uintptr(p.tooltip), ttmSetTipBkColor, uintptr(p.palette.Surface), 0)
+	pSendMessage.Call(uintptr(p.tooltip), ttmSetTipTextColor, uintptr(p.palette.Text), 0)
 }
 
 func (p *panel) applyFrameTheme(dark bool) {
@@ -1504,35 +1500,35 @@ func (p *panel) drawButton(item *drawItem) {
 	state := p.visualState(id)
 	selected := state.Active
 	brush := p.surfaceBrush
-	textColor := p.palette.text
+	textColor := p.palette.Text
 	if p.hoverID == id || item.ItemState&odsHotlight != 0 {
 		brush = p.hoverBrush
 	}
 	if id == idExit {
 		brush = p.dangerBrush
-		textColor = p.palette.dangerText
+		textColor = p.palette.DangerText
 		if p.hoverID == id || item.ItemState&odsHotlight != 0 {
 			brush = p.dangerHoverBrush
 		}
 	}
 	if selected {
 		brush = p.accentBrush
-		textColor = p.palette.accentText
+		textColor = p.palette.AccentText
 		if p.hoverID == id || item.ItemState&odsHotlight != 0 {
 			brush = p.accentHoverBrush
 		}
 	}
 	if item.ItemState&odsSelected != 0 {
 		brush = p.pressedBrush
-		textColor = p.palette.accentText
+		textColor = p.palette.AccentText
 		if id == idExit {
 			brush = p.dangerPressedBrush
-			textColor = p.palette.dangerText
+			textColor = p.palette.DangerText
 		}
 	}
 	if state.Disabled || item.ItemState&odsDisabled != 0 {
 		brush = p.disabledBrush
-		textColor = p.palette.mutedText
+		textColor = p.palette.MutedText
 	}
 	pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&item.Rect)), uintptr(brush))
 	pFrameRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&item.Rect)), uintptr(p.borderBrush))
@@ -1547,11 +1543,11 @@ func (p *panel) drawButton(item *drawItem) {
 		focus.Right -= inset
 		focus.Bottom -= inset
 		if focus.Left < focus.Right && focus.Top < focus.Bottom {
-			focusBrush := p.accentBrush
-			if focusOutlineUsesSurface(selected) {
-				// An accent outline disappears into an enabled/selected button.
-				// The surface color keeps focus equally visible in both themes.
-				focusBrush = p.surfaceBrush
+			focusBrush := p.focusBrush
+			if focusOutlineUsesLightOnAccent(selected) {
+				// Selected controls use a dedicated pale focus ring rather than their
+				// surface color, keeping keyboard focus independent from selection.
+				focusBrush = p.focusOnAccentBrush
 			}
 			pFrameRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&focus)), uintptr(focusBrush))
 		}
@@ -1572,10 +1568,10 @@ func (p *panel) drawButton(item *drawItem) {
 // arrow geometry, while this keeps its content on the panel's theme palette.
 func (p *panel) drawTimeoutChoice(item *drawItem) {
 	brush := p.surfaceBrush
-	textColor := p.palette.text
+	textColor := p.palette.Text
 	if item.ItemState&odsSelected != 0 && item.ItemState&odsComboBoxEdit == 0 {
 		brush = p.accentBrush
-		textColor = p.palette.accentText
+		textColor = p.palette.AccentText
 	}
 	pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&item.Rect)), uintptr(brush))
 
@@ -1621,7 +1617,7 @@ func (p *panel) drawStatic(item *drawItem) {
 		accent.Bottom = accent.Top + accentHeight
 		pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&accent)), uintptr(p.accentBrush))
 		bounds.Left += int32(p.sc(10))
-		pSetTextColor.Call(uintptr(item.HDC), uintptr(p.palette.text))
+		pSetTextColor.Call(uintptr(item.HDC), uintptr(p.palette.Text))
 		old, _, _ := pSelectObject.Call(uintptr(item.HDC), uintptr(p.sectionFont))
 		defer pSelectObject.Call(uintptr(item.HDC), old)
 
@@ -1637,7 +1633,7 @@ func (p *panel) drawStatic(item *drawItem) {
 			pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&separator)), uintptr(p.borderBrush))
 		}
 	} else {
-		pSetTextColor.Call(uintptr(item.HDC), uintptr(p.palette.mutedText))
+		pSetTextColor.Call(uintptr(item.HDC), uintptr(p.palette.MutedText))
 		old, _, _ := pSelectObject.Call(uintptr(item.HDC), uintptr(p.subtitleFont))
 		defer pSelectObject.Call(uintptr(item.HDC), old)
 	}
@@ -1662,7 +1658,7 @@ func (p *panel) fill(dc, brush windows.Handle) {
 	pFillRect.Call(uintptr(dc), uintptr(unsafe.Pointer(&r)), uintptr(brush))
 }
 func (p *panel) releaseBrushes() {
-	for _, brush := range []windows.Handle{p.backgroundBrush, p.surfaceBrush, p.hoverBrush, p.borderBrush, p.accentBrush, p.accentHoverBrush, p.pressedBrush, p.disabledBrush, p.dangerBrush, p.dangerHoverBrush, p.dangerPressedBrush} {
+	for _, brush := range []windows.Handle{p.backgroundBrush, p.surfaceBrush, p.hoverBrush, p.borderBrush, p.accentBrush, p.accentHoverBrush, p.pressedBrush, p.disabledBrush, p.focusBrush, p.focusOnAccentBrush, p.dangerBrush, p.dangerHoverBrush, p.dangerPressedBrush} {
 		if brush != 0 {
 			pDeleteObject.Call(uintptr(brush))
 		}
@@ -1675,11 +1671,12 @@ func (p *panel) releaseBrushes() {
 	p.accentHoverBrush = 0
 	p.pressedBrush = 0
 	p.disabledBrush = 0
+	p.focusBrush = 0
+	p.focusOnAccentBrush = 0
 	p.dangerBrush = 0
 	p.dangerHoverBrush = 0
 	p.dangerPressedBrush = 0
 }
-func rgb(r, g, b byte) uint32 { return uint32(r) | uint32(g)<<8 | uint32(b)<<16 }
 func makeBrush(color uint32) windows.Handle {
 	result, _, _ := pCreateBrush.Call(uintptr(color))
 	return windows.Handle(result)
