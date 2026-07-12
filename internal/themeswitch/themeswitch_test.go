@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/sys/windows"
+
 	mylog "github.com/JeffioZ/idletrigger/internal/log"
 )
 
@@ -68,23 +70,49 @@ func TestSchedulerFallsBackToFixedTimeWhenSunriseUnavailable(t *testing.T) {
 	}
 }
 
-func TestLocationFromTimezoneFallsBackToUTCOffset(t *testing.T) {
-	info := locationFromTimezone("Unknown Localized Time", -480, true)
-	if info.Source != LocationSourceUTCOffset {
-		t.Fatalf("source = %s, want %s", info.Source, LocationSourceUTCOffset)
+func TestLocationFromTimezoneUsesEffectiveWindowsBias(t *testing.T) {
+	tests := []struct {
+		name                             string
+		bias, standardBias, daylightBias int32
+		state                            uint32
+		wantLongitude                    float64
+	}{
+		{"standard time", 300, 15, -60, windows.TIME_ZONE_ID_STANDARD, -78.75},
+		{"daylight time", 300, 0, -60, windows.TIME_ZONE_ID_DAYLIGHT, -60},
+		{"no daylight saving", -480, 15, -45, windows.TIME_ZONE_ID_UNKNOWN, 120},
 	}
-	if info.Longitude != 120 {
-		t.Fatalf("longitude = %v, want 120", info.Longitude)
-	}
-	if info.Latitude != 35 {
-		t.Fatalf("latitude = %v, want 35", info.Latitude)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			info := locationFromTimezone("Unknown Localized Time", tt.bias, tt.standardBias, tt.daylightBias, tt.state)
+			if info.Source != LocationSourceUTCOffset {
+				t.Fatalf("source = %s, want %s", info.Source, LocationSourceUTCOffset)
+			}
+			if info.Longitude != tt.wantLongitude {
+				t.Fatalf("longitude = %v, want %v", info.Longitude, tt.wantLongitude)
+			}
+			if info.Latitude != 35 {
+				t.Fatalf("latitude = %v, want 35", info.Latitude)
+			}
+		})
 	}
 }
 
-func TestLocationFromTimezoneUsesDefaultOnlyWhenTimezoneInvalid(t *testing.T) {
-	info := locationFromTimezone("Unknown Localized Time", 0, false)
-	if info.Source != LocationSourceDefault {
-		t.Fatalf("source = %s, want %s", info.Source, LocationSourceDefault)
+func TestLocationFromTimezoneUsesDefaultForInvalidOrUnknownState(t *testing.T) {
+	for _, state := range []uint32{timeZoneIDInvalid, 99} {
+		info := locationFromTimezone("Unknown Localized Time", -480, 0, -60, state)
+		if info.Source != LocationSourceDefault {
+			t.Fatalf("state %d: source = %s, want %s", state, info.Source, LocationSourceDefault)
+		}
+	}
+}
+
+func TestLocationFromTimezonePrefersKnownTimezoneRegardlessOfState(t *testing.T) {
+	info := locationFromTimezone("China Standard Time", 300, 0, -60, timeZoneIDInvalid)
+	if info.Source != LocationSourceTimezone {
+		t.Fatalf("source = %s, want %s", info.Source, LocationSourceTimezone)
+	}
+	if info.Latitude != 39.9 || info.Longitude != 116.4 {
+		t.Fatalf("coordinates = %.1f/%.1f, want 39.9/116.4", info.Latitude, info.Longitude)
 	}
 }
 

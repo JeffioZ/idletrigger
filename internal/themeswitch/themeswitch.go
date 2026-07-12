@@ -74,17 +74,21 @@ func AutoLocationInfo(useIPLocation bool, blockIPLookup bool) LocationInfo {
 	var tz tzInfo
 	result, _, _ := proc.Call(uintptr(unsafe.Pointer(&tz)))
 	name := windows.UTF16ToString(tz.StandardName[:])
-	return logAutoLocationInfo(locationFromTimezone(name, tz.Bias+tz.StandardBias, result != 0xFFFFFFFF))
+	return logAutoLocationInfo(locationFromTimezone(name, tz.Bias, tz.StandardBias, tz.DaylightBias, uint32(result)))
 }
 
-func locationFromTimezone(name string, effectiveBias int32, valid bool) LocationInfo {
+const timeZoneIDInvalid = ^uint32(0)
+
+func locationFromTimezone(name string, bias, standardBias, daylightBias int32, state uint32) LocationInfo {
 	if coords, ok := timezoneLookup[name]; ok {
 		return LocationInfo{Latitude: coords[0], Longitude: coords[1], Source: LocationSourceTimezone, TimezoneName: name}
 	}
-	if valid {
+	if effectiveBias, ok := effectiveTimezoneBias(bias, standardBias, daylightBias, state); ok {
 		// Windows Bias is minutes west of UTC. Convert the effective UTC offset
 		// to a rough longitude so sunrise/sunset is still locally plausible when
-		// the localized timezone name is not in the lookup table.
+		// the timezone name is not in the lookup table. GetTimeZoneInformation
+		// reports whether the current bias is standard, daylight, or a zone with
+		// no daylight-saving transition; unrecognized and invalid states do not guess.
 		offsetMinutes := -effectiveBias
 		lon := float64(offsetMinutes) / 4
 		if lon < -180 {
@@ -95,6 +99,22 @@ func locationFromTimezone(name string, effectiveBias int32, valid bool) Location
 		return LocationInfo{Latitude: 35, Longitude: lon, Source: LocationSourceUTCOffset, TimezoneName: name}
 	}
 	return LocationInfo{Latitude: 39.9, Longitude: 116.4, Source: LocationSourceDefault}
+}
+
+func effectiveTimezoneBias(bias, standardBias, daylightBias int32, state uint32) (int32, bool) {
+	switch state {
+	case windows.TIME_ZONE_ID_STANDARD:
+		return bias + standardBias, true
+	case windows.TIME_ZONE_ID_DAYLIGHT:
+		return bias + daylightBias, true
+	case windows.TIME_ZONE_ID_UNKNOWN:
+		// UNKNOWN explicitly means this timezone has no daylight-saving period.
+		return bias, true
+	case timeZoneIDInvalid:
+		return 0, false
+	default:
+		return 0, false
+	}
 }
 
 var lastAutoLocationLog atomic.Value
