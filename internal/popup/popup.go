@@ -279,7 +279,6 @@ var (
 	pReleaseDC             = user32.NewProc("ReleaseDC")
 	pTrackMouseEvent       = user32.NewProc("TrackMouseEvent")
 	pDeleteObject          = gdi32.NewProc("DeleteObject")
-	pCreateFont            = gdi32.NewProc("CreateFontIndirectW")
 	pCreateBrush           = gdi32.NewProc("CreateSolidBrush")
 	pSetTextColor          = gdi32.NewProc("SetTextColor")
 	pSetBkColor            = gdi32.NewProc("SetBkColor")
