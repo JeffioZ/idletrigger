@@ -69,11 +69,10 @@ jobs:
 
             ### Highlights
 
-            - Hardened idle monitoring with diagnostics for Windows last-input resets and optional fixed-interval keepalive filtering.
-            - Added `IdleTrigger diagnostics idle [--watch]` for inspecting idle timing and input-reset behavior.
-            - Clarified Stay Awake process-watch semantics: watched processes now limit an enabled Stay Awake session instead of enabling it by themselves.
-            - Improved native control-panel keyboard accessibility, tooltip state text, and idle-warning layout.
-            - Reduced debug-log overhead when logging is disabled and expanded diagnostics around keepalive decisions.
+            - Redesigned the Windows application and tray icon assets with refreshed light/dark variants.
+            - Added a repository social preview image and documented the icon generation workflow.
+            - Reduced background overhead by polling battery state only when Stay Awake or theme rules need it.
+            - Kept the native single-EXE distribution model and regenerated Windows version resources for this release.
 
             Download the native 64-bit build `IdleTrigger-x64.exe` (recommended) or
             the 32-bit compatibility build `IdleTrigger-x86.exe` — no installation needed.
@@ -84,11 +83,10 @@ jobs:
 
             ### 更新重点
 
-            - 强化空闲监测，增加 Windows 最后输入重置诊断，并支持可选过滤固定间隔保活输入。
-            - 新增 `IdleTrigger diagnostics idle [--watch]`，用于查看空闲计时与输入重置行为。
-            - 明确保持唤醒的进程监听语义：指定进程只限制已开启的保持唤醒，不会单独启用保持唤醒。
-            - 优化原生控制浮层的键盘可访问性、tooltip 状态说明和空闲预警布局。
-            - 日志关闭时减少调试格式化开销，并补充保活输入判定诊断。
+            - 重新设计 Windows 应用图标和托盘图标，并刷新深浅色托盘变体。
+            - 新增仓库社交预览图，并补充图标生成流程说明。
+            - 仅在保持唤醒或主题规则需要时轮询电池状态，降低后台开销。
+            - 保持单 EXE 原生分发方式，并为本次发布重新生成 Windows 版本资源。
 
             下载原生 64 位版本 `IdleTrigger-x64.exe`（推荐），或下载 32 位兼容版本
             `IdleTrigger-x86.exe`。无需安装，直接运行即可。
