@@ -9,10 +9,10 @@ IdleTrigger is a single executable with no runtime dependencies beyond Windows s
 ## What It Does
 
 - **Idle monitor**: after a chosen period without keyboard or mouse input, lock, sleep, hibernate, or shut down the PC.
-- **Pre-action warning**: show a non-activating warning before an idle action; mouse or keyboard input, or closing the warning, cancels the pending action.
+- **Pre-action reminder**: show a non-activating reminder before an idle action; mouse or keyboard input, or closing the reminder, cancels the pending action.
 - **Stay Awake**: prevent automatic sleep, optionally keeping the display on.
 - **Day/Night theme**: switch Windows themes at fixed times or from calculated sunrise and sunset; optionally use dark mode on battery.
-- **Quick actions**: lock, sleep, hibernate, shut down, or restart from the control panel or command line.
+- **System controls**: lock, sleep, hibernate, shut down, or restart from the control panel or command line.
 - **Automation**: control a running tray instance through a per-session named pipe.
 
 ## Requirements
@@ -30,12 +30,12 @@ Windows 7 is intentionally not supported by the main build. See [BUILD.md](BUILD
 3. Left-click the tray icon to open or close the control panel. Right-click it for the native **Open** and **Exit** menu.
 4. Use the panel for common settings; edit `IdleTrigger.toml` beside the EXE for advanced settings.
 
-The control panel follows Windows light/dark mode, responds to DPI changes, and closes when it loses focus. Tooltips explain each available option.
+The control panel follows Windows light/dark mode, responds to DPI changes, and stays open until you close it or left-click the tray icon again. Tooltips explain each available option.
 
 ## Using the Control Panel
 
 - Blue controls are enabled or selected; neutral controls are available but not selected. **Exit** is red because it stops all IdleTrigger features.
-- **Quick Actions** run immediately. Save your work before choosing Sleep, Hibernate, Shut Down, or Restart.
+- Hover **System Controls** or **Language Settings** to open their menus. **System Controls** run immediately; save your work before choosing Sleep, Hibernate, Shut Down, or Restart.
 - Use the mouse or `Tab` / `Shift+Tab` to move between controls, then press `Space` to activate the focused control. The keyboard focus has a visible outline.
 - The compact panel exposes routine choices only. Use **Edit Config** for advanced settings such as applicable processes, locations, and detailed theme rules.
 
@@ -60,7 +60,7 @@ The idle monitor is enabled by default with a 30-minute idle time and Sleep as i
 
 The monitor uses Windows `GetLastInputInfo` to observe real keyboard and mouse activity. A newly started or re-enabled monitor begins a fresh idle window; it never acts immediately because the machine had already been idle before IdleTrigger started. After an action is triggered, the idle window is reset before monitoring continues.
 
-Enable the warning to receive a non-activating prompt before the action. Any keyboard or mouse input cancels the pending action; closing the prompt does the same. Set `idle_warning_seconds = 0` for silent operation.
+Enable **Show Reminder Before Action** to receive a non-activating prompt before the action. Any keyboard or mouse input cancels the pending action; closing the prompt does the same. Set `idle_warning_seconds = 0` for silent operation.
 
 If a device, driver, or app refreshes Windows idle time at a fixed interval and prevents system sleep or idle actions, enable the Enhanced Idle Monitor switch. It is off by default; when enabled, IdleTrigger first logs and learns a stable reset pattern, then keeps a more robust idle timer. Normal keyboard or mouse input still resets idle time, and logs continue to record why each reset was accepted or ignored.
 

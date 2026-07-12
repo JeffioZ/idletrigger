@@ -286,14 +286,33 @@ func (s *trayState) themeScheduleText(showSource bool) string {
 	if !scheduleInfo.OK {
 		return i18n.T(s.lang, "theme_schedule_unavailable")
 	}
-	schedule := fmt.Sprintf(i18n.T(s.lang, "theme_schedule_format"), scheduleInfo.LightTime, scheduleInfo.DarkTime)
+	formatKey := "theme_schedule_format"
+	if s.cfg.ThemeMode == "sunrise" {
+		formatKey = "theme_schedule_sunrise_format"
+	}
+	schedule := fmt.Sprintf(i18n.T(s.lang, formatKey), scheduleInfo.LightTime, scheduleInfo.DarkTime)
 	if scheduleInfo.FixedFallback {
 		return fmt.Sprintf(i18n.T(s.lang, "theme_schedule_fallback_format"), schedule)
 	}
 	if s.cfg.ThemeMode != "sunrise" || !showSource {
 		return schedule
 	}
-	return fmt.Sprintf(i18n.T(s.lang, "theme_schedule_source_format"), schedule, s.locationSourceText(loc))
+	return fmt.Sprintf(i18n.T(s.lang, "theme_schedule_source_format"), schedule, s.locationSourceShort(loc))
+}
+
+func (s *trayState) locationSourceShort(loc themeswitch.LocationInfo) string {
+	switch loc.Source {
+	case themeswitch.LocationSourceConfigured:
+		return i18n.T(s.lang, "theme_location_configured")
+	case themeswitch.LocationSourceIP:
+		return i18n.T(s.lang, "theme_location_ip")
+	case themeswitch.LocationSourceTimezone:
+		return i18n.T(s.lang, "theme_location_timezone")
+	case themeswitch.LocationSourceUTCOffset:
+		return i18n.T(s.lang, "theme_location_utc_offset")
+	default:
+		return i18n.T(s.lang, "theme_location_default")
+	}
 }
 
 func (s *trayState) themeLocationInfo(blockIPLookup bool) themeswitch.LocationInfo {
@@ -304,25 +323,15 @@ func (s *trayState) themeLocationInfo(blockIPLookup bool) themeswitch.LocationIn
 	return themeswitch.AutoLocationInfo(s.cfg.ThemeIPLocationEnabled, blockIPLookup)
 }
 
-func (s *trayState) locationSourceText(loc themeswitch.LocationInfo) string {
-	switch loc.Source {
-	case themeswitch.LocationSourceConfigured:
-		return i18n.T(s.lang, "theme_location_configured")
-	case themeswitch.LocationSourceIP:
-		if loc.LocationLabel != "" {
-			return fmt.Sprintf(i18n.T(s.lang, "theme_location_ip_named"), loc.LocationLabel)
-		}
-		return i18n.T(s.lang, "theme_location_ip")
-	case themeswitch.LocationSourceTimezone:
-		if loc.TimezoneName != "" {
-			return fmt.Sprintf(i18n.T(s.lang, "theme_location_timezone_named"), loc.TimezoneName)
-		}
-		return i18n.T(s.lang, "theme_location_timezone")
-	case themeswitch.LocationSourceUTCOffset:
-		return i18n.T(s.lang, "theme_location_utc_offset")
-	default:
-		return i18n.T(s.lang, "theme_location_default")
+func (s *trayState) ipLocationLabel() string {
+	if !s.cfg.ThemeIPLocationEnabled {
+		return ""
 	}
+	loc := s.themeLocationInfo(false)
+	if loc.Source == themeswitch.LocationSourceIP {
+		return loc.LocationLabel
+	}
+	return ""
 }
 
 func tooltipText(lines []string) string {
@@ -1082,6 +1091,7 @@ func (s *trayState) openPopup(refresh bool) {
 				LoggingEnabled:          s.cfg.LoggingEnabled,
 				IsChinese:               i18n.ResolveLanguage(s.lang) == "zh-CN",
 				ThemeSchedule:           s.themeScheduleText(true),
+				IPLocationLabel:         s.ipLocationLabel(),
 				AppVersion:              version.Value,
 				Owner:                   systray.WindowHandle(),
 				DeveloperCapturePanel:   s.devtools.CapturePanel,
@@ -1274,7 +1284,7 @@ func (s *trayState) restartThemeScheduler() {
 func (s *trayState) refreshPopupThemeSchedule() {
 	text := s.themeScheduleText(true)
 	systray.Post(func() {
-		popup.UpdateThemeSchedule(text)
+		popup.UpdateThemeSchedule(text, s.ipLocationLabel())
 	})
 }
 

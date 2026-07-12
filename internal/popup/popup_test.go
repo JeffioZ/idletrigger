@@ -37,9 +37,8 @@ func TestVisualStateForButtonRoles(t *testing.T) {
 	}{
 		{name: "toggle on", id: idNoSleep, toggleOn: true, wantRole: buttonToggle, wantActive: true},
 		{name: "toggle off", id: idTheme, wantRole: buttonToggle, wantActive: false},
-		{name: "choice selected", id: idActionLock, choiceSelected: true, wantRole: buttonChoice, wantActive: true},
-		{name: "choice not selected", id: idLangEN, wantRole: buttonChoice, wantActive: false},
-		{name: "command remains stateless", id: idRestart, toggleOn: true, choiceSelected: true, wantRole: buttonCommand, wantActive: false},
+		{name: "command remains stateless", id: idIdleAction, toggleOn: true, choiceSelected: true, wantRole: buttonCommand, wantActive: false},
+		{name: "system controls remains a command", id: idQuickActions, toggleOn: true, choiceSelected: true, wantRole: buttonCommand, wantActive: false},
 		{name: "disabled state is retained", id: idIdleWarning, toggleOn: true, down: true, wantRole: buttonToggle, wantActive: true},
 	}
 	for _, tt := range tests {
@@ -58,12 +57,7 @@ func TestButtonRoleMappingCoversEveryPanelAction(t *testing.T) {
 			t.Fatalf("toggle id %d has role %d", id, got)
 		}
 	}
-	for _, id := range append(actionIDs(), languageIDs()...) {
-		if got := roleForButton(id); got != buttonChoice {
-			t.Fatalf("choice id %d has role %d", id, got)
-		}
-	}
-	for _, id := range []uint16{idLock, idSleep, idHibernate, idShutdown, idRestart, idThemeSwitch, idThemeRepair, idConfig, idExit, idTestWarning} {
+	for _, id := range []uint16{idQuickActions, idLock, idSleep, idHibernate, idShutdown, idRestart, idThemeSwitch, idThemeRepair, idConfig, idExit, idTestWarning} {
 		if got := roleForButton(id); got != buttonCommand {
 			t.Fatalf("command id %d has role %d", id, got)
 		}

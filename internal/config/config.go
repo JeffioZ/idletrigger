@@ -355,7 +355,7 @@ func renderAnnotatedTOML(cfg Config) string {
 	fmt.Fprintf(&b, "idle_timeout_minutes = %d\n", cfg.IdleTimeoutMinutes)
 	b.WriteString("# 达到空闲时长后执行的动作 / Action to run after the idle time is reached: \"sleep\", \"hibernate\", \"shutdown\", \"lock\"\n")
 	fmt.Fprintf(&b, "idle_action = %s\n", tomlString(string(cfg.IdleAction)))
-	b.WriteString("# 触发前多少秒显示不抢焦点的应用内预警；键鼠操作或关闭预警会取消本次动作，设为 0 静默执行 / Seconds before trigger to show a non-activating in-app warning; keyboard/mouse input or closing it cancels this action, 0 = silent\n")
+	b.WriteString("# 触发前多少秒显示不抢焦点的应用内提醒；键鼠操作或关闭提醒会取消本次动作，设为 0 静默执行 / Seconds before trigger to show a non-activating in-app reminder; keyboard/mouse input or closing it cancels this action, 0 = silent\n")
 	fmt.Fprintf(&b, "idle_warning_seconds = %d\n", cfg.IdleWarningSeconds)
 	b.WriteString("# 增强空闲监测：适合系统睡眠也被固定间隔空闲刷新干扰的机器；默认关闭，普通键鼠操作仍会重置计时 / Enhanced idle monitoring for machines where system sleep is disturbed by fixed-interval idle refreshes; off by default, and normal keyboard or mouse input still resets idle time\n")
 	fmt.Fprintf(&b, "idle_enhanced_monitor = %t\n\n", cfg.IdleEnhancedMonitor)

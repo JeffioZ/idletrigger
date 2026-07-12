@@ -112,6 +112,7 @@ type State struct {
 	HotkeysEnabled, AutostartEnabled, LoggingEnabled             bool
 	IsChinese                                                    bool
 	ThemeSchedule                                                string
+	IPLocationLabel                                              string
 	AppVersion                                                   string
 	Owner                                                        windows.Handle
 	DeveloperCapturePanel, DeveloperWarningPreview               bool
@@ -133,9 +134,9 @@ const (
 
 	wmDestroy         = 0x0002
 	wmClose           = 0x0010
-	wmActivate        = 0x0006
 	wmMouseMove       = 0x0200
 	wmLButtonDown     = 0x0201
+	wmLButtonUp       = 0x0202
 	wmMouseLeave      = 0x02A3
 	wmParentNotify    = 0x0210
 	wmEraseBkgnd      = 0x0014
@@ -148,6 +149,8 @@ const (
 	wmCtlColorListBox = 0x0134
 	wmThemeChanged    = 0x031A
 	wmDpiChanged      = 0x02E0
+	wmTimer           = 0x0113
+	wmKeyDown         = 0x0100
 	wmSetFont         = 0x0030
 	wmSetIcon         = 0x0080
 	bnClicked         = 0
@@ -180,9 +183,20 @@ const (
 	wsExComposited = 0x02000000
 	wsExAppWindow  = 0x00040000
 
-	swpShowWindow  = 0x0040
-	monitorNearest = 2
-	gwlpWndProc    = ^uintptr(3)
+	swpNoSize         = 0x0001
+	swpNoMove         = 0x0002
+	swpNoZOrder       = 0x0004
+	swpNoActivate     = 0x0010
+	swpShowWindow     = 0x0040
+	swHide            = 0
+	swShow            = 5
+	monitorNearest    = 2
+	gwlpWndProc       = ^uintptr(3)
+	quickMenuTimer    = 1
+	languageMenuTimer = 2
+	vkUp              = 0x26
+	vkDown            = 0x28
+	vkEscape          = 0x1B
 
 	odsSelected     = 0x0001
 	odsDisabled     = 0x0004
@@ -196,7 +210,6 @@ const (
 	dtCalcRect      = 0x00000400
 	dtSingleLine    = 0x00000020
 	transparent     = 1
-	waInactive      = 0
 	tmeLeave        = 0x00000002
 
 	ttsAlwaysTip       = 0x0001
@@ -223,30 +236,31 @@ const (
 )
 
 const (
-	idNoSleep         = 10
-	idProcess         = 11
-	idIdle            = 20
-	idIdleWarning     = 21
-	idIdleEnhanced    = 22
-	idTheme           = 30
-	idBattery         = 32
-	idFullscreen      = 33
-	idThemeSwitch     = 34
-	idThemeRepair     = 35
-	idIPLocation      = 36
-	idHotkeys         = 40
-	idAutostart       = 41
-	idLogging         = 42
-	idIdleTimeout     = 120
-	idActionSleep     = 131
-	idActionHibernate = 132
-	idActionShutdown  = 133
-	idActionLock      = 134
-	idLangEN          = 151
-	idLangZH          = 152
-	idConfig          = 500
-	idExit            = 502
-	idTestWarning     = 600
+	idQuickActions = 6
+	idQuickMenu    = 7
+	idNoSleep      = 10
+	idProcess      = 11
+	idIdle         = 20
+	idIdleWarning  = 21
+	idIdleEnhanced = 22
+	idTheme        = 30
+	idBattery      = 32
+	idFullscreen   = 33
+	idThemeSwitch  = 34
+	idThemeRepair  = 35
+	idIPLocation   = 36
+	idHotkeys      = 40
+	idAutostart    = 41
+	idLogging      = 42
+	idIdleTimeout  = 120
+	idIdleAction   = 121
+	idLanguage     = 150
+	idLanguageMenu = 151
+	idLangEN       = 152
+	idLangZH       = 153
+	idConfig       = 500
+	idExit         = 502
+	idTestWarning  = 600
 )
 
 var (
@@ -277,6 +291,11 @@ var (
 	pGetDpiForWindow       = user32.NewProc("GetDpiForWindow")
 	pGetDpiForSystem       = user32.NewProc("GetDpiForSystem")
 	pSetForeground         = user32.NewProc("SetForegroundWindow")
+	pSetFocus              = user32.NewProc("SetFocus")
+	pShowWindow            = user32.NewProc("ShowWindow")
+	pEnableWindow          = user32.NewProc("EnableWindow")
+	pSetTimer              = user32.NewProc("SetTimer")
+	pKillTimer             = user32.NewProc("KillTimer")
 	pFillRect              = user32.NewProc("FillRect")
 	pFrameRect             = user32.NewProc("FrameRect")
 	pDrawText              = user32.NewProc("DrawTextW")
@@ -310,6 +329,7 @@ const (
 	staticNone staticKind = iota
 	staticSection
 	staticSubtitle
+	staticQuickMenu
 )
 
 type trackMouseEvent struct {
@@ -379,8 +399,12 @@ type panel struct {
 	processWatchActive              bool
 	developerCapturePanel           bool
 	developerWarningPreview         bool
+	quickMenuOpen                   bool
+	languageMenuOpen                bool
 	themeSchedule                   string
+	ipLocationLabel                 string
 	timeoutOptions                  []timeoutChoice
+	comboOptions                    map[uint16][]string
 	style, exStyle                  uint32
 	controlBounds                   map[uint16]logicalBounds
 }
@@ -420,6 +444,7 @@ func createPanel(state State, onAction OnAction, langFn LangFunc) error {
 		lang:                    langFn,
 		scale:                   1,
 		themeSchedule:           state.ThemeSchedule,
+		ipLocationLabel:         state.IPLocationLabel,
 		appVersion:              state.AppVersion,
 		idlePaused:              state.IdlePaused,
 		idleTimeout:             state.IdleTimeout,
@@ -451,8 +476,8 @@ func createPanel(state State, onAction OnAction, langFn LangFunc) error {
 		disabled:      make(map[uint16]bool),
 		oldButtonProc: make(map[windows.Handle]uintptr),
 		controlBounds: make(map[uint16]logicalBounds),
+		comboOptions:  make(map[uint16][]string),
 	}
-	p.setChoice(actionIDs(), actionID(state.IdleAction))
 	if state.IsChinese {
 		p.setChoice(languageIDs(), idLangZH)
 	} else {
@@ -486,7 +511,7 @@ func Hide() {
 // UpdateThemeSchedule refreshes the already visible Day/Night schedule line.
 // It is intentionally layout-preserving; callers should still recreate the
 // panel when a future change needs to add or remove controls.
-func UpdateThemeSchedule(text string) {
+func UpdateThemeSchedule(text, ipLocationLabel string) {
 	panelMu.Lock()
 	p := active
 	if p == nil || p.themeScheduleID == 0 {
@@ -496,11 +521,13 @@ func UpdateThemeSchedule(text string) {
 	id := p.themeScheduleID
 	hwnd := p.controls[id]
 	p.labels[id] = text
+	p.ipLocationLabel = ipLocationLabel
 	panelMu.Unlock()
 
 	if hwnd != 0 {
 		pInvalidateRect.Call(uintptr(hwnd), 0, 1)
 	}
+	p.refreshTooltip(idIPLocation)
 }
 
 func Destroy() {
@@ -755,6 +782,8 @@ func (p *panel) refreshTooltip(id uint16) {
 func (p *panel) tooltipText(id uint16) string {
 	key := ""
 	switch id {
+	case idQuickActions:
+		key = "tip_quick_actions"
 	case idLock:
 		key = "tip_lock"
 	case idSleep:
@@ -777,7 +806,7 @@ func (p *panel) tooltipText(id uint16) string {
 		key = "tip_idle_enhanced"
 	case idIdleTimeout:
 		key = "tip_idle_timeout"
-	case idActionSleep, idActionHibernate, idActionShutdown, idActionLock:
+	case idIdleAction:
 		key = "tip_idle_action"
 	case idTheme:
 		key = "tip_theme"
@@ -786,7 +815,11 @@ func (p *panel) tooltipText(id uint16) string {
 	case idBattery:
 		key = "tip_battery_theme"
 	case idIPLocation:
-		key = "tip_ip_location"
+		body := p.text("tip_ip_location")
+		if p.ipLocationLabel != "" {
+			body = fmt.Sprintf(p.text("tip_ip_location_current"), p.ipLocationLabel, body)
+		}
+		return p.withStateTooltip(id, body)
 	case idThemeSwitch:
 		key = "tip_theme_switch"
 	case idThemeRepair:
@@ -797,7 +830,7 @@ func (p *panel) tooltipText(id uint16) string {
 		key = "tip_autostart"
 	case idLogging:
 		key = "tip_logging"
-	case idLangEN, idLangZH:
+	case idLanguage:
 		key = "tip_language"
 	case idConfig:
 		key = "tip_config"
@@ -860,16 +893,15 @@ func (p *panel) build() error {
 		p.subclassButton(hwnd)
 		return err
 	}
-	combo := func(x, y, width, height int, current int) error {
-		hwnd, err := p.child("COMBOBOX", "", wsChild|wsVisible|wsTabStop|wsClipSiblings|wsVScroll|cbsDropDownList|cbsOwnerDrawFix|cbsHasStrings, x, y, width, height, idIdleTimeout, p.font)
+	combo := func(id uint16, x, y, width, height int, options []string, current int) error {
+		hwnd, err := p.child("COMBOBOX", "", wsChild|wsVisible|wsTabStop|wsClipSiblings|wsVScroll|cbsDropDownList|cbsOwnerDrawFix|cbsHasStrings, x, y, width, height, id, p.font)
 		if err != nil {
 			return err
 		}
 		p.applyComboTheme(hwnd, themeswitch.Current() == themeswitch.ModeDark)
-		var selected int
-		p.timeoutOptions, selected = timeoutChoices(current, p.isChinese)
-		for _, option := range p.timeoutOptions {
-			label, err := windows.UTF16PtrFromString(option.label)
+		p.comboOptions[id] = append([]string(nil), options...)
+		for _, option := range options {
+			label, err := windows.UTF16PtrFromString(option)
 			if err != nil {
 				return err
 			}
@@ -878,7 +910,7 @@ func (p *panel) build() error {
 		itemHeight := uintptr(p.sc(30))
 		pSendMessage.Call(uintptr(hwnd), cbSetItemHeight, ^uintptr(0), itemHeight)
 		pSendMessage.Call(uintptr(hwnd), cbSetItemHeight, 0, itemHeight)
-		pSendMessage.Call(uintptr(hwnd), cbSetCurSel, uintptr(selected), 0)
+		pSendMessage.Call(uintptr(hwnd), cbSetCurSel, uintptr(current), 0)
 		return nil
 	}
 	choiceRow := func(x, y, totalW int, labels []string, ids []uint16) (int, error) {
@@ -891,21 +923,27 @@ func (p *panel) build() error {
 		}
 		return height, nil
 	}
+	choiceRowWidths := func(x, y int, labels []string, ids, widths []uint16) (int, error) {
+		height := buttonH
+		for i, width := range widths {
+			if candidate := p.rowHeight([]string{labels[i]}, int(width)); candidate > height {
+				height = candidate
+			}
+		}
+		for i, id := range ids {
+			if err := button(labels[i], x, y, int(widths[i]), height, id); err != nil {
+				return 0, err
+			}
+			x += int(widths[i]) + gap
+		}
+		return height, nil
+	}
 	y := pad
-	if err := section(p.text("menu_quick_actions"), y); err != nil {
-		return err
-	}
-	y += sectionH + gap
-	height, err := choiceRow(pad, y, baseW-2*pad, []string{p.text("menu_lock"), p.text("menu_sleep"), p.text("menu_hibernate"), p.text("menu_shutdown"), p.text("menu_restart")}, []uint16{idLock, idSleep, idHibernate, idShutdown, idRestart})
-	if err != nil {
-		return err
-	}
-	y += height + sectionGap
 	if err := section(p.text("menu_nosleep"), y); err != nil {
 		return err
 	}
 	y += sectionH + labelGap
-	height, err = choiceRow(pad, y, baseW-2*pad, []string{p.text("menu_nosleep_enable"), p.text("menu_process_watch")}, []uint16{idNoSleep, idProcess})
+	height, err := choiceRow(pad, y, baseW-2*pad, []string{p.text("menu_nosleep_enable"), p.text("menu_process_watch")}, []uint16{idNoSleep, idProcess})
 	if err != nil {
 		return err
 	}
@@ -916,7 +954,7 @@ func (p *panel) build() error {
 	y += sectionH + labelGap
 	childX := pad
 	childW := baseW - 2*pad
-	idleLabel := p.text("menu_idle_enable")
+	idleLabel := p.text("menu_idle_enable_short")
 	if p.idlePaused {
 		idleLabel = p.text("menu_idle_paused")
 	}
@@ -925,23 +963,28 @@ func (p *panel) build() error {
 		return err
 	}
 	y += height + gap
-	if err := subtitle(p.text("menu_idle_timeout"), childX, y, childW); err != nil {
+	if p.developerWarningPreview {
+		if err := button(p.text("msg_idle_warning_test"), childX, y, 132, buttonH, idTestWarning); err != nil {
+			return err
+		}
+		y += buttonH + gap
+	}
+	fieldW := (childW - gap) / 2
+	if err := subtitle(p.text("menu_idle_timeout"), childX, y, fieldW); err != nil {
+		return err
+	}
+	secondX := childX + fieldW + gap
+	if err := subtitle(p.text("menu_idle_action"), secondX, y, fieldW); err != nil {
 		return err
 	}
 	y += subtitleH + labelGap
-	if err := combo(childX, y, childW, buttonH, p.idleTimeout); err != nil {
+	if err := combo(idIdleTimeout, childX, y, fieldW, buttonH, timeoutLabels(p.idleTimeout, p.isChinese, &p.timeoutOptions), timeoutIndex(p.timeoutOptions, p.idleTimeout)); err != nil {
 		return err
 	}
-	y += buttonH + gap
-	if err := subtitle(p.text("menu_idle_action"), childX, y, childW); err != nil {
+	if err := combo(idIdleAction, secondX, y, fieldW, buttonH, actionLabels(p), actionIndex(p.idleAction)); err != nil {
 		return err
 	}
-	y += subtitleH
-	height, err = choiceRow(childX, y, childW, []string{p.text("menu_action_sleep"), p.text("menu_action_hibernate"), p.text("menu_action_shutdown"), p.text("menu_action_lock")}, actionIDs())
-	if err != nil {
-		return err
-	}
-	y += height + sectionGap
+	y += buttonH + sectionGap
 	if err := section(p.text("menu_theme_switch"), y); err != nil {
 		return err
 	}
@@ -954,12 +997,17 @@ func (p *panel) build() error {
 		}
 		y += subtitleH + labelGap
 	}
-	height, err = choiceRow(pad, y, baseW-2*pad, []string{p.text("menu_theme_enable"), p.text("menu_theme_skip_fullscreen"), p.text("menu_theme_battery_dark")}, []uint16{idTheme, idFullscreen, idBattery})
+	height, err = choiceRow(pad, y, baseW-2*pad, []string{p.text("menu_theme_enable"), p.text("menu_theme_skip_fullscreen")}, []uint16{idTheme, idFullscreen})
+	if err != nil {
+		return err
+	}
+	y += height + 4
+	height, err = choiceRow(pad, y, baseW-2*pad, []string{p.text("menu_theme_battery_dark"), p.text("menu_theme_ip_location")}, []uint16{idBattery, idIPLocation})
 	if err != nil {
 		return err
 	}
 	y += height + gap
-	height, err = choiceRow(pad, y, baseW-2*pad, []string{p.text("menu_theme_ip_location"), p.text("menu_theme_switch_now"), p.text("menu_theme_repair")}, []uint16{idIPLocation, idThemeSwitch, idThemeRepair})
+	height, err = choiceRow(pad, y, baseW-2*pad, []string{p.text("menu_theme_switch_now"), p.text("menu_theme_repair")}, []uint16{idThemeSwitch, idThemeRepair})
 	if err != nil {
 		return err
 	}
@@ -968,36 +1016,81 @@ func (p *panel) build() error {
 		return err
 	}
 	y += sectionH + labelGap
-	height, err = choiceRow(pad, y, baseW-2*pad, []string{p.text("menu_hotkeys"), p.text("menu_autostart"), p.text("menu_logging")}, []uint16{idHotkeys, idAutostart, idLogging})
-	if err != nil {
-		return err
+	generalLabels := []string{p.text("menu_hotkeys"), p.text("menu_autostart"), p.text("menu_logging")}
+	generalIDs := []uint16{idHotkeys, idAutostart, idLogging}
+	if p.isChinese {
+		height, err = choiceRow(pad, y, baseW-2*pad, generalLabels, generalIDs)
+	} else {
+		// English labels are shorter than their Chinese counterparts. Keep this
+		// row compact so the final two toggles read as one related group.
+		height, err = choiceRowWidths(pad, y, generalLabels, generalIDs, []uint16{160, 126, 126})
 	}
-	y += height + labelGap
-	if err := subtitle(p.text("menu_language"), pad, y, baseW-2*pad); err != nil {
-		return err
-	}
-	y += subtitleH + labelGap
-	height, err = choiceRow(pad, y, baseW-2*pad, []string{p.text("menu_lang_en"), p.text("menu_lang_zh")}, languageIDs())
 	if err != nil {
 		return err
 	}
 	y += height + sectionGap
-	if err := section(p.text("menu_more"), y); err != nil {
+	bottomW := (baseW - 2*pad - gap) / 2
+	bottomRow1 := []string{p.text("menu_system_controls"), p.text("menu_language_settings")}
+	bottomRow2 := []string{p.text("menu_open_config"), p.text("menu_exit_panel")}
+	bottomH := p.rowHeight(append(bottomRow1, bottomRow2...), bottomW)
+	p.clientH = y + bottomH*2 + gap + pad
+	if _, err = choiceRow(pad, y, baseW-2*pad, bottomRow1, []uint16{idQuickActions, idLanguage}); err != nil {
 		return err
 	}
-	y += sectionH + labelGap
-	if p.developerWarningPreview {
-		height, err := choiceRow(pad, y, baseW-2*pad, []string{p.text("msg_idle_warning_test")}, []uint16{idTestWarning})
-		if err != nil {
+	if _, err = choiceRow(pad, y+bottomH+gap, baseW-2*pad, bottomRow2, []uint16{idConfig, idExit}); err != nil {
+		return err
+	}
+	quickW := bottomW
+	menuRowH := 34
+	menuH := 8 + len(quickActionIDs())*menuRowH
+	menuY := y - menuH + 1
+	p.staticKinds[idQuickMenu] = staticQuickMenu
+	if _, err := p.child("STATIC", "", wsChild|ssOwnerDraw, pad, menuY, quickW, menuH, idQuickMenu, 0); err != nil {
+		return err
+	}
+	for i, id := range quickActionIDs() {
+		if err := buttonHidden(p, p.text(quickActionTranslationKey(id)), pad+4, menuY+4+i*menuRowH, quickW-8, menuRowH, id); err != nil {
 			return err
 		}
-		y += height + gap
 	}
-	bottomLabels := []string{p.text("menu_open_config"), p.text("menu_exit")}
-	bottomH := p.rowHeight(bottomLabels, (baseW-2*pad-gap)/2)
-	p.clientH = y + bottomH + pad
-	_, err = choiceRow(pad, y, baseW-2*pad, bottomLabels, []uint16{idConfig, idExit})
-	return err
+	languageX := pad + bottomW + gap
+	languageMenuH := 8 + len(languageIDs())*menuRowH
+	languageMenuY := y - languageMenuH + 1
+	p.staticKinds[idLanguageMenu] = staticQuickMenu
+	if _, err := p.child("STATIC", "", wsChild|ssOwnerDraw, languageX, languageMenuY, bottomW, languageMenuH, idLanguageMenu, 0); err != nil {
+		return err
+	}
+	for i, id := range languageIDs() {
+		if err := buttonHidden(p, []string{p.text("menu_lang_en"), p.text("menu_lang_zh")}[i], languageX+4, languageMenuY+4+i*menuRowH, bottomW-8, menuRowH, id); err != nil {
+			return err
+		}
+	}
+	p.applyDependentStates()
+	return nil
+}
+
+func buttonHidden(p *panel, text string, x, y, width, height int, id uint16) error {
+	hwnd, err := p.child("BUTTON", text, wsChild|wsTabStop|bsOwnerDraw, x, y, width, height, id, p.font)
+	if err != nil {
+		return err
+	}
+	p.subclassButton(hwnd)
+	return nil
+}
+
+func quickActionTranslationKey(id uint16) string {
+	switch id {
+	case idLock:
+		return "menu_lock"
+	case idSleep:
+		return "menu_sleep"
+	case idHibernate:
+		return "menu_hibernate"
+	case idShutdown:
+		return "menu_shutdown"
+	default:
+		return "menu_restart"
+	}
 }
 
 func (p *panel) staticID(kind staticKind) uint16 {
@@ -1081,17 +1174,49 @@ func formatTimeout(minutes int, chinese bool) string {
 	return fmt.Sprintf("%d minutes", minutes)
 }
 
-func actionIDs() []uint16 {
-	return []uint16{idActionSleep, idActionHibernate, idActionShutdown, idActionLock}
+func timeoutLabels(current int, chinese bool, options *[]timeoutChoice) []string {
+	*options, _ = timeoutChoices(current, chinese)
+	labels := make([]string, len(*options))
+	for i, option := range *options {
+		labels[i] = option.label
+	}
+	return labels
 }
+
+func timeoutIndex(options []timeoutChoice, current int) int {
+	for i, option := range options {
+		if option.minutes == current {
+			return i
+		}
+	}
+	return 0
+}
+
+func quickActionIDs() []uint16 {
+	return []uint16{idLock, idSleep, idHibernate, idShutdown, idRestart}
+}
+
 func languageIDs() []uint16 { return []uint16{idLangEN, idLangZH} }
+
+func actionIndex(value string) int {
+	for i, action := range []string{"sleep", "hibernate", "shutdown", "lock"} {
+		if value == action {
+			return i
+		}
+	}
+	return 0
+}
+
+func actionLabels(p *panel) []string {
+	return []string{p.text("menu_action_sleep"), p.text("menu_action_hibernate"), p.text("menu_action_shutdown"), p.text("menu_action_lock")}
+}
 
 func roleForButton(id uint16) buttonRole {
 	switch id {
 	case idNoSleep, idProcess, idIdle, idIdleWarning, idIdleEnhanced,
 		idTheme, idBattery, idFullscreen, idIPLocation, idHotkeys, idAutostart, idLogging:
 		return buttonToggle
-	case idActionSleep, idActionHibernate, idActionShutdown, idActionLock, idLangEN, idLangZH:
+	case idLangEN, idLangZH:
 		return buttonChoice
 	default:
 		return buttonCommand
@@ -1115,15 +1240,6 @@ func (p *panel) visualState(id uint16) buttonVisualState {
 }
 
 func focusOutlineUsesLightOnAccent(active bool) bool { return active }
-
-func actionID(value string) uint16 {
-	for i, action := range []string{"sleep", "hibernate", "shutdown", "lock"} {
-		if value == action {
-			return actionIDs()[i]
-		}
-	}
-	return idActionSleep
-}
 
 func actionTranslationKey(value string) string {
 	switch value {
@@ -1162,6 +1278,120 @@ func (p *panel) invalidate(id uint16) {
 	}
 }
 
+func (p *panel) openQuickMenu(focusFirst bool) {
+	if p.quickMenuOpen {
+		pKillTimer.Call(uintptr(p.hwnd), quickMenuTimer)
+		if focusFirst {
+			pSetFocus.Call(uintptr(p.controls[quickActionIDs()[0]]))
+		}
+		return
+	}
+	p.quickMenuOpen = true
+	p.closeLanguageMenu()
+	for _, id := range append([]uint16{idQuickMenu}, quickActionIDs()...) {
+		if hwnd := p.controls[id]; hwnd != 0 {
+			pSetWindowPos.Call(uintptr(hwnd), 0, 0, 0, 0, 0, swpNoMove|swpNoSize|swpNoActivate|swpShowWindow)
+		}
+	}
+	if focusFirst {
+		pSetFocus.Call(uintptr(p.controls[quickActionIDs()[0]]))
+	}
+}
+
+func (p *panel) scheduleQuickMenuClose() {
+	if p.quickMenuOpen {
+		pSetTimer.Call(uintptr(p.hwnd), quickMenuTimer, 220, 0)
+	}
+}
+
+func (p *panel) closeQuickMenu() {
+	if !p.quickMenuOpen {
+		return
+	}
+	pKillTimer.Call(uintptr(p.hwnd), quickMenuTimer)
+	p.quickMenuOpen = false
+	for _, id := range append([]uint16{idQuickMenu}, quickActionIDs()...) {
+		if hwnd := p.controls[id]; hwnd != 0 {
+			pShowWindow.Call(uintptr(hwnd), swHide)
+		}
+	}
+}
+
+func (p *panel) openLanguageMenu(focusFirst bool) {
+	if p.languageMenuOpen {
+		pKillTimer.Call(uintptr(p.hwnd), languageMenuTimer)
+		if focusFirst {
+			p.focusUnselectedLanguage()
+		}
+		return
+	}
+	p.closeQuickMenu()
+	p.languageMenuOpen = true
+	for _, id := range append([]uint16{idLanguageMenu}, languageIDs()...) {
+		if hwnd := p.controls[id]; hwnd != 0 {
+			pSetWindowPos.Call(uintptr(hwnd), 0, 0, 0, 0, 0, swpNoMove|swpNoSize|swpNoActivate|swpShowWindow)
+		}
+	}
+	if focusFirst {
+		p.focusUnselectedLanguage()
+	}
+}
+
+func (p *panel) focusUnselectedLanguage() {
+	id := uint16(idLangEN)
+	if p.selected[id] {
+		id = idLangZH
+	}
+	pSetFocus.Call(uintptr(p.controls[id]))
+}
+
+func (p *panel) scheduleLanguageMenuClose() {
+	if p.languageMenuOpen {
+		pSetTimer.Call(uintptr(p.hwnd), languageMenuTimer, 220, 0)
+	}
+}
+
+func (p *panel) closeLanguageMenu() {
+	if !p.languageMenuOpen {
+		return
+	}
+	pKillTimer.Call(uintptr(p.hwnd), languageMenuTimer)
+	p.languageMenuOpen = false
+	for _, id := range append([]uint16{idLanguageMenu}, languageIDs()...) {
+		if hwnd := p.controls[id]; hwnd != 0 {
+			pShowWindow.Call(uintptr(hwnd), swHide)
+		}
+	}
+}
+
+func (p *panel) setDisabled(id uint16, value bool) {
+	if p.disabled[id] == value {
+		return
+	}
+	p.disabled[id] = value
+	if hwnd := p.controls[id]; hwnd != 0 {
+		enabled := uintptr(1)
+		if value {
+			enabled = 0
+		}
+		pEnableWindow.Call(uintptr(hwnd), enabled)
+	}
+	p.refreshTooltip(id)
+	p.invalidate(id)
+}
+
+func (p *panel) applyDependentStates() {
+	p.setDisabled(idProcess, !p.toggles[idNoSleep])
+	monitorEnabled := p.toggles[idIdle]
+	p.setDisabled(idIdleWarning, !monitorEnabled)
+	p.setDisabled(idIdleEnhanced, !monitorEnabled)
+	p.setDisabled(idTestWarning, !monitorEnabled)
+	themeEnabled := p.toggles[idTheme]
+	p.setDisabled(idFullscreen, !themeEnabled)
+	p.setDisabled(idBattery, !themeEnabled)
+	p.setDisabled(idIPLocation, !themeEnabled)
+}
+
 func (p *panel) setKeyboardNavigation(active bool) {
 	if p.keyboardNavigation == active {
 		return
@@ -1184,9 +1414,9 @@ func comboFocusVisible(keyboardNavigation bool, itemState uint32, focused, combo
 	return keyboardNavigation && itemState&odsComboBoxEdit != 0 && focused != 0 && focused == combo
 }
 
-func (p *panel) shouldDrawComboFocusOutline(itemState uint32) bool {
+func (p *panel) shouldDrawComboFocusOutline(id uint16, itemState uint32) bool {
 	focused, _, _ := pGetFocus.Call()
-	return comboFocusVisible(p.keyboardNavigation, itemState, windows.Handle(focused), p.controls[idIdleTimeout])
+	return comboFocusVisible(p.keyboardNavigation, itemState, windows.Handle(focused), p.controls[id])
 }
 
 func (p *panel) subclassButton(hwnd windows.Handle) {
@@ -1217,7 +1447,49 @@ func buttonWndProc(hwnd windows.Handle, msg uint32, wp, lp uintptr) uintptr {
 		case wmMouseLeave:
 			p.clearHover(hwnd)
 		case wmLButtonDown:
+			id := p.controlID(hwnd)
+			if id == idQuickActions || id == idLanguage {
+				// These menu triggers intentionally open on hover only. Keep Space
+				// available through WM_COMMAND for keyboard navigation.
+				return 0
+			}
 			p.leaveKeyboardNavigation()
+		case wmLButtonUp:
+			id := p.controlID(hwnd)
+			if id == idQuickActions || id == idLanguage {
+				return 0
+			}
+		case wmKeyDown:
+			id := p.controlID(hwnd)
+			if containsQuickAction(id) {
+				switch wp {
+				case vkUp:
+					p.focusQuickAction(id, -1)
+					return 0
+				case vkDown:
+					p.focusQuickAction(id, 1)
+					return 0
+				case vkEscape:
+					p.closeQuickMenu()
+					pSetFocus.Call(uintptr(p.controls[idQuickActions]))
+					return 0
+				}
+			}
+			if containsLanguageOption(id) {
+				switch wp {
+				case vkUp, vkDown:
+					other := uint16(idLangEN)
+					if id == idLangEN {
+						other = uint16(idLangZH)
+					}
+					pSetFocus.Call(uintptr(p.controls[other]))
+					return 0
+				case vkEscape:
+					p.closeLanguageMenu()
+					pSetFocus.Call(uintptr(p.controls[idLanguage]))
+					return 0
+				}
+			}
 		}
 	}
 	if old != 0 {
@@ -1228,8 +1500,25 @@ func buttonWndProc(hwnd windows.Handle, msg uint32, wp, lp uintptr) uintptr {
 	return result
 }
 
+func (p *panel) focusQuickAction(current uint16, delta int) {
+	ids := quickActionIDs()
+	for index, id := range ids {
+		if id == current {
+			next := (index + delta + len(ids)) % len(ids)
+			pSetFocus.Call(uintptr(p.controls[ids[next]]))
+			return
+		}
+	}
+}
+
 func (p *panel) setHover(hwnd windows.Handle) {
 	id := p.controlID(hwnd)
+	if id == idQuickActions || containsQuickAction(id) {
+		p.openQuickMenu(false)
+	}
+	if id == idLanguage || containsLanguageOption(id) {
+		p.openLanguageMenu(false)
+	}
 	if id == 0 {
 		return
 	}
@@ -1251,6 +1540,23 @@ func (p *panel) clearHover(hwnd windows.Handle) {
 		p.hoverID = 0
 		p.invalidate(id)
 	}
+	if id == idQuickActions || containsQuickAction(id) {
+		p.scheduleQuickMenuClose()
+	}
+	if id == idLanguage || containsLanguageOption(id) {
+		p.scheduleLanguageMenuClose()
+	}
+}
+
+func containsLanguageOption(id uint16) bool { return id == idLangEN || id == idLangZH }
+
+func containsQuickAction(id uint16) bool {
+	for _, quickID := range quickActionIDs() {
+		if id == quickID {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *panel) controlID(hwnd windows.Handle) uint16 {
@@ -1297,11 +1603,6 @@ func wndProc(hwnd windows.Handle, msg uint32, wp, lp uintptr) uintptr {
 	p := panelFor(hwnd)
 	if p != nil {
 		switch msg {
-		case wmActivate:
-			if uint16(wp) == waInactive && !p.developerCapturePanel {
-				Hide()
-				return 0
-			}
 		case wmClose:
 			Hide()
 			return 0
@@ -1327,7 +1628,7 @@ func wndProc(hwnd windows.Handle, msg uint32, wp, lp uintptr) uintptr {
 		case wmDrawItem:
 			if lp != 0 {
 				item := drawItemFromLParam(lp)
-				if uint16(item.CtlID) == idIdleTimeout {
+				if _, ok := p.comboOptions[uint16(item.CtlID)]; ok {
 					p.drawTimeoutChoice(item)
 				} else if p.staticKinds[uint16(item.CtlID)] != staticNone {
 					p.drawStatic(item)
@@ -1343,14 +1644,28 @@ func wndProc(hwnd windows.Handle, msg uint32, wp, lp uintptr) uintptr {
 			p.position(p.style, p.exStyle)
 			mylog.Info("UI font: surface=popup rebuilt reason=dpi-change dpi=%d face=%q client_px=%dx%d", int(p.scale*96+0.5), p.fontChoice.Face, p.sc(baseW), p.sc(p.clientH))
 			return 0
+		case wmTimer:
+			if wp == quickMenuTimer {
+				p.closeQuickMenu()
+				return 0
+			}
+			if wp == languageMenuTimer {
+				p.closeLanguageMenu()
+				return 0
+			}
 		case wmCommand:
 			id, notification := uint16(wp), uint16(wp>>16)
 			if notification == bnClicked {
 				p.handleCommand(id)
 				return 0
 			}
-			if id == idIdleTimeout && notification == cbnSelChange {
-				p.handleTimeoutSelection()
+			if notification == cbnSelChange {
+				switch id {
+				case idIdleTimeout:
+					p.handleTimeoutSelection()
+				case idIdleAction:
+					p.handleActionSelection()
+				}
 				return 0
 			}
 		}
@@ -1413,6 +1728,28 @@ func (p *panel) handleCommand(id uint16) {
 	var action Action
 	value := 0
 	switch {
+	case id == idQuickActions:
+		p.openQuickMenu(true)
+		return
+	case id == idLanguage:
+		p.openLanguageMenu(true)
+		return
+	case id == idLangEN:
+		if p.selected[idLangEN] {
+			return
+		}
+		p.choose(languageIDs(), idLangEN)
+		p.closeLanguageMenu()
+		action = ActLanguage
+		value = 0
+	case id == idLangZH:
+		if p.selected[idLangZH] {
+			return
+		}
+		p.choose(languageIDs(), idLangZH)
+		p.closeLanguageMenu()
+		action = ActLanguage
+		value = 1
 	case id == idSleep:
 		action = ActSleep
 	case id == idHibernate:
@@ -1428,6 +1765,7 @@ func (p *panel) handleCommand(id uint16) {
 		if p.toggles[idNoSleep] {
 			p.setToggle(idIdle, false)
 		}
+		p.applyDependentStates()
 		action = ActNoSleepToggle
 	case id == idProcess:
 		p.toggle(id)
@@ -1437,6 +1775,7 @@ func (p *panel) handleCommand(id uint16) {
 		if p.toggles[idIdle] {
 			p.setToggle(idNoSleep, false)
 		}
+		p.applyDependentStates()
 		action = ActIdleToggle
 	case id == idIdleWarning:
 		p.toggle(id)
@@ -1444,12 +1783,9 @@ func (p *panel) handleCommand(id uint16) {
 	case id == idIdleEnhanced:
 		p.toggle(id)
 		action = ActIdleEnhancedMonitorToggle
-	case id >= idActionSleep && id <= idActionLock:
-		p.choose(actionIDs(), id)
-		action = ActIdleAction
-		value = int(id - idActionSleep)
 	case id == idTheme:
 		p.toggle(id)
+		p.applyDependentStates()
 		action = ActThemeToggle
 	case id == idBattery:
 		p.toggle(id)
@@ -1473,14 +1809,6 @@ func (p *panel) handleCommand(id uint16) {
 	case id == idLogging:
 		p.toggle(id)
 		action = ActLoggingToggle
-	case id == idLangEN:
-		p.choose(languageIDs(), id)
-		action = ActLanguage
-		value = 0
-	case id == idLangZH:
-		p.choose(languageIDs(), id)
-		action = ActLanguage
-		value = 1
 	case id == idTestWarning:
 		Hide()
 		idlewarning.SetLanguage(p.isChinese)
@@ -1524,8 +1852,21 @@ func (p *panel) handleTimeoutSelection() {
 	}
 	p.setToggle(idNoSleep, false)
 	p.setToggle(idIdle, true)
+	p.applyDependentStates()
 	if p.onAction != nil {
 		p.onAction(ActIdleTimeout, p.timeoutOptions[index].minutes)
+	}
+}
+
+func (p *panel) handleActionSelection() {
+	hwnd := p.controls[idIdleAction]
+	index, _, _ := pSendMessage.Call(uintptr(hwnd), cbGetCurSel, 0, 0)
+	if index >= 4 {
+		return
+	}
+	p.idleAction = []string{"sleep", "hibernate", "shutdown", "lock"}[index]
+	if p.onAction != nil {
+		p.onAction(ActIdleAction, int(index))
 	}
 }
 
@@ -1628,6 +1969,10 @@ func (p *panel) applyFrameTheme(dark bool) {
 func (p *panel) drawButton(item *drawItem) {
 	id := uint16(item.CtlID)
 	state := p.visualState(id)
+	if state.Role == buttonToggle {
+		p.drawToggle(item, state)
+		return
+	}
 	selected := state.Active
 	brush := p.surfaceBrush
 	borderBrush := p.borderBrush
@@ -1700,10 +2045,59 @@ func (p *panel) drawButton(item *drawItem) {
 	drawTextCentered(item.HDC, text, r)
 }
 
+func (p *panel) drawToggle(item *drawItem, state buttonVisualState) {
+	pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&item.Rect)), uintptr(p.backgroundBrush))
+	boxSize := int32(p.sc(16))
+	box := rect{
+		Left:   item.Rect.Left + int32(p.sc(2)),
+		Top:    item.Rect.Top + (item.Rect.Bottom-item.Rect.Top-boxSize)/2,
+		Right:  item.Rect.Left + int32(p.sc(2)) + boxSize,
+		Bottom: item.Rect.Top + (item.Rect.Bottom-item.Rect.Top-boxSize)/2 + boxSize,
+	}
+	brush, border, textColor := p.surfaceBrush, p.borderBrush, p.palette.PrimaryText
+	if p.hoverID == uint16(item.CtlID) || item.ItemState&odsHotlight != 0 {
+		brush = p.hoverBrush
+	}
+	if state.Active {
+		brush, border = p.accentBrush, p.accentBrush
+	}
+	if state.Disabled || item.ItemState&odsDisabled != 0 {
+		brush, border, textColor = p.disabledBrush, p.subtleBorderBrush, p.palette.DisabledText
+	}
+	pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&box)), uintptr(brush))
+	pFrameRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&box)), uintptr(border))
+	old, _, _ := pSelectObject.Call(uintptr(item.HDC), uintptr(p.font))
+	defer pSelectObject.Call(uintptr(item.HDC), old)
+	pSetBkMode.Call(uintptr(item.HDC), transparent)
+	if state.Active {
+		check, _ := windows.UTF16PtrFromString("✓")
+		pSetTextColor.Call(uintptr(item.HDC), uintptr(p.palette.AccentText))
+		pDrawText.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(check)), ^uintptr(0), uintptr(unsafe.Pointer(&box)), dtCenter|dtVCenter|dtSingleLine)
+	}
+	if p.shouldDrawFocusOutline(item.ItemState) {
+		focus := item.Rect
+		inset := int32(p.sc(2))
+		focus.Left += inset
+		focus.Top += inset
+		focus.Right -= inset
+		focus.Bottom -= inset
+		if focus.Left < focus.Right && focus.Top < focus.Bottom {
+			pFrameRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&focus)), uintptr(p.focusBrush))
+		}
+	}
+	text, _ := windows.UTF16PtrFromString(p.labels[uint16(item.CtlID)])
+	bounds := item.Rect
+	bounds.Left = box.Right + int32(p.sc(8))
+	bounds.Right -= int32(p.sc(4))
+	pSetTextColor.Call(uintptr(item.HDC), uintptr(textColor))
+	drawTextLeftCentered(item.HDC, text, bounds)
+}
+
 // drawTimeoutChoice owns both the selected field and the drop-down rows. The
 // native combo box still supplies focus, keyboard navigation, and DPI-aware
 // arrow geometry, while this keeps its content on the panel's theme palette.
 func (p *panel) drawTimeoutChoice(item *drawItem) {
+	id := uint16(item.CtlID)
 	brush := p.surfaceBrush
 	textColor := p.palette.PrimaryText
 	if item.ItemState&odsSelected != 0 && item.ItemState&odsComboBoxEdit == 0 {
@@ -1714,7 +2108,7 @@ func (p *panel) drawTimeoutChoice(item *drawItem) {
 	// The combo box keeps its native frame, drop arrow, list, and keyboard
 	// handling. Its owner-drawn selection field gets the same focus-visible
 	// token as buttons, but only while Tab navigation is active.
-	if p.shouldDrawComboFocusOutline(item.ItemState) {
+	if p.shouldDrawComboFocusOutline(id, item.ItemState) {
 		focus := item.Rect
 		inset := int32(p.sc(2))
 		focus.Left += inset
@@ -1727,10 +2121,11 @@ func (p *panel) drawTimeoutChoice(item *drawItem) {
 	}
 
 	// UINT_MAX means that the combo box has no current item to paint.
-	if item.ItemID == ^uint32(0) || int(item.ItemID) >= len(p.timeoutOptions) {
+	options := p.comboOptions[id]
+	if item.ItemID == ^uint32(0) || int(item.ItemID) >= len(options) {
 		return
 	}
-	text, err := windows.UTF16PtrFromString(p.timeoutOptions[item.ItemID].label)
+	text, err := windows.UTF16PtrFromString(options[item.ItemID])
 	if err != nil {
 		return
 	}
@@ -1751,6 +2146,11 @@ func (p *panel) drawTimeoutChoice(item *drawItem) {
 func (p *panel) drawStatic(item *drawItem) {
 	id := uint16(item.CtlID)
 	kind := p.staticKinds[id]
+	if kind == staticQuickMenu {
+		pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&item.Rect)), uintptr(p.surfaceBrush))
+		pFrameRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&item.Rect)), uintptr(p.borderBrush))
+		return
+	}
 	pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&item.Rect)), uintptr(p.backgroundBrush))
 	pSetBkMode.Call(uintptr(item.HDC), transparent)
 	text, err := windows.UTF16PtrFromString(p.labels[id])
@@ -1801,6 +2201,16 @@ func drawTextCentered(dc windows.Handle, text *uint16, bounds rect) {
 	// bounds.Top already centers the measured text block. Applying DT_VCENTER
 	// again would shift single-line labels downward within the reduced bounds.
 	pDrawText.Call(uintptr(dc), uintptr(unsafe.Pointer(text)), ^uintptr(0), uintptr(unsafe.Pointer(&bounds)), dtCenter|dtWordBreak)
+}
+
+func drawTextLeftCentered(dc windows.Handle, text *uint16, bounds rect) {
+	measure := bounds
+	pDrawText.Call(uintptr(dc), uintptr(unsafe.Pointer(text)), ^uintptr(0), uintptr(unsafe.Pointer(&measure)), dtLeft|dtWordBreak|dtCalcRect)
+	textH := measure.Bottom - measure.Top
+	if textH < bounds.Bottom-bounds.Top {
+		bounds.Top += ((bounds.Bottom - bounds.Top) - textH) / 2
+	}
+	pDrawText.Call(uintptr(dc), uintptr(unsafe.Pointer(text)), ^uintptr(0), uintptr(unsafe.Pointer(&bounds)), dtLeft|dtWordBreak)
 }
 
 func (p *panel) fill(dc, brush windows.Handle) {
