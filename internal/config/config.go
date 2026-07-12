@@ -28,27 +28,27 @@ const (
 	ActionLock      Action = "lock"
 )
 
-const configTemplateVersion = 7
+const configTemplateVersion = 8
 
 // Config holds all user-configurable settings.
 type Config struct {
 	// Language for UI strings: "auto" (follow OS), "en", "zh-CN".
 	Language string `toml:"language"`
 
-	// IdleTimeoutMinutes is how many minutes of inactivity before the idle
-	// action fires. 0 disables the idle monitor.
+	// IdleTimeoutMinutes is the idle time in minutes before the selected
+	// action runs after no keyboard or mouse input. 0 disables the monitor.
 	IdleTimeoutMinutes int `toml:"idle_timeout_minutes"`
 
-	// IdleAction is the system action to trigger when idle timeout expires.
+	// IdleAction is the system action to run after the idle time is reached.
 	IdleAction Action `toml:"idle_action"`
 
 	// IdleWarningSeconds controls the in-app warning shown before the idle
 	// action fires. 0 disables it for silent operation. Default: 30.
 	IdleWarningSeconds int `toml:"idle_warning_seconds"`
 
-	// IdleIgnoreKeepaliveInput keeps IdleTrigger's own idle timer running when
-	// Windows reports stable low-frequency keepalive input. Default: false.
-	IdleIgnoreKeepaliveInput bool `toml:"idle_ignore_keepalive_input"`
+	// IdleEnhancedMonitor enables enhanced idle monitoring when Windows idle
+	// time is refreshed by a stable low-frequency source. Default: false.
+	IdleEnhancedMonitor bool `toml:"idle_enhanced_monitor"`
 
 	// NoSleepEnabled prevents the system from sleeping automatically.
 	NoSleepEnabled bool `toml:"nosleep_enabled"`
@@ -67,12 +67,13 @@ type Config struct {
 	// HotkeysEnabled enables global keyboard shortcuts.
 	HotkeysEnabled bool `toml:"hotkeys_enabled"`
 
-	// ProcessWatchEnabled limits Stay Awake to watched apps when Stay Awake is
-	// enabled. It does not activate Stay Awake by itself.
+	// ProcessWatchEnabled limits Stay Awake to applicable processes when Stay
+	// Awake is enabled. If no listed process is running, no keep-awake request
+	// is made. It does not activate Stay Awake by itself.
 	ProcessWatchEnabled bool `toml:"process_watch_enabled"`
 
-	// ProcessWatchList is a list of case-insensitive .exe names. Empty means
-	// no process condition is applied.
+	// ProcessWatchList is a list of applicable case-insensitive .exe names.
+	// Empty means Stay Awake is not process-limited.
 	ProcessWatchList []string `toml:"process_watch_list"`
 
 	// LoggingEnabled writes debug logs to IdleTrigger.log.
@@ -112,29 +113,29 @@ type Config struct {
 // DefaultConfig returns the factory-default configuration.
 func DefaultConfig() Config {
 	return Config{
-		Language:                 "auto",
-		IdleTimeoutMinutes:       30,
-		IdleAction:               ActionSleep,
-		IdleWarningSeconds:       30,
-		IdleIgnoreKeepaliveInput: false,
-		NoSleepEnabled:           false,
-		KeepScreenOn:             false,
-		NoSleepOnBattery:         false,
-		NoSleepBatteryThreshold:  20,
-		HotkeysEnabled:           false,
-		ProcessWatchEnabled:      false,
-		ProcessWatchList:         nil,
-		LoggingEnabled:           false,
-		ThemeSwitchEnabled:       false,
-		ThemeLightTime:           "07:00",
-		ThemeDarkTime:            "19:00",
-		ThemeMode:                "sunrise",
-		ThemeLatitude:            0,
-		ThemeLongitude:           0,
-		ThemeIPLocationEnabled:   false,
-		ThemeDarkOnBattery:       true,
-		ThemeSkipFullscreen:      true,
-		AutostartEnabled:         false,
+		Language:                "auto",
+		IdleTimeoutMinutes:      30,
+		IdleAction:              ActionSleep,
+		IdleWarningSeconds:      30,
+		IdleEnhancedMonitor:     false,
+		NoSleepEnabled:          false,
+		KeepScreenOn:            false,
+		NoSleepOnBattery:        false,
+		NoSleepBatteryThreshold: 20,
+		HotkeysEnabled:          false,
+		ProcessWatchEnabled:     false,
+		ProcessWatchList:        nil,
+		LoggingEnabled:          false,
+		ThemeSwitchEnabled:      false,
+		ThemeLightTime:          "07:00",
+		ThemeDarkTime:           "19:00",
+		ThemeMode:               "sunrise",
+		ThemeLatitude:           0,
+		ThemeLongitude:          0,
+		ThemeIPLocationEnabled:  false,
+		ThemeDarkOnBattery:      true,
+		ThemeSkipFullscreen:     true,
+		AutostartEnabled:        false,
 	}
 }
 
@@ -344,20 +345,20 @@ func renderAnnotatedTOML(cfg Config) string {
 	fmt.Fprintf(&b, "nosleep_on_battery = %t\n", cfg.NoSleepOnBattery)
 	b.WriteString("# 电池电量低于此百分比时强制关闭保持唤醒 / Force-disable Stay Awake below this battery percentage\n")
 	fmt.Fprintf(&b, "nosleep_battery_threshold = %d\n", cfg.NoSleepBatteryThreshold)
-	b.WriteString("# 保持唤醒已开启时，按指定进程限制生效范围；不会单独启用保持唤醒 / When Stay Awake is enabled, limit it to listed processes; this does not enable Stay Awake by itself\n")
+	b.WriteString("# 保持唤醒已开启时，仅在下方任一 exe 运行时保活；没有匹配进程时不保活，也不会单独启用保持唤醒 / When Stay Awake is enabled, keep awake only while any listed exe is running; no match means no keep-awake request, and this does not enable Stay Awake by itself\n")
 	fmt.Fprintf(&b, "process_watch_enabled = %t\n", cfg.ProcessWatchEnabled)
-	b.WriteString("# 不区分大小写的 .exe 文件名；空列表是正常状态，表示不按进程限制 / Case-insensitive .exe names; an empty list is valid and means no process limit\n")
+	b.WriteString("# 适用进程的 .exe 文件名，不区分大小写；空列表是正常状态，表示不按进程限制保持唤醒，也不影响空闲监测 / Applicable .exe names, case-insensitive; an empty list is valid, means Stay Awake is not process-limited, and does not affect idle monitoring\n")
 	fmt.Fprintf(&b, "process_watch_list = %s\n\n", tomlStringList(cfg.ProcessWatchList))
 
 	b.WriteString("# -- 空闲监测 / Idle Monitor --\n")
-	b.WriteString("# 无键鼠操作多少分钟后触发动作，设为 0 禁用 / Minutes of keyboard/mouse inactivity before triggering, 0 = disabled\n")
+	b.WriteString("# 空闲时长：无键鼠操作多少分钟后触发动作，设为 0 禁用 / Idle time in minutes before triggering after no keyboard or mouse input, 0 = disabled\n")
 	fmt.Fprintf(&b, "idle_timeout_minutes = %d\n", cfg.IdleTimeoutMinutes)
-	b.WriteString("# 空闲超时后执行的动作 / Action to run after idle timeout: \"sleep\", \"hibernate\", \"shutdown\", \"lock\"\n")
+	b.WriteString("# 达到空闲时长后执行的动作 / Action to run after the idle time is reached: \"sleep\", \"hibernate\", \"shutdown\", \"lock\"\n")
 	fmt.Fprintf(&b, "idle_action = %s\n", tomlString(string(cfg.IdleAction)))
-	b.WriteString("# 触发前多少秒显示不抢焦点的应用内预警；键鼠操作或关闭预警会取消本次动作，设为 0 静默执行 / Non-activating in-app warning seconds before trigger; keyboard/mouse input or closing it cancels this action, 0 = silent\n")
+	b.WriteString("# 触发前多少秒显示不抢焦点的应用内预警；键鼠操作或关闭预警会取消本次动作，设为 0 静默执行 / Seconds before trigger to show a non-activating in-app warning; keyboard/mouse input or closing it cancels this action, 0 = silent\n")
 	fmt.Fprintf(&b, "idle_warning_seconds = %d\n", cfg.IdleWarningSeconds)
-	b.WriteString("# 忽略稳定的保活输入，适合系统睡眠也被固定间隔输入干扰的机器；默认关闭，开启后仍会记录每次接受或忽略的原因 / Ignore stable keepalive input when system sleep is also disturbed by fixed-interval input; off by default, and every accepted or ignored reset is logged\n")
-	fmt.Fprintf(&b, "idle_ignore_keepalive_input = %t\n\n", cfg.IdleIgnoreKeepaliveInput)
+	b.WriteString("# 增强空闲监测：适合系统睡眠也被固定间隔空闲刷新干扰的机器；默认关闭，普通键鼠操作仍会重置计时 / Enhanced idle monitoring for machines where system sleep is disturbed by fixed-interval idle refreshes; off by default, and normal keyboard or mouse input still resets idle time\n")
+	fmt.Fprintf(&b, "idle_enhanced_monitor = %t\n\n", cfg.IdleEnhancedMonitor)
 
 	b.WriteString("# -- 昼夜主题 / Day/Night Theme --\n")
 	b.WriteString("# 启用按时间自动切换 Windows 深浅色 / Automatically switch Windows light/dark theme by schedule\n")

@@ -282,6 +282,9 @@ func TestLoadFromRefreshesOlderTemplateVersion(t *testing.T) {
 	oldAnnotated := renderAnnotatedTOML(DefaultConfig())
 	oldAnnotated = strings.Replace(oldAnnotated, configTemplateVersionMarker(), "# config_template_version = 1", 1)
 	oldAnnotated = strings.Replace(oldAnnotated, "idle_timeout_minutes = 30", "idle_timeout_minutes = 120", 1)
+	oldAnnotated = strings.Replace(oldAnnotated,
+		"# 增强空闲监测：适合系统睡眠也被固定间隔空闲刷新干扰的机器；默认关闭，普通键鼠操作仍会重置计时 / Enhanced idle monitoring for machines where system sleep is disturbed by fixed-interval idle refreshes; off by default, and normal keyboard or mouse input still resets idle time\nidle_enhanced_monitor = false",
+		"# Ignore stable keepalive input\nidle_ignore_keepalive_input = true", 1)
 	if err := os.WriteFile(path, []byte(oldAnnotated), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -300,6 +303,9 @@ func TestLoadFromRefreshesOlderTemplateVersion(t *testing.T) {
 	text := string(data)
 	if !strings.Contains(text, configTemplateVersionMarker()) ||
 		!strings.Contains(text, "idle_timeout_minutes = 120") ||
+		!strings.Contains(text, "idle_enhanced_monitor = false") ||
+		strings.Contains(text, "idle_ignore_keepalive_input") ||
+		strings.Contains(text, "Ignore stable keepalive input") ||
 		needsAnnotatedTOMLRefresh(data) {
 		t.Fatalf("old template version was not refreshed correctly:\n%s", text)
 	}
@@ -318,7 +324,7 @@ func assertConfigFieldsPresent(t *testing.T, text string) {
 		"idle_timeout_minutes =",
 		"idle_action =",
 		"idle_warning_seconds =",
-		"idle_ignore_keepalive_input =",
+		"idle_enhanced_monitor =",
 		"theme_switch_enabled =",
 		"theme_mode =",
 		"theme_light_time =",

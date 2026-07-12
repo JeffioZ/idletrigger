@@ -230,9 +230,9 @@ func (m *Monitor) SetThreshold(d time.Duration) { m.thresholdNs.Store(int64(d)) 
 // Threshold returns the current idle threshold.
 func (m *Monitor) Threshold() time.Duration { return time.Duration(m.thresholdNs.Load()) }
 
-// SetIgnoreKeepaliveInput enables an advanced compatibility mode that ignores
-// stable, low-frequency input timestamp changes after a pattern is established.
-func (m *Monitor) SetIgnoreKeepaliveInput(enabled bool) { m.ignorePeriodic.Store(enabled) }
+// SetEnhancedIdleMonitor enables a compatibility mode that keeps logical idle
+// time moving across stable, low-frequency input timestamp refreshes.
+func (m *Monitor) SetEnhancedIdleMonitor(enabled bool) { m.ignorePeriodic.Store(enabled) }
 
 // SetOnActivity sets a callback for the first user activity after a warning.
 // It must be configured before Start.

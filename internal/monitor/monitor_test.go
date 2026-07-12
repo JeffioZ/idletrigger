@@ -172,7 +172,7 @@ func TestKeepaliveInputResetCanBeIgnored(t *testing.T) {
 	var input atomic.Uint32
 	input.Store(1000)
 	m := New(80*time.Millisecond, 0, nil, nil, time.Millisecond)
-	m.SetIgnoreKeepaliveInput(true)
+	m.SetEnhancedIdleMonitor(true)
 	m.idleDuration = func() (time.Duration, error) { return 0, nil }
 	m.inputTimestamp = func() (uint32, error) { return input.Load(), nil }
 	m.SetOnInputReset(func(reset InputReset) { resets <- reset })

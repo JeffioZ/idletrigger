@@ -355,20 +355,21 @@ func (s *trayState) startMonitor() {
 		mylog.Info("Idle monitor starting: config_timeout_min=%d effective_threshold=%s warning=%s action=%s tick_now=%d tick32=%d last_input=%d raw_delta_ms=%d idle=%s",
 			s.cfg.IdleTimeoutMinutes, threshold, warnOffset, string(action), snap.NowTick64, snap.NowTick32, snap.LastInputTick, snap.RawDeltaMS, snap.Idle.Round(time.Second))
 	}
-	mylog.Info("Idle monitor input policy: ignore_keepalive_input=%v periodic_window=%s..%s periodic_tolerance=%s periodic_required=%d",
-		s.cfg.IdleIgnoreKeepaliveInput, 20*time.Second, 2*time.Minute, 5*time.Second, 3)
+	mylog.Info("Idle monitor input policy: enhanced_idle_monitor=%v periodic_window=%s..%s periodic_tolerance=%s periodic_required=%d",
+		s.cfg.IdleEnhancedMonitor, 20*time.Second, 2*time.Minute, 5*time.Second, 3)
 	lang := s.lang
 	warningSeconds := int(warnOffset / time.Second)
 	processWatchEnabled := s.cfg.ProcessWatchEnabled
 	processListCount := len(effectiveProcessWatchList(s.cfg))
 	noSleepEnabled := s.cfg.NoSleepEnabled
 	keepScreenOn := s.cfg.KeepScreenOn
-	ignoreKeepaliveInput := s.cfg.IdleIgnoreKeepaliveInput
+	enhancedIdleMonitor := s.cfg.IdleEnhancedMonitor
 	sampleLogInterval := 5 * time.Second
 	if developerTest {
 		sampleLogInterval = 2 * time.Second
 	}
 	var lastSampleLog time.Time
+	var lastEffectiveIdle time.Duration
 	idlewarning.SetOnDismiss(func() {
 		s.post(func() {
 			if s.mon != nil && s.idleMonitorRequested() {
@@ -399,9 +400,11 @@ func (s *trayState) startMonitor() {
 			systray.PostAndWait(idlewarning.Hide)
 			idleFor, idleErr := monitor.IdleDuration()
 			if idleErr != nil {
-				mylog.Info("Idle monitor trigger reached, but idle duration lookup failed: %v", idleErr)
+				mylog.Info("Idle monitor trigger reached: effective_idle=%s action=%s raw_idle_after_trigger_error=%v",
+					lastEffectiveIdle.Round(time.Second), action, idleErr)
 			} else {
-				mylog.Info("Idle monitor trigger reached: idle=%s action=%s", idleFor.Round(time.Second), action)
+				mylog.Info("Idle monitor trigger reached: effective_idle=%s action=%s raw_idle_after_trigger=%s",
+					lastEffectiveIdle.Round(time.Second), action, idleFor.Round(time.Second))
 			}
 			if err := executeAction(action); err != nil {
 				mylog.Info("Idle monitor action failed: action=%s error=%v", action, err)
@@ -412,26 +415,27 @@ func (s *trayState) startMonitor() {
 		},
 		time.Second,
 	)
-	s.mon.SetIgnoreKeepaliveInput(ignoreKeepaliveInput)
+	s.mon.SetEnhancedIdleMonitor(enhancedIdleMonitor)
 	s.mon.SetOnActivity(func() { systray.Post(idlewarning.Hide) })
 	s.mon.SetOnInputReset(func(reset monitor.InputReset) {
-		mylog.Info("Idle monitor input reset: previous_last_input=%d last_input=%d session_idle_before_reset=%s threshold=%s warn_at=%s was_warned=%v was_triggered=%v ignored=%v reason=%s periodic_count=%d periodic_baseline=%s ignore_keepalive_input=%v action=%s source=GetLastInputInfo",
+		mylog.Info("Idle monitor input reset: previous_last_input=%d last_input=%d session_idle_before_reset=%s threshold=%s warn_at=%s was_warned=%v was_triggered=%v ignored=%v reason=%s periodic_count=%d periodic_baseline=%s enhanced_idle_monitor=%v action=%s source=GetLastInputInfo",
 			reset.PreviousLastInputTick, reset.LastInputTick, reset.SessionIdleBeforeReset.Round(time.Millisecond),
 			reset.Threshold, reset.WarnAt, reset.WasWarned, reset.WasTriggered, reset.Ignored, reset.Reason,
-			reset.PeriodicCount, reset.PeriodicBaseline.Round(time.Millisecond), ignoreKeepaliveInput, action)
+			reset.PeriodicCount, reset.PeriodicBaseline.Round(time.Millisecond), enhancedIdleMonitor, action)
 	})
 	s.mon.SetOnSample(func(sample monitor.Sample) {
+		lastEffectiveIdle = sample.Idle
 		now := time.Now()
 		if !lastSampleLog.IsZero() && now.Sub(lastSampleLog) < sampleLogInterval {
 			return
 		}
 		lastSampleLog = now
 		if snap, err := monitor.Snapshot(); err == nil {
-			mylog.Info("Idle monitor sample: effective_idle=%s raw_idle=%s raw_delta_ms=%d threshold=%s warn_at=%s last_input=%d tick_now=%d clamped_to_start=%v warned=%v triggered=%v input_timestamp=%v ignore_keepalive_input=%v nosleep_enabled=%v keep_screen_on=%v process_watch_enabled=%v process_list_count=%d",
+			mylog.Info("Idle monitor sample: effective_idle=%s raw_idle=%s raw_delta_ms=%d threshold=%s warn_at=%s last_input=%d tick_now=%d clamped_to_start=%v warned=%v triggered=%v input_timestamp=%v enhanced_idle_monitor=%v nosleep_enabled=%v keep_screen_on=%v process_watch_enabled=%v process_list_count=%d",
 				sample.Idle.Round(time.Millisecond), snap.Idle.Round(time.Millisecond), snap.RawDeltaMS,
 				sample.Threshold, sample.WarnAt, sample.LastInputTick, snap.NowTick64,
 				sample.StartWindowClamped, sample.Warned, sample.Triggered, sample.InputTimestampAvailable,
-				ignoreKeepaliveInput, noSleepEnabled, keepScreenOn, processWatchEnabled, processListCount)
+				enhancedIdleMonitor, noSleepEnabled, keepScreenOn, processWatchEnabled, processListCount)
 		} else {
 			mylog.Info("Idle monitor sample: effective_idle=%s threshold=%s warn_at=%s last_input=%d clamped_to_start=%v warned=%v triggered=%v input_timestamp=%v snapshot_error=%v",
 				sample.Idle.Round(time.Millisecond), sample.Threshold, sample.WarnAt, sample.LastInputTick,
@@ -577,7 +581,7 @@ func (s *trayState) startProcessWatcher() {
 	s.stopProcessWatcher()
 	list := effectiveProcessWatchList(s.cfg)
 	if len(list) == 0 {
-		mylog.Info("Process watcher not started: process_watch_list is empty")
+		mylog.Info("Process condition inactive: process_watch_list is empty; Stay Awake is not process-limited")
 		return
 	}
 	mylog.Info("Process watcher started: exes=%s", strings.Join(list, ","))
@@ -621,7 +625,7 @@ func (s *trayState) syncProcessWatcher() {
 	}
 	s.stopProcessWatcher()
 	if s.cfg.ProcessWatchEnabled && len(effectiveProcessWatchList(s.cfg)) == 0 {
-		mylog.Info("Process watcher disabled at runtime: process_watch_list is empty")
+		mylog.Info("Process condition inactive at runtime: process_watch_list is empty; idle monitoring is unaffected")
 	}
 }
 
@@ -1058,29 +1062,30 @@ func (s *trayState) openPopup(refresh bool) {
 	s.stateCh <- stateRequest{fn: func() string {
 		result <- popupSnapshot{
 			state: popup.State{
-				NoSleepEnabled:           s.cfg.NoSleepEnabled,
-				ProcessWatchEnabled:      s.cfg.ProcessWatchEnabled,
-				IdleEnabled:              s.idleMonitorRequested(),
-				IdlePaused:               s.idleSuspended(),
-				IdleWarningEnabled:       s.cfg.IdleWarningSeconds > 0,
-				IdleIgnoreKeepaliveInput: s.cfg.IdleIgnoreKeepaliveInput,
-				IdleTimeout:              s.cfg.IdleTimeoutMinutes,
-				IdleAction:               string(s.cfg.IdleAction),
-				ProcessWatchList:         effectiveProcessWatchList(s.cfg),
-				ProcessWatchActive:       s.processNoSleep,
-				ThemeSwitchEnabled:       s.cfg.ThemeSwitchEnabled,
-				DarkOnBattery:            s.cfg.ThemeDarkOnBattery,
-				SkipFullscreen:           s.cfg.ThemeSkipFullscreen,
-				IPLocationEnabled:        s.cfg.ThemeIPLocationEnabled,
-				HotkeysEnabled:           s.cfg.HotkeysEnabled,
-				AutostartEnabled:         s.cfg.AutostartEnabled,
-				LoggingEnabled:           s.cfg.LoggingEnabled,
-				IsChinese:                i18n.ResolveLanguage(s.lang) == "zh-CN",
-				ThemeSchedule:            s.themeScheduleText(true),
-				AppVersion:               version.Value,
-				Owner:                    systray.WindowHandle(),
-				DeveloperCapturePanel:    s.devtools.CapturePanel,
-				DeveloperWarningPreview:  s.devtools.WarningPreview,
+				NoSleepEnabled:          s.cfg.NoSleepEnabled,
+				ProcessWatchEnabled:     s.cfg.ProcessWatchEnabled,
+				IdleEnabled:             s.idleMonitorRequested(),
+				IdlePaused:              s.idleSuspended(),
+				IdleWarningEnabled:      s.cfg.IdleWarningSeconds > 0,
+				IdleEnhancedMonitor:     s.cfg.IdleEnhancedMonitor,
+				IdleTimeout:             s.cfg.IdleTimeoutMinutes,
+				IdleWarningSeconds:      s.cfg.IdleWarningSeconds,
+				IdleAction:              string(s.cfg.IdleAction),
+				ProcessWatchList:        effectiveProcessWatchList(s.cfg),
+				ProcessWatchActive:      s.processNoSleep,
+				ThemeSwitchEnabled:      s.cfg.ThemeSwitchEnabled,
+				DarkOnBattery:           s.cfg.ThemeDarkOnBattery,
+				SkipFullscreen:          s.cfg.ThemeSkipFullscreen,
+				IPLocationEnabled:       s.cfg.ThemeIPLocationEnabled,
+				HotkeysEnabled:          s.cfg.HotkeysEnabled,
+				AutostartEnabled:        s.cfg.AutostartEnabled,
+				LoggingEnabled:          s.cfg.LoggingEnabled,
+				IsChinese:               i18n.ResolveLanguage(s.lang) == "zh-CN",
+				ThemeSchedule:           s.themeScheduleText(true),
+				AppVersion:              version.Value,
+				Owner:                   systray.WindowHandle(),
+				DeveloperCapturePanel:   s.devtools.CapturePanel,
+				DeveloperWarningPreview: s.devtools.WarningPreview,
 			},
 			lang: s.lang,
 		}
@@ -1159,9 +1164,9 @@ func (s *trayState) handlePopupAction(action popup.Action, value int) {
 		}
 		s.reconcileRuntime()
 		s.saveConfig()
-	case popup.ActIdleIgnoreKeepaliveInputToggle:
-		s.cfg.IdleIgnoreKeepaliveInput = !s.cfg.IdleIgnoreKeepaliveInput
-		mylog.Info("Idle monitor keepalive input filter toggled: enabled=%v", s.cfg.IdleIgnoreKeepaliveInput)
+	case popup.ActIdleEnhancedMonitorToggle:
+		s.cfg.IdleEnhancedMonitor = !s.cfg.IdleEnhancedMonitor
+		mylog.Info("Idle monitor enhanced mode toggled: enabled=%v", s.cfg.IdleEnhancedMonitor)
 		s.reconcileRuntime()
 		s.saveConfig()
 	case popup.ActThemeToggle:

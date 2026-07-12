@@ -83,7 +83,7 @@ const (
 	ActIdleTimeout Action = 100 + iota
 	ActIdleAction
 	ActIdleWarningToggle
-	ActIdleIgnoreKeepaliveInputToggle
+	ActIdleEnhancedMonitorToggle
 	ActThemeToggle
 	ActBatteryToggle
 	ActFullscreenToggle
@@ -101,8 +101,9 @@ const (
 type State struct {
 	NoSleepEnabled, ProcessWatchEnabled, IdleEnabled, IdlePaused bool
 	IdleWarningEnabled                                           bool
-	IdleIgnoreKeepaliveInput                                     bool
+	IdleEnhancedMonitor                                          bool
 	IdleTimeout                                                  int
+	IdleWarningSeconds                                           int
 	IdleAction                                                   string
 	ProcessWatchList                                             []string
 	ProcessWatchActive                                           bool
@@ -226,7 +227,7 @@ const (
 	idProcess         = 11
 	idIdle            = 20
 	idIdleWarning     = 21
-	idIdleKeepalive   = 22
+	idIdleEnhanced    = 22
 	idTheme           = 30
 	idBattery         = 32
 	idFullscreen      = 33
@@ -351,6 +352,8 @@ type panel struct {
 	clientH                         int
 	appVersion                      string
 	idleTimeout                     int
+	idleWarningSeconds              int
+	idleAction                      string
 	isChinese                       bool
 	owner                           windows.Handle
 	largeIcon, smallIcon            windows.Handle
@@ -419,6 +422,8 @@ func createPanel(state State, onAction OnAction, langFn LangFunc) error {
 		appVersion:              state.AppVersion,
 		idlePaused:              state.IdlePaused,
 		idleTimeout:             state.IdleTimeout,
+		idleWarningSeconds:      state.IdleWarningSeconds,
+		idleAction:              state.IdleAction,
 		isChinese:               state.IsChinese,
 		owner:                   state.Owner,
 		processWatchList:        append([]string(nil), state.ProcessWatchList...),
@@ -433,13 +438,13 @@ func createPanel(state State, onAction OnAction, langFn LangFunc) error {
 		toggles: map[uint16]bool{
 			idNoSleep: state.NoSleepEnabled, idProcess: state.ProcessWatchEnabled,
 			idIdle: state.IdleEnabled && !state.IdlePaused, idIdleWarning: state.IdleWarningEnabled,
-			idIdleKeepalive: state.IdleIgnoreKeepaliveInput,
-			idTheme:         state.ThemeSwitchEnabled,
-			idBattery:       state.DarkOnBattery,
-			idFullscreen:    state.SkipFullscreen,
-			idIPLocation:    state.IPLocationEnabled,
-			idHotkeys:       state.HotkeysEnabled,
-			idAutostart:     state.AutostartEnabled, idLogging: state.LoggingEnabled,
+			idIdleEnhanced: state.IdleEnhancedMonitor,
+			idTheme:        state.ThemeSwitchEnabled,
+			idBattery:      state.DarkOnBattery,
+			idFullscreen:   state.SkipFullscreen,
+			idIPLocation:   state.IPLocationEnabled,
+			idHotkeys:      state.HotkeysEnabled,
+			idAutostart:    state.AutostartEnabled, idLogging: state.LoggingEnabled,
 		},
 		selected:      make(map[uint16]bool),
 		disabled:      make(map[uint16]bool),
@@ -750,8 +755,8 @@ func (p *panel) tooltipText(id uint16) string {
 		key = "tip_idle"
 	case idIdleWarning:
 		key = "tip_idle_warning"
-	case idIdleKeepalive:
-		key = "tip_idle_keepalive"
+	case idIdleEnhanced:
+		key = "tip_idle_enhanced"
 	case idIdleTimeout:
 		key = "tip_idle_timeout"
 	case idActionSleep, idActionHibernate, idActionShutdown, idActionLock:
@@ -897,7 +902,7 @@ func (p *panel) build() error {
 	if p.idlePaused {
 		idleLabel = p.text("menu_idle_paused")
 	}
-	height, err = choiceRow(childX, y, childW, []string{idleLabel, p.text("menu_idle_warning"), p.text("menu_idle_keepalive")}, []uint16{idIdle, idIdleWarning, idIdleKeepalive})
+	height, err = choiceRow(childX, y, childW, []string{idleLabel, p.text("menu_idle_warning"), p.text("menu_idle_enhanced")}, []uint16{idIdle, idIdleWarning, idIdleEnhanced})
 	if err != nil {
 		return err
 	}
@@ -1065,7 +1070,7 @@ func languageIDs() []uint16 { return []uint16{idLangEN, idLangZH} }
 
 func roleForButton(id uint16) buttonRole {
 	switch id {
-	case idNoSleep, idProcess, idIdle, idIdleWarning, idIdleKeepalive,
+	case idNoSleep, idProcess, idIdle, idIdleWarning, idIdleEnhanced,
 		idTheme, idBattery, idFullscreen, idIPLocation, idHotkeys, idAutostart, idLogging:
 		return buttonToggle
 	case idActionSleep, idActionHibernate, idActionShutdown, idActionLock, idLangEN, idLangZH:
@@ -1101,6 +1106,16 @@ func actionID(value string) uint16 {
 	}
 	return idActionSleep
 }
+
+func actionTranslationKey(value string) string {
+	switch value {
+	case "sleep", "hibernate", "shutdown", "lock":
+		return "menu_action_" + value
+	default:
+		return "menu_action_sleep"
+	}
+}
+
 func (p *panel) setChoice(group []uint16, selected uint16) {
 	for _, id := range group {
 		p.selected[id] = id == selected
@@ -1408,9 +1423,9 @@ func (p *panel) handleCommand(id uint16) {
 	case id == idIdleWarning:
 		p.toggle(id)
 		action = ActIdleWarningToggle
-	case id == idIdleKeepalive:
+	case id == idIdleEnhanced:
 		p.toggle(id)
-		action = ActIdleIgnoreKeepaliveInputToggle
+		action = ActIdleEnhancedMonitorToggle
 	case id >= idActionSleep && id <= idActionLock:
 		p.choose(actionIDs(), id)
 		action = ActIdleAction
@@ -1451,7 +1466,18 @@ func (p *panel) handleCommand(id uint16) {
 	case id == idTestWarning:
 		Hide()
 		idlewarning.SetLanguage(p.isChinese)
-		idlewarning.Show(p.text("idle_warning_title"), p.text("msg_idle_warning_test"))
+		seconds := p.idleWarningSeconds
+		if seconds <= 0 {
+			seconds = 30
+		}
+		actionName := p.text(actionTranslationKey(p.idleAction))
+		title := p.text("idle_warning_title")
+		idlewarning.ShowCountdown(title, seconds, func(remaining int) string {
+			if remaining < 0 {
+				remaining = 0
+			}
+			return fmt.Sprintf(p.text("msg_idle_warning"), actionName, remaining)
+		})
 		return
 	case id == idConfig:
 		action = ActConfig

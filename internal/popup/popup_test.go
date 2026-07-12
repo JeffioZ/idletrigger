@@ -53,7 +53,7 @@ func TestVisualStateForButtonRoles(t *testing.T) {
 }
 
 func TestButtonRoleMappingCoversEveryPanelAction(t *testing.T) {
-	for _, id := range []uint16{idNoSleep, idProcess, idIdle, idIdleWarning, idIdleKeepalive, idTheme, idBattery, idFullscreen, idIPLocation, idHotkeys, idAutostart, idLogging} {
+	for _, id := range []uint16{idNoSleep, idProcess, idIdle, idIdleWarning, idIdleEnhanced, idTheme, idBattery, idFullscreen, idIPLocation, idHotkeys, idAutostart, idLogging} {
 		if got := roleForButton(id); got != buttonToggle {
 			t.Fatalf("toggle id %d has role %d", id, got)
 		}

@@ -37,7 +37,7 @@ The control panel follows Windows light/dark mode, responds to DPI changes, and 
 - Blue controls are enabled or selected; neutral controls are available but not selected. **Exit** is red because it stops all IdleTrigger features.
 - **Quick Actions** run immediately. Save your work before choosing Sleep, Hibernate, Shut Down, or Restart.
 - Use the mouse or `Tab` / `Shift+Tab` to move between controls, then press `Space` to activate the focused control. The keyboard focus has a visible outline.
-- The compact panel exposes routine choices only. Use **Edit Config** for advanced settings such as process lists, locations, and detailed theme rules.
+- The compact panel exposes routine choices only. Use **Edit Config** for advanced settings such as applicable processes, locations, and detailed theme rules.
 
 ## Screenshots
 
@@ -54,15 +54,15 @@ The control panel follows Windows light/dark mode, responds to DPI changes, and 
 
 ## Idle Monitor
 
-The idle monitor is enabled by default with a 30-minute timeout and Sleep as its action. Available panel timeouts are:
+The idle monitor is enabled by default with a 30-minute idle time and Sleep as its action. Available panel idle-time choices are:
 
 `1, 2, 3, 5, 10, 15, 20, 25, 30, 45 minutes; 1, 2, 3, 4, 5 hours`.
 
-The monitor uses Windows `GetLastInputInfo` to observe real keyboard and mouse activity. A newly started or re-enabled monitor begins a fresh timeout; it never acts immediately because the machine had already been idle before IdleTrigger started. After an action is triggered, the timeout is reset before monitoring continues.
+The monitor uses Windows `GetLastInputInfo` to observe real keyboard and mouse activity. A newly started or re-enabled monitor begins a fresh idle window; it never acts immediately because the machine had already been idle before IdleTrigger started. After an action is triggered, the idle window is reset before monitoring continues.
 
 Enable the warning to receive a non-activating prompt before the action. Any keyboard or mouse input cancels the pending action; closing the prompt does the same. Set `idle_warning_seconds = 0` for silent operation.
 
-If Windows itself never becomes idle because a device, driver, or app sends fixed-interval keepalive input, enable the Ignore Keepalive Input switch. It is off by default; when enabled, IdleTrigger first logs and learns a stable reset pattern, then ignores matching keepalive resets while continuing to log why each reset was accepted or ignored.
+If a device, driver, or app refreshes Windows idle time at a fixed interval and prevents system sleep or idle actions, enable the Enhanced Idle Monitor switch. It is off by default; when enabled, IdleTrigger first logs and learns a stable reset pattern, then keeps a more robust idle timer. Normal keyboard or mouse input still resets idle time, and logs continue to record why each reset was accepted or ignored.
 
 ## Command Line
 
