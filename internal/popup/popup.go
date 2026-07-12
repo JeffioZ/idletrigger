@@ -258,6 +258,7 @@ var (
 	kernel32 = windows.NewLazySystemDLL("kernel32.dll")
 
 	pCreateWindowEx        = user32.NewProc("CreateWindowExW")
+	pLoadIcon              = user32.NewProc("LoadIconW")
 	pLoadImage             = user32.NewProc("LoadImageW")
 	pDestroyIcon           = user32.NewProc("DestroyIcon")
 	pRegisterClassEx       = user32.NewProc("RegisterClassExW")
@@ -513,10 +514,15 @@ func ensureClass() error {
 			classErr = err
 			return
 		}
+		module, _, _ := pGetModuleHandle.Call(0)
+		fallbackIcon := classFallbackIcon(module)
 		wc := wndClassExW{
 			Size:      uint32(unsafe.Sizeof(wndClassExW{})),
 			WndProc:   windows.NewCallback(wndProc),
+			Instance:  windows.Handle(module),
+			Icon:      fallbackIcon,
 			ClassName: name,
+			IconSm:    fallbackIcon,
 		}
 		if result, _, callErr := pRegisterClassEx.Call(uintptr(unsafe.Pointer(&wc))); result == 0 && callErr != syscall.Errno(1410) {
 			classErr = fmt.Errorf("register popup class: %w", callErr)
@@ -526,9 +532,21 @@ func ensureClass() error {
 }
 
 const (
+	appIconResourceID       = 2 // Main executable icon; shared class fallback only.
 	trayDarkIconResourceID  = 3 // Dark mark for a light title bar.
 	trayLightIconResourceID = 4 // Light mark for a dark title bar.
 )
+
+// classFallbackIcon is loaded through LoadIconW, whose resource handle is
+// shared by the module and must not be destroyed. Every real panel instance
+// immediately replaces it with the theme-specific, owned WM_SETICON handles.
+func classFallbackIcon(module uintptr) windows.Handle {
+	if module == 0 {
+		return 0
+	}
+	icon, _, _ := pLoadIcon.Call(module, appIconResourceID)
+	return windows.Handle(icon)
+}
 
 func windowIconResourceID(dark bool) uintptr {
 	if dark {

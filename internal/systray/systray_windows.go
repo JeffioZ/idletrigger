@@ -54,6 +54,7 @@ var (
 	pGetSystemMetrics      = u32.NewProc("GetSystemMetrics")
 	pInsertMenuItem        = u32.NewProc("InsertMenuItemW")
 	pLoadCursor            = u32.NewProc("LoadCursorW")
+	pDestroyIcon           = u32.NewProc("DestroyIcon")
 	pLoadIcon              = u32.NewProc("LoadIconW")
 	pLoadImage             = u32.NewProc("LoadImageW")
 	pPostMessage           = u32.NewProc("PostMessageW")
@@ -285,8 +286,10 @@ type winTray struct {
 	cursor,
 	window windows.Handle
 
-	loadedImages   map[string]windows.Handle
-	muLoadedImages sync.RWMutex
+	loadedImages    map[string]windows.Handle
+	muLoadedImages  sync.RWMutex
+	iconsReleased   bool
+	muIconLifecycle sync.Mutex
 	// menus keeps track of the submenus keyed by the menu item ID, plus 0
 	// which corresponds to the main popup menu.
 	menus   map[uint32]windows.Handle
@@ -317,6 +320,8 @@ type winTray struct {
 // Shell_NotifyIcon: https://msdn.microsoft.com/en-us/library/windows/desktop/bb762159(v=vs.85).aspx
 func (t *winTray) setIcon(src string) error {
 	const NIF_ICON = 0x00000002
+	t.muIconLifecycle.Lock()
+	defer t.muIconLifecycle.Unlock()
 
 	h, err := t.loadIconFrom(src)
 	if err != nil {
@@ -330,6 +335,51 @@ func (t *winTray) setIcon(src string) error {
 	t.nid.Size = uint32(unsafe.Sizeof(*t.nid))
 
 	return t.nid.modify()
+}
+
+// releaseLoadedIcons destroys only the HICON values created by LoadImageW in
+// loadIconFrom. It runs after NIM_DELETE (or destruction of the owner window),
+// when Shell_NotifyIcon can no longer use the notification icon handle.
+func (t *winTray) releaseLoadedIcons() {
+	for _, icon := range t.takeLoadedIconsForRelease() {
+		pDestroyIcon.Call(uintptr(icon))
+	}
+}
+
+// takeLoadedIconsForRelease transfers the owned handles exactly once. Clearing
+// the map before DestroyIcon prevents both a second release and later reuse of
+// an invalid handle during shutdown.
+func (t *winTray) takeLoadedIconsForRelease() []windows.Handle {
+	t.muLoadedImages.Lock()
+	defer t.muLoadedImages.Unlock()
+	if t.iconsReleased {
+		return nil
+	}
+	t.iconsReleased = true
+	icons := make([]windows.Handle, 0, len(t.loadedImages))
+	for _, icon := range t.loadedImages {
+		if icon != 0 {
+			icons = append(icons, icon)
+		}
+	}
+	t.loadedImages = nil
+	return icons
+}
+
+// removeNotificationIcon releases the Shell registration before destroying
+// application-owned HICON values. WM_ENDSESSION can precede WM_DESTROY, so this
+// operation is intentionally idempotent.
+func (t *winTray) removeNotificationIcon() {
+	t.muIconLifecycle.Lock()
+	defer t.muIconLifecycle.Unlock()
+	t.muNID.Lock()
+	nid := t.nid
+	t.nid = nil
+	t.muNID.Unlock()
+	if nid != nil {
+		_ = nid.delete()
+	}
+	t.releaseLoadedIcons()
 }
 
 // Sets tooltip on icon.
@@ -484,11 +534,7 @@ func (t *winTray) wndProc(hWnd windows.Handle, message uint32, wParam, lParam ui
 		defer pPostQuitMessage.Call(uintptr(int32(0)))
 		fallthrough
 	case WM_ENDSESSION:
-		t.muNID.Lock()
-		if t.nid != nil {
-			t.nid.delete()
-		}
-		t.muNID.Unlock()
+		t.removeNotificationIcon()
 		systrayExit()
 	case t.wmSystrayMessage:
 		switch lParam {
@@ -502,9 +548,13 @@ func (t *winTray) wndProc(hWnd windows.Handle, message uint32, wParam, lParam ui
 			t.showMenu()
 		}
 	case t.wmTaskbarCreated: // on explorer.exe restarts
+		t.muIconLifecycle.Lock()
 		t.muNID.Lock()
-		t.nid.add()
+		if t.nid != nil {
+			t.nid.add()
+		}
 		t.muNID.Unlock()
+		t.muIconLifecycle.Unlock()
 	default:
 		// Calls the default window procedure to provide default processing for any window messages that an application does not process.
 		// https://msdn.microsoft.com/en-us/library/windows/desktop/ms633572(v=vs.85).aspx
@@ -563,7 +613,10 @@ func (t *winTray) initInstance() error {
 	)
 	t.wmTaskbarCreated = uint32(res)
 
+	t.muLoadedImages.Lock()
 	t.loadedImages = make(map[string]windows.Handle)
+	t.iconsReleased = false
+	t.muLoadedImages.Unlock()
 
 	instanceHandle, _, err := pGetModuleHandle.Call(0)
 	if instanceHandle == 0 {

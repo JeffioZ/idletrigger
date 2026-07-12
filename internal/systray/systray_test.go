@@ -55,3 +55,25 @@ func TestThemeChangeMessageScope(t *testing.T) {
 		t.Fatal("keyboard messages must not trigger a theme refresh")
 	}
 }
+
+func TestTakeLoadedIconsForReleaseTransfersHandlesOnce(t *testing.T) {
+	tray := &winTray{loadedImages: map[string]windows.Handle{
+		"light": 101,
+		"dark":  202,
+		"zero":  0,
+	}}
+	first := tray.takeLoadedIconsForRelease()
+	if len(first) != 2 || !tray.iconsReleased || tray.loadedImages != nil {
+		t.Fatalf("first release = %#v, released=%v, cache=%#v", first, tray.iconsReleased, tray.loadedImages)
+	}
+	seen := map[windows.Handle]bool{}
+	for _, icon := range first {
+		seen[icon] = true
+	}
+	if !seen[101] || !seen[202] {
+		t.Fatalf("released handles = %#v, want 101 and 202", first)
+	}
+	if second := tray.takeLoadedIconsForRelease(); len(second) != 0 {
+		t.Fatalf("second release = %#v, want no handles", second)
+	}
+}

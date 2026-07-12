@@ -124,6 +124,9 @@ func TestComboFocusOutlineRequiresKeyboardFocusedSelectionField(t *testing.T) {
 }
 
 func TestWindowIconThemeAndReloadDecisions(t *testing.T) {
+	if appIconResourceID != 2 {
+		t.Fatalf("class fallback resource = %d, want 2", appIconResourceID)
+	}
 	if got := windowIconResourceID(false); got != trayDarkIconResourceID {
 		t.Fatalf("light theme resource = %d, want %d", got, trayDarkIconResourceID)
 	}
