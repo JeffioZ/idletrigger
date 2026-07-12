@@ -69,11 +69,11 @@ jobs:
 
             ### Highlights
 
-            - Added IP-based sunrise/sunset location resolution with safe fallback through Windows timezone, UTC offset, and the default location.
-            - Improved day/night theme fallback documentation and failure diagnostics.
-            - Fixed CLI output behavior for Windows GUI-subsystem builds.
-            - Aligned user-facing idle monitor and theme text in English and Simplified Chinese.
-            - Hardened release, lint, repository hygiene, and config example consistency checks.
+            - Hardened idle monitoring with diagnostics for Windows last-input resets and optional fixed-interval keepalive filtering.
+            - Added `IdleTrigger diagnostics idle [--watch]` for inspecting idle timing and input-reset behavior.
+            - Clarified Stay Awake process-watch semantics: watched processes now limit an enabled Stay Awake session instead of enabling it by themselves.
+            - Improved native control-panel keyboard accessibility, tooltip state text, and idle-warning layout.
+            - Reduced debug-log overhead when logging is disabled and expanded diagnostics around keepalive decisions.
 
             Download the native 64-bit build `IdleTrigger-x64.exe` (recommended) or
             the 32-bit compatibility build `IdleTrigger-x86.exe` — no installation needed.
@@ -84,11 +84,11 @@ jobs:
 
             ### 更新重点
 
-            - 新增基于 IP 的日出日落定位，并按 Windows 时区、UTC 偏移和默认位置安全回退。
-            - 完善昼夜主题回退说明和主题切换失败诊断日志。
-            - 修复 Windows GUI 子系统构建下 CLI 输出行为。
-            - 对齐空闲监测与主题相关的中英文用户可见文案。
-            - 强化发布、Lint、仓库清理和配置示例一致性检查。
+            - 强化空闲监测，增加 Windows 最后输入重置诊断，并支持可选过滤固定间隔保活输入。
+            - 新增 `IdleTrigger diagnostics idle [--watch]`，用于查看空闲计时与输入重置行为。
+            - 明确保持唤醒的进程监听语义：指定进程只限制已开启的保持唤醒，不会单独启用保持唤醒。
+            - 优化原生控制浮层的键盘可访问性、tooltip 状态说明和空闲预警布局。
+            - 日志关闭时减少调试格式化开销，并补充保活输入判定诊断。
 
             下载原生 64 位版本 `IdleTrigger-x64.exe`（推荐），或下载 32 位兼容版本
             `IdleTrigger-x86.exe`。无需安装，直接运行即可。
