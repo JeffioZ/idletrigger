@@ -17,3 +17,14 @@ func TestWarningMinimumHeightIsCompact(t *testing.T) {
 		t.Fatalf("minimum warning height = %d, expected a more compact card", warningMinHeight)
 	}
 }
+
+func TestCloseGlyphMetricsScaleWithoutFonts(t *testing.T) {
+	inset, stroke := closeGlyphMetrics(28)
+	if inset != 9 || stroke != 2 {
+		t.Fatalf("28px glyph = inset %d stroke %d", inset, stroke)
+	}
+	_, stroke = closeGlyphMetrics(1)
+	if stroke != 1 {
+		t.Fatalf("small glyph stroke = %d", stroke)
+	}
+}

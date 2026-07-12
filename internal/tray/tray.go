@@ -378,6 +378,7 @@ func (s *trayState) startMonitor() {
 		func() {
 			actName := i18n.T(lang, actionTranslationKey(action))
 			title := i18n.T(lang, "idle_warning_title")
+			idlewarning.SetLanguage(i18n.ResolveLanguage(lang) == "zh-CN")
 			mylog.Info("Idle warning displayed: action=%s seconds=%d", action, warningSeconds)
 			idlewarning.ShowCountdown(title, warningSeconds, func(remaining int) string {
 				if remaining < 0 {

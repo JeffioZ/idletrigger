@@ -10,8 +10,10 @@ import (
 
 	"golang.org/x/sys/windows"
 
+	mylog "github.com/JeffioZ/idletrigger/internal/log"
 	"github.com/JeffioZ/idletrigger/internal/systray"
 	"github.com/JeffioZ/idletrigger/internal/themeswitch"
+	"github.com/JeffioZ/idletrigger/internal/uifont"
 )
 
 type rect struct{ Left, Top, Right, Bottom int32 }
@@ -33,10 +35,6 @@ type monitorInfo struct {
 	Flags         uint32
 }
 
-type textSize struct {
-	CX, CY int32
-}
-
 // paintStruct is an opaque buffer large enough for PAINTSTRUCT on 32-bit and
 // 64-bit Windows. Only BeginPaint/EndPaint consume it, so this avoids Go
 // struct-alignment differences between architectures.
@@ -53,6 +51,7 @@ const (
 	wmLButtonUp      = 0x0202
 	wmMouseMove      = 0x0200
 	wmMouseLeave     = 0x02A3
+	wmDpiChanged     = 0x02E0
 	wsPopup          = 0x80000000
 	wsBorder         = 0x00800000
 	wsExTool         = 0x00000080
@@ -93,27 +92,32 @@ var (
 	pTrackMouseEvent   = user32.NewProc("TrackMouseEvent")
 	pFillRect          = user32.NewProc("FillRect")
 	pDrawText          = user32.NewProc("DrawTextW")
-	pTextOut           = gdi32.NewProc("TextOutW")
-	pGetTextExtent     = gdi32.NewProc("GetTextExtentPoint32W")
 	pSetTextColor      = gdi32.NewProc("SetTextColor")
 	pSetBkMode         = gdi32.NewProc("SetBkMode")
 	pGetDpiForWindow   = user32.NewProc("GetDpiForWindow")
 	pDeleteObject      = gdi32.NewProc("DeleteObject")
 	pCreateBrush       = gdi32.NewProc("CreateSolidBrush")
-	pCreateFont        = gdi32.NewProc("CreateFontIndirectW")
+	pCreatePen         = gdi32.NewProc("CreatePen")
+	pMoveToEx          = gdi32.NewProc("MoveToEx")
+	pLineTo            = gdi32.NewProc("LineTo")
 	pSelectObject      = gdi32.NewProc("SelectObject")
 
-	classOnce sync.Once
-	classErr  error
-	active    windows.Handle
-	title     string
-	body      string
-	closeHot  bool
-	closeDown bool
-	activeSeq uint64
-	nextSeq   atomic.Uint64
-	dismissMu sync.RWMutex
-	onDismiss func()
+	classOnce  sync.Once
+	classErr   error
+	active     windows.Handle
+	title      string
+	body       string
+	closeHot   bool
+	closeDown  bool
+	activeSeq  uint64
+	titleFont  windows.Handle
+	bodyFont   windows.Handle
+	fontChoice uifont.Choice
+	uiChinese  *bool
+	nextSeq    atomic.Uint64
+	dismissMu  sync.RWMutex
+	onDismiss  func()
+	languageMu sync.RWMutex
 
 	warningProc = windows.NewCallback(wndProc)
 )
@@ -179,6 +183,14 @@ func SetOnDismiss(fn func()) {
 	dismissMu.Unlock()
 }
 
+// SetLanguage supplies the resolved application UI language before a warning
+// is shown, including when it differs from the Windows display language.
+func SetLanguage(chinese bool) {
+	languageMu.Lock()
+	uiChinese = &chinese
+	languageMu.Unlock()
+}
+
 // Hide closes the currently displayed warning. It must run on the tray UI thread.
 func Hide() {
 	if active != 0 {
@@ -187,6 +199,12 @@ func Hide() {
 	activeSeq = 0
 	closeHot = false
 	closeDown = false
+	for _, font := range []windows.Handle{titleFont, bodyFont} {
+		if font != 0 {
+			pDeleteObject.Call(uintptr(font))
+		}
+	}
+	titleFont, bodyFont = 0, 0
 }
 
 func showNow(titleText, bodyText string, seq uint64) {
@@ -209,6 +227,8 @@ func showNow(titleText, bodyText string, seq uint64) {
 	active = windows.Handle(hwnd)
 	activeSeq = seq
 	title, body = titleText, bodyText
+	rebuildFonts(active)
+	mylog.Info("UI font: surface=idle-warning ui_language=%s system_language=%s system_locale=%s face=%q reason=%s dpi=%d title_px=%d body_px=%d", fontChoice.UILanguage, fontChoice.SystemLanguage, fontChoice.SystemLocale, fontChoice.Face, fontChoice.Reason, dpiForWindow(active), scaledFontSize(active, 15), scaledFontSize(active, 13))
 	position(active)
 }
 
@@ -269,11 +289,10 @@ func measureText(hwnd windows.Handle, text string, size, weight, maxWidth int32)
 		return 0
 	}
 	defer pReleaseDC.Call(uintptr(hwnd), dc)
-	font := makeFont(size, weight)
+	font := bodyFont
 	if font == 0 {
 		return 0
 	}
-	defer pDeleteObject.Call(uintptr(font))
 	old, _, _ := pSelectObject.Call(dc, uintptr(font))
 	defer pSelectObject.Call(dc, old)
 	value, err := windows.UTF16PtrFromString(text)
@@ -291,6 +310,45 @@ func scaleForWindow(hwnd windows.Handle, v int32) int32 {
 		return v
 	}
 	return int32(float64(v)*float64(dpi)/96 + 0.5)
+}
+
+func dpiForWindow(hwnd windows.Handle) uintptr {
+	dpi, _, _ := pGetDpiForWindow.Call(uintptr(hwnd))
+	if dpi == 0 {
+		return 96
+	}
+	return dpi
+}
+
+func scaledFontSize(hwnd windows.Handle, size int32) int32 {
+	return int32(float64(size)*float64(dpiForWindow(hwnd))/96 + 0.5)
+}
+
+func rebuildFonts(hwnd windows.Handle) {
+	chinese := uifont.SystemLanguageIsChinese()
+	languageMu.RLock()
+	if uiChinese != nil {
+		chinese = *uiChinese
+	}
+	languageMu.RUnlock()
+	newTitle, choice := uifont.New(scaledFontSize(hwnd, 15), 600, chinese)
+	newBody, _ := uifont.New(scaledFontSize(hwnd, 13), 400, chinese)
+	if newTitle == 0 || newBody == 0 {
+		if newTitle != 0 {
+			pDeleteObject.Call(uintptr(newTitle))
+		}
+		if newBody != 0 {
+			pDeleteObject.Call(uintptr(newBody))
+		}
+		return
+	}
+	oldTitle, oldBody := titleFont, bodyFont
+	titleFont, bodyFont, fontChoice = newTitle, newBody, choice
+	for _, font := range []windows.Handle{oldTitle, oldBody} {
+		if font != 0 {
+			pDeleteObject.Call(uintptr(font))
+		}
+	}
 }
 
 func wndProc(hwnd windows.Handle, message uint32, wParam, lParam uintptr) uintptr {
@@ -325,6 +383,11 @@ func wndProc(hwnd windows.Handle, message uint32, wParam, lParam uintptr) uintpt
 		return 0
 	case wmMouseLeave:
 		setCloseState(hwnd, false, false)
+		return 0
+	case wmDpiChanged:
+		rebuildFonts(hwnd)
+		position(hwnd)
+		mylog.Info("UI font: surface=idle-warning rebuilt reason=dpi-change dpi=%d face=%q", dpiForWindow(hwnd), fontChoice.Face)
 		return 0
 	case wmDestroy:
 		if active == hwnd {
@@ -405,9 +468,9 @@ func paint(hwnd windows.Handle) {
 		closeText = closeActiveText
 	}
 	pSetTextColor.Call(dc, uintptr(foreground))
-	drawText(dc, title, rect{Left: margin + sc(10), Top: titleTop, Right: close.Left - sc(6), Bottom: titleBottom}, sc(15), 600, dtLeft)
+	drawText(dc, title, rect{Left: margin + sc(10), Top: titleTop, Right: close.Left - sc(6), Bottom: titleBottom}, titleFont, dtLeft)
 	pSetTextColor.Call(dc, uintptr(muted))
-	drawText(dc, body, rect{Left: margin + sc(10), Top: sc(47), Right: client.Right - margin, Bottom: client.Bottom - sc(14)}, sc(13), 400, dtLeft|dtWordBreak)
+	drawText(dc, body, rect{Left: margin + sc(10), Top: sc(47), Right: client.Right - margin, Bottom: client.Bottom - sc(14)}, bodyFont, dtLeft|dtWordBreak)
 	drawCloseGlyph(dc, close, closeText)
 }
 
@@ -424,61 +487,44 @@ func pointInRect(point point, bounds rect) bool {
 }
 
 func drawCloseGlyph(dc uintptr, bounds rect, color uint32) {
-	ptr, err := windows.UTF16PtrFromString("\uE711")
-	if err != nil {
-		return
-	}
+	// This is a graphic element, not text. Do not rely on the private-use
+	// U+E711 glyph from Segoe MDL2 Assets: GDI can silently substitute another
+	// font when it is absent, leaving a tofu box on customized Windows images.
 	size := bounds.Bottom - bounds.Top
-	glyphSize := size * 4 / 7
-	font := makeFontWithFace(glyphSize, 400, "Segoe MDL2 Assets")
-	if font == 0 {
-		font = makeFont(glyphSize, 400)
-	}
-	if font == 0 {
+	inset, stroke := closeGlyphMetrics(size)
+	pen, _, _ := pCreatePen.Call(0, uintptr(stroke), uintptr(color))
+	if pen == 0 {
 		return
 	}
-	defer pDeleteObject.Call(uintptr(font))
-	old, _, _ := pSelectObject.Call(dc, uintptr(font))
+	defer pDeleteObject.Call(pen)
+	old, _, _ := pSelectObject.Call(dc, pen)
 	defer pSelectObject.Call(dc, old)
-	pSetTextColor.Call(dc, uintptr(color))
-	pSetBkMode.Call(dc, transparent)
-	measured := textSize{}
-	pGetTextExtent.Call(dc, uintptr(unsafe.Pointer(ptr)), 1, uintptr(unsafe.Pointer(&measured)))
-	x := bounds.Left + (bounds.Right-bounds.Left-measured.CX)/2
-	y := bounds.Top + (bounds.Bottom-bounds.Top-measured.CY)/2
-	pTextOut.Call(dc, uintptr(x), uintptr(y), uintptr(unsafe.Pointer(ptr)), 1)
+	x1, y1 := bounds.Left+inset, bounds.Top+inset
+	x2, y2 := bounds.Right-inset-1, bounds.Bottom-inset-1
+	pMoveToEx.Call(dc, uintptr(x1), uintptr(y1), 0)
+	pLineTo.Call(dc, uintptr(x2), uintptr(y2))
+	pMoveToEx.Call(dc, uintptr(x2), uintptr(y1), 0)
+	pLineTo.Call(dc, uintptr(x1), uintptr(y2))
 }
 
-func drawText(dc uintptr, text string, bounds rect, size, weight int32, format uintptr) {
+func closeGlyphMetrics(size int32) (inset, stroke int32) {
+	inset, stroke = size*9/28, size/12
+	if stroke < 1 {
+		stroke = 1
+	}
+	return inset, stroke
+}
+
+func drawText(dc uintptr, text string, bounds rect, font windows.Handle, format uintptr) {
 	ptr, err := windows.UTF16PtrFromString(text)
 	if err != nil {
 		return
 	}
-	font := makeFont(size, weight)
 	if font != 0 {
 		old, _, _ := pSelectObject.Call(dc, uintptr(font))
 		defer pSelectObject.Call(dc, old)
-		defer pDeleteObject.Call(uintptr(font))
 	}
 	pDrawText.Call(dc, uintptr(unsafe.Pointer(ptr)), ^uintptr(0), uintptr(unsafe.Pointer(&bounds)), format)
-}
-
-func makeFont(size, weight int32) windows.Handle {
-	return makeFontWithFace(size, weight, "Microsoft YaHei UI")
-}
-
-func makeFontWithFace(size, weight int32, face string) windows.Handle {
-	type logFont struct {
-		Height, Width, Escapement, Orientation, Weight       int32
-		Italic, Underline, StrikeOut, CharSet                byte
-		OutPrecision, ClipPrecision, Quality, PitchAndFamily byte
-		FaceName                                             [32]uint16
-	}
-	const clearTypeQuality = 5
-	lf := logFont{Height: -size, Weight: weight, CharSet: 1, Quality: clearTypeQuality}
-	copy(lf.FaceName[:], windows.StringToUTF16(face))
-	result, _, _ := pCreateFont.Call(uintptr(unsafe.Pointer(&lf)))
-	return windows.Handle(result)
 }
 
 func makeBrush(color uint32) windows.Handle {

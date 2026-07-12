@@ -12,7 +12,9 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/JeffioZ/idletrigger/internal/idlewarning"
+	mylog "github.com/JeffioZ/idletrigger/internal/log"
 	"github.com/JeffioZ/idletrigger/internal/themeswitch"
+	"github.com/JeffioZ/idletrigger/internal/uifont"
 )
 
 type wndClassExW struct {
@@ -140,6 +142,7 @@ const (
 	wmCtlColorEdit    = 0x0133
 	wmCtlColorListBox = 0x0134
 	wmThemeChanged    = 0x031A
+	wmDpiChanged      = 0x02E0
 	wmSetFont         = 0x0030
 	wmSetIcon         = 0x0080
 	bnClicked         = 0
@@ -345,6 +348,7 @@ type panel struct {
 	largeIcon, smallIcon            windows.Handle
 	tooltip                         windows.Handle
 	palette                         colors
+	fontChoice                      uifont.Choice
 	controls                        map[uint16]windows.Handle
 	labels                          map[uint16]string
 	staticKinds                     map[uint16]staticKind
@@ -360,7 +364,11 @@ type panel struct {
 	processWatchActive              bool
 	themeSchedule                   string
 	timeoutOptions                  []timeoutChoice
+	style, exStyle                  uint32
+	controlBounds                   map[uint16]logicalBounds
 }
+
+type logicalBounds struct{ x, y, width, height int }
 
 // Show opens the panel or closes the currently open panel. It must be called
 // from the thread that owns the application's Win32 message loop.
@@ -421,6 +429,7 @@ func createPanel(state State, onAction OnAction, langFn LangFunc) error {
 		selected:      make(map[uint16]bool),
 		disabled:      make(map[uint16]bool),
 		oldButtonProc: make(map[windows.Handle]uintptr),
+		controlBounds: make(map[uint16]logicalBounds),
 	}
 	p.setChoice(actionIDs(), actionID(state.IdleAction))
 	if state.IsChinese {
@@ -550,12 +559,17 @@ func (p *panel) create() error {
 		return fmt.Errorf("create control panel: %w", callErr)
 	}
 	p.hwnd = windows.Handle(hwnd)
+	p.style, p.exStyle = style, exStyle
 	p.scale = dpiForWindow(p.hwnd)
 	p.setWindowIcons()
-	p.font = makeFont(p.scale, 14, 400)
-	p.sectionFont = makeFont(p.scale, 14, 700)
-	p.subtitleFont = makeFont(p.scale, 12, 600)
+	p.font = p.makeFont(14, 400)
+	p.sectionFont = p.makeFont(14, 700)
+	p.subtitleFont = p.makeFont(12, 600)
 	p.createTooltip()
+	if p.font == 0 || p.sectionFont == 0 || p.subtitleFont == 0 {
+		return fmt.Errorf("create control panel fonts failed")
+	}
+	mylog.Info("UI font: surface=popup ui_language=%s system_language=%s system_locale=%s face=%q reason=%s dpi=%d body_px=%d", p.fontChoice.UILanguage, p.fontChoice.SystemLanguage, p.fontChoice.SystemLocale, p.fontChoice.Face, p.fontChoice.Reason, int(p.scale*96+0.5), p.sc(14))
 	p.refreshTheme(false)
 	if err := p.build(); err != nil {
 		pDestroyWindow.Call(uintptr(p.hwnd))
@@ -597,17 +611,12 @@ func dpiForWindow(hwnd windows.Handle) float64 {
 	return float64(dpi) / 96
 }
 
-func makeFont(scale float64, size int32, weight int32) windows.Handle {
-	type logFont struct {
-		Height, Width, Escapement, Orientation, Weight       int32
-		Italic, Underline, StrikeOut, CharSet                byte
-		OutPrecision, ClipPrecision, Quality, PitchAndFamily byte
-		FaceName                                             [32]uint16
+func (p *panel) makeFont(size int32, weight int32) windows.Handle {
+	font, choice := uifont.New(int32(float64(size)*p.scale+0.5), weight, p.isChinese)
+	if p.fontChoice.Face == "" {
+		p.fontChoice = choice
 	}
-	lf := logFont{Height: -int32(float64(size)*scale + 0.5), Weight: weight, CharSet: 1}
-	copy(lf.FaceName[:], windows.StringToUTF16("Microsoft YaHei UI"))
-	result, _, _ := pCreateFont.Call(uintptr(unsafe.Pointer(&lf)))
-	return windows.Handle(result)
+	return font
 }
 
 func (p *panel) sc(value int) int { return int(float64(value)*p.scale + 0.5) }
@@ -636,6 +645,7 @@ func (p *panel) child(className, text string, style uint32, x, y, width, height 
 	}
 	if id != 0 {
 		p.controls[id] = windows.Handle(hwnd)
+		p.controlBounds[id] = logicalBounds{x, y, width, height}
 		p.labels[id] = text
 		p.addTooltip(id, windows.Handle(hwnd))
 	}
@@ -1221,6 +1231,11 @@ func wndProc(hwnd windows.Handle, msg uint32, wp, lp uintptr) uintptr {
 			}
 		case wmSettingChange, wmSysColorChange, wmThemeChanged:
 			p.refreshTheme(true)
+		case wmDpiChanged:
+			p.refreshFontsForDPI()
+			p.position(p.style, p.exStyle)
+			mylog.Info("UI font: surface=popup rebuilt reason=dpi-change dpi=%d face=%q client_px=%dx%d", int(p.scale*96+0.5), p.fontChoice.Face, p.sc(baseW), p.sc(p.clientH))
+			return 0
 		case wmCommand:
 			id, notification := uint16(wp), uint16(wp>>16)
 			if notification == bnClicked {
@@ -1235,6 +1250,46 @@ func wndProc(hwnd windows.Handle, msg uint32, wp, lp uintptr) uintptr {
 	}
 	result, _, _ := pDefWindowProc.Call(uintptr(hwnd), uintptr(msg), wp, lp)
 	return result
+}
+
+func (p *panel) refreshFontsForDPI() {
+	newScale := dpiForWindow(p.hwnd)
+	if newScale <= 0 || newScale == p.scale {
+		return
+	}
+	oldScale, oldChoice := p.scale, p.fontChoice
+	p.scale = newScale
+	p.fontChoice = uifont.Choice{}
+	newFont := p.makeFont(14, 400)
+	newSectionFont := p.makeFont(14, 700)
+	newSubtitleFont := p.makeFont(12, 600)
+	if newFont == 0 || newSectionFont == 0 || newSubtitleFont == 0 {
+		for _, font := range []windows.Handle{newFont, newSectionFont, newSubtitleFont} {
+			if font != 0 {
+				pDeleteObject.Call(uintptr(font))
+			}
+		}
+		p.scale, p.fontChoice = oldScale, oldChoice
+		return
+	}
+	oldFont, oldSection, oldSubtitle := p.font, p.sectionFont, p.subtitleFont
+	p.font, p.sectionFont, p.subtitleFont = newFont, newSectionFont, newSubtitleFont
+	for id, hwnd := range p.controls {
+		if bounds, ok := p.controlBounds[id]; ok {
+			pSetWindowPos.Call(uintptr(hwnd), 0, uintptr(p.sc(bounds.x)), uintptr(p.sc(bounds.y)), uintptr(p.sc(bounds.width)), uintptr(p.sc(bounds.height)), 0x0004|0x0010)
+		}
+		if p.staticKinds[id] == staticNone {
+			pSendMessage.Call(uintptr(hwnd), wmSetFont, uintptr(p.font), 1)
+		}
+	}
+	if p.tooltip != 0 {
+		pSendMessage.Call(uintptr(p.tooltip), ttmSetMaxTipWidth, 0, uintptr(p.sc(360)))
+	}
+	for _, font := range []windows.Handle{oldFont, oldSection, oldSubtitle} {
+		if font != 0 {
+			pDeleteObject.Call(uintptr(font))
+		}
+	}
 }
 
 type drawItemPointer *drawItem
@@ -1320,6 +1375,7 @@ func (p *panel) handleCommand(id uint16) {
 		value = 1
 	case id == idTestWarning:
 		Hide()
+		idlewarning.SetLanguage(p.isChinese)
 		idlewarning.Show(p.text("idle_warning_title"), p.text("msg_idle_warning_test"))
 		return
 	case id == idConfig:
@@ -1596,7 +1652,9 @@ func drawTextCentered(dc windows.Handle, text *uint16, bounds rect) {
 	if textH < bounds.Bottom-bounds.Top {
 		bounds.Top += ((bounds.Bottom - bounds.Top) - textH) / 2
 	}
-	pDrawText.Call(uintptr(dc), uintptr(unsafe.Pointer(text)), ^uintptr(0), uintptr(unsafe.Pointer(&bounds)), dtCenter|dtVCenter|dtWordBreak)
+	// bounds.Top already centers the measured text block. Applying DT_VCENTER
+	// again would shift single-line labels downward within the reduced bounds.
+	pDrawText.Call(uintptr(dc), uintptr(unsafe.Pointer(text)), ^uintptr(0), uintptr(unsafe.Pointer(&bounds)), dtCenter|dtWordBreak)
 }
 
 func (p *panel) fill(dc, brush windows.Handle) {
