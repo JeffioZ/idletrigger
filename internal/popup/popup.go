@@ -338,6 +338,8 @@ type panel struct {
 	dangerHoverBrush                windows.Handle
 	dangerPressedBrush              windows.Handle
 	dangerBorderBrush               windows.Handle
+	dangerHoverBorderBrush          windows.Handle
+	dangerPressedBorderBrush        windows.Handle
 	dangerFocusBrush                windows.Handle
 	onAction                        OnAction
 	lang                            LangFunc
@@ -1433,6 +1435,8 @@ func (p *panel) refreshTheme(invalidate bool) {
 	p.dangerHoverBrush = makeBrush(p.palette.DangerHover)
 	p.dangerPressedBrush = makeBrush(p.palette.DangerPressed)
 	p.dangerBorderBrush = makeBrush(p.palette.DangerBorder)
+	p.dangerHoverBorderBrush = makeBrush(p.palette.DangerHoverBorder)
+	p.dangerPressedBorderBrush = makeBrush(p.palette.DangerPressedBorder)
 	p.dangerFocusBrush = makeBrush(p.palette.DangerFocus)
 	p.applyFrameTheme(dark)
 	p.applyComboTheme(p.controls[idIdleTimeout], dark)
@@ -1521,6 +1525,7 @@ func (p *panel) drawButton(item *drawItem) {
 		textColor = p.palette.DangerText
 		if p.hoverID == id || item.ItemState&odsHotlight != 0 {
 			brush = p.dangerHoverBrush
+			borderBrush = p.dangerHoverBorderBrush
 		}
 	}
 	if selected {
@@ -1535,6 +1540,7 @@ func (p *panel) drawButton(item *drawItem) {
 		textColor = p.palette.AccentText
 		if id == idExit {
 			brush = p.dangerPressedBrush
+			borderBrush = p.dangerPressedBorderBrush
 			textColor = p.palette.DangerText
 		}
 	}
@@ -1673,7 +1679,7 @@ func (p *panel) fill(dc, brush windows.Handle) {
 	pFillRect.Call(uintptr(dc), uintptr(unsafe.Pointer(&r)), uintptr(brush))
 }
 func (p *panel) releaseBrushes() {
-	for _, brush := range []windows.Handle{p.backgroundBrush, p.surfaceBrush, p.hoverBrush, p.borderBrush, p.subtleBorderBrush, p.accentBrush, p.accentHoverBrush, p.pressedBrush, p.selectedBrush, p.selectedHoverBrush, p.disabledBrush, p.focusBrush, p.focusOnAccentBrush, p.dangerBrush, p.dangerHoverBrush, p.dangerPressedBrush, p.dangerBorderBrush, p.dangerFocusBrush} {
+	for _, brush := range []windows.Handle{p.backgroundBrush, p.surfaceBrush, p.hoverBrush, p.borderBrush, p.subtleBorderBrush, p.accentBrush, p.accentHoverBrush, p.pressedBrush, p.selectedBrush, p.selectedHoverBrush, p.disabledBrush, p.focusBrush, p.focusOnAccentBrush, p.dangerBrush, p.dangerHoverBrush, p.dangerPressedBrush, p.dangerBorderBrush, p.dangerHoverBorderBrush, p.dangerPressedBorderBrush, p.dangerFocusBrush} {
 		if brush != 0 {
 			pDeleteObject.Call(uintptr(brush))
 		}
@@ -1695,6 +1701,8 @@ func (p *panel) releaseBrushes() {
 	p.dangerHoverBrush = 0
 	p.dangerPressedBrush = 0
 	p.dangerBorderBrush = 0
+	p.dangerHoverBorderBrush = 0
+	p.dangerPressedBorderBrush = 0
 	p.dangerFocusBrush = 0
 }
 func makeBrush(color uint32) windows.Handle {

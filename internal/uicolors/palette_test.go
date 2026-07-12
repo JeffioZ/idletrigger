@@ -43,6 +43,19 @@ func TestAccentTextContrast(t *testing.T) {
 		if got := contrast(palette.DangerFocus, palette.DangerBackground); got < 3 {
 			t.Fatalf("dark=%v danger focus contrast = %.2f, want >= 3", dark, got)
 		}
+		for _, state := range []struct {
+			name       string
+			border     uint32
+			background uint32
+		}{
+			{"default", palette.DangerBorder, palette.DangerBackground},
+			{"hover", palette.DangerHoverBorder, palette.DangerHover},
+			{"pressed", palette.DangerPressedBorder, palette.DangerPressed},
+		} {
+			if got := contrast(state.border, state.background); got < 1.5 {
+				t.Fatalf("dark=%v danger %s border contrast = %.2f, want >= 1.5", dark, state.name, got)
+			}
+		}
 	}
 }
 
@@ -54,6 +67,9 @@ func TestExitAndCloseStatesRemainSemanticallyDistinct(t *testing.T) {
 		}
 		if palette.CloseHover == palette.DangerHover || palette.CloseActiveText == palette.DangerText {
 			t.Fatalf("dark=%v warning close state must stay neutral rather than inherit exit colors", dark)
+		}
+		if palette.DangerBorder == palette.DangerHoverBorder || palette.DangerHoverBorder == palette.DangerPressedBorder {
+			t.Fatalf("dark=%v exit borders must differentiate default, hover, and pressed states", dark)
 		}
 	}
 }
