@@ -36,3 +36,12 @@ func TestWarningContentRectPreservesFormerBorderInset(t *testing.T) {
 		t.Fatalf("warningContentRect() = %#v, want %#v", got, want)
 	}
 }
+
+func TestCloseRectStaysInsideWarningContentAtScaledSizes(t *testing.T) {
+	content := warningContentRect(rect{Left: 0, Top: 0, Right: 522, Bottom: 138})
+	got := closeRectForClient(content, 42, 12)
+	want := rect{Left: 467, Top: 13, Right: 509, Bottom: 55}
+	if got != want {
+		t.Fatalf("closeRectForClient() = %#v, want %#v", got, want)
+	}
+}

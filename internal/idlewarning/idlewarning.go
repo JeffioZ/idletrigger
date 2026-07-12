@@ -434,7 +434,7 @@ func paint(hwnd windows.Handle) {
 	pGetClientRect.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&client)))
 	dark := themeswitch.Current() == themeswitch.ModeDark
 	palette := uicolors.ForTheme(dark)
-	brush := makeBrush(palette.Background)
+	brush := makeBrush(palette.WindowBackground)
 	defer pDeleteObject.Call(uintptr(brush))
 	pFillRect.Call(dc, uintptr(unsafe.Pointer(&client)), uintptr(brush))
 	borderBrush := makeBrush(palette.Border)
@@ -457,20 +457,20 @@ func paint(hwnd windows.Handle) {
 	pDeleteObject.Call(uintptr(accentBrush))
 	pSetBkMode.Call(dc, transparent)
 	close := closeRect(hwnd)
-	closeText := palette.MutedText
+	closeText := palette.CloseText
 	if closeHot {
-		fill := palette.DangerHover
+		fill := palette.CloseHover
 		if closeDown {
-			fill = palette.DangerPressed
+			fill = palette.ClosePressed
 		}
 		closeBrush := makeBrush(fill)
 		pFillRect.Call(dc, uintptr(unsafe.Pointer(&close)), uintptr(closeBrush))
 		pDeleteObject.Call(uintptr(closeBrush))
-		closeText = palette.DangerText
+		closeText = palette.CloseActiveText
 	}
-	pSetTextColor.Call(dc, uintptr(palette.Text))
+	pSetTextColor.Call(dc, uintptr(palette.PrimaryText))
 	drawText(dc, title, rect{Left: content.Left + margin + sc(10), Top: content.Top + titleTop, Right: close.Left - sc(6), Bottom: content.Top + titleBottom}, titleFont, dtLeft)
-	pSetTextColor.Call(dc, uintptr(palette.MutedText))
+	pSetTextColor.Call(dc, uintptr(palette.SecondaryText))
 	drawText(dc, body, rect{Left: content.Left + margin + sc(10), Top: content.Top + sc(47), Right: content.Right - margin, Bottom: content.Bottom - sc(14)}, bodyFont, dtLeft|dtWordBreak)
 	drawCloseGlyph(dc, close, closeText)
 }
@@ -481,7 +481,11 @@ func closeRect(hwnd windows.Handle) rect {
 	client = warningContentRect(client)
 	size := scaleForWindow(hwnd, 28)
 	margin := scaleForWindow(hwnd, 8)
-	return rect{Left: client.Right - margin - size, Top: margin, Right: client.Right - margin, Bottom: margin + size}
+	return closeRectForClient(client, size, margin)
+}
+
+func closeRectForClient(client rect, size, margin int32) rect {
+	return rect{Left: client.Right - margin - size, Top: client.Top + margin, Right: client.Right - margin, Bottom: client.Top + margin + size}
 }
 
 func warningContentRect(client rect) rect {

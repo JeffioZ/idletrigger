@@ -5,13 +5,21 @@ package uicolors
 // and idle warning. It intentionally models existing UI states rather than a
 // general-purpose theming system.
 type Palette struct {
-	Background, Surface, Hover, Border uint32
-	Accent, AccentHover, Pressed       uint32
-	Text, MutedText, AccentText        uint32
-	Disabled                           uint32
-	Danger, DangerHover                uint32
-	DangerPressed, DangerText          uint32
-	Focus, FocusOnAccent               uint32
+	WindowBackground, Surface, ElevatedSurface, HoverSurface uint32
+	Border, SubtleBorder                                     uint32
+	PrimaryText, SecondaryText                               uint32
+	MutedText, DisabledText                                  uint32
+	DisabledSurface                                          uint32
+	Accent, AccentHover, AccentPressed                       uint32
+	Selected, SelectedHover                                  uint32
+	AccentText                                               uint32
+	Focus, FocusOnAccent                                     uint32
+	DangerBackground, DangerHover                            uint32
+	DangerPressed, DangerBorder                              uint32
+	DangerText, DangerFocus                                  uint32
+	CloseText, CloseHover, ClosePressed                      uint32
+	CloseActiveText                                          uint32
+	TooltipBackground, TooltipText                           uint32
 }
 
 // ForTheme returns the compact native-control palette for the active Windows
@@ -20,43 +28,71 @@ type Palette struct {
 func ForTheme(dark bool) Palette {
 	if dark {
 		return Palette{
-			Background:    RGB(32, 36, 42),
-			Surface:       RGB(43, 48, 54),
-			Hover:         RGB(54, 61, 69),
-			Border:        RGB(76, 85, 95),
-			Accent:        RGB(10, 120, 180),
-			AccentHover:   RGB(12, 139, 203),
-			Pressed:       RGB(6, 104, 157),
-			Text:          RGB(244, 247, 250),
-			MutedText:     RGB(174, 182, 191),
-			AccentText:    RGB(255, 255, 255),
-			Disabled:      RGB(40, 44, 49),
-			Danger:        RGB(88, 34, 39),
-			DangerHover:   RGB(116, 43, 50),
-			DangerPressed: RGB(72, 28, 33),
-			DangerText:    RGB(255, 162, 168),
-			Focus:         RGB(81, 205, 237),
-			FocusOnAccent: RGB(229, 246, 255),
+			WindowBackground:  RGB(32, 36, 42),
+			Surface:           RGB(43, 48, 54),
+			ElevatedSurface:   RGB(52, 59, 67),
+			HoverSurface:      RGB(54, 61, 69),
+			Border:            RGB(76, 85, 95),
+			SubtleBorder:      RGB(60, 68, 77),
+			PrimaryText:       RGB(244, 247, 250),
+			SecondaryText:     RGB(204, 212, 220),
+			MutedText:         RGB(170, 181, 191),
+			DisabledText:      RGB(119, 130, 141),
+			DisabledSurface:   RGB(40, 44, 49),
+			Accent:            RGB(10, 120, 180),
+			AccentHover:       RGB(12, 139, 203),
+			AccentPressed:     RGB(6, 104, 157),
+			Selected:          RGB(10, 120, 180),
+			SelectedHover:     RGB(12, 139, 203),
+			AccentText:        RGB(255, 255, 255),
+			Focus:             RGB(81, 205, 237),
+			FocusOnAccent:     RGB(229, 246, 255),
+			DangerBackground:  RGB(57, 43, 49),
+			DangerHover:       RGB(73, 52, 59),
+			DangerPressed:     RGB(48, 36, 42),
+			DangerBorder:      RGB(116, 74, 85),
+			DangerText:        RGB(255, 196, 204),
+			DangerFocus:       RGB(255, 177, 189),
+			CloseText:         RGB(180, 194, 206),
+			CloseHover:        RGB(53, 69, 80),
+			ClosePressed:      RGB(43, 58, 69),
+			CloseActiveText:   RGB(213, 236, 248),
+			TooltipBackground: RGB(52, 59, 67),
+			TooltipText:       RGB(244, 247, 250),
 		}
 	}
 	return Palette{
-		Background:    RGB(246, 248, 250),
-		Surface:       RGB(255, 255, 255),
-		Hover:         RGB(234, 244, 249),
-		Border:        RGB(203, 211, 220),
-		Accent:        RGB(0, 118, 181),
-		AccentHover:   RGB(0, 106, 163),
-		Pressed:       RGB(0, 85, 133),
-		Text:          RGB(25, 30, 36),
-		MutedText:     RGB(99, 108, 118),
-		AccentText:    RGB(255, 255, 255),
-		Disabled:      RGB(238, 242, 245),
-		Danger:        RGB(255, 239, 240),
-		DangerHover:   RGB(255, 225, 228),
-		DangerPressed: RGB(255, 207, 211),
-		DangerText:    RGB(190, 24, 34),
-		Focus:         RGB(0, 90, 134),
-		FocusOnAccent: RGB(229, 246, 255),
+		WindowBackground:  RGB(246, 248, 250),
+		Surface:           RGB(255, 255, 255),
+		ElevatedSurface:   RGB(251, 253, 255),
+		HoverSurface:      RGB(234, 244, 249),
+		Border:            RGB(203, 211, 220),
+		SubtleBorder:      RGB(225, 231, 237),
+		PrimaryText:       RGB(25, 30, 36),
+		SecondaryText:     RGB(70, 82, 94),
+		MutedText:         RGB(99, 108, 118),
+		DisabledText:      RGB(126, 137, 147),
+		DisabledSurface:   RGB(238, 242, 245),
+		Accent:            RGB(0, 118, 181),
+		AccentHover:       RGB(0, 106, 163),
+		AccentPressed:     RGB(0, 85, 133),
+		Selected:          RGB(0, 118, 181),
+		SelectedHover:     RGB(0, 106, 163),
+		AccentText:        RGB(255, 255, 255),
+		Focus:             RGB(0, 90, 134),
+		FocusOnAccent:     RGB(229, 246, 255),
+		DangerBackground:  RGB(255, 248, 248),
+		DangerHover:       RGB(255, 236, 238),
+		DangerPressed:     RGB(248, 219, 223),
+		DangerBorder:      RGB(230, 191, 197),
+		DangerText:        RGB(150, 51, 62),
+		DangerFocus:       RGB(167, 68, 79),
+		CloseText:         RGB(82, 101, 116),
+		CloseHover:        RGB(232, 241, 247),
+		ClosePressed:      RGB(213, 229, 239),
+		CloseActiveText:   RGB(41, 84, 108),
+		TooltipBackground: RGB(251, 253, 255),
+		TooltipText:       RGB(25, 30, 36),
 	}
 }
 

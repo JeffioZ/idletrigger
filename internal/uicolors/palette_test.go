@@ -8,8 +8,28 @@ import (
 func TestAccentTextContrast(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		palette := ForTheme(dark)
-		if got := contrast(palette.AccentText, palette.Accent); got < 4.5 {
-			t.Fatalf("dark=%v accent text contrast = %.2f, want >= 4.5", dark, got)
+		for _, text := range []struct {
+			name       string
+			foreground uint32
+			background uint32
+			minimum    float64
+		}{
+			{"accent", palette.AccentText, palette.Accent, 4.5},
+			{"primary", palette.PrimaryText, palette.WindowBackground, 7},
+			{"secondary", palette.SecondaryText, palette.WindowBackground, 4.5},
+			{"muted", palette.MutedText, palette.WindowBackground, 3},
+			{"disabled", palette.DisabledText, palette.DisabledSurface, 3},
+			{"tooltip", palette.TooltipText, palette.TooltipBackground, 4.5},
+			{"danger default", palette.DangerText, palette.DangerBackground, 4.5},
+			{"danger hover", palette.DangerText, palette.DangerHover, 4.5},
+			{"danger pressed", palette.DangerText, palette.DangerPressed, 4.5},
+			{"close default", palette.CloseText, palette.WindowBackground, 4.5},
+			{"close hover", palette.CloseActiveText, palette.CloseHover, 4.5},
+			{"close pressed", palette.CloseActiveText, palette.ClosePressed, 4.5},
+		} {
+			if got := contrast(text.foreground, text.background); got < text.minimum {
+				t.Fatalf("dark=%v %s contrast = %.2f, want >= %.1f", dark, text.name, got, text.minimum)
+			}
 		}
 		if palette.Focus == palette.Accent || palette.FocusOnAccent == palette.AccentText {
 			t.Fatalf("dark=%v focus colors must remain distinct from selected-control colors", dark)
@@ -20,17 +40,21 @@ func TestAccentTextContrast(t *testing.T) {
 		if got := contrast(palette.FocusOnAccent, palette.Accent); got < 3 {
 			t.Fatalf("dark=%v selected focus contrast = %.2f, want >= 3", dark, got)
 		}
+		if got := contrast(palette.DangerFocus, palette.DangerBackground); got < 3 {
+			t.Fatalf("dark=%v danger focus contrast = %.2f, want >= 3", dark, got)
+		}
 	}
 }
 
-func TestDangerColorsRemainUnchanged(t *testing.T) {
-	light := ForTheme(false)
-	if light.Danger != RGB(255, 239, 240) || light.DangerHover != RGB(255, 225, 228) || light.DangerPressed != RGB(255, 207, 211) || light.DangerText != RGB(190, 24, 34) {
-		t.Fatal("light danger palette changed")
-	}
-	dark := ForTheme(true)
-	if dark.Danger != RGB(88, 34, 39) || dark.DangerHover != RGB(116, 43, 50) || dark.DangerPressed != RGB(72, 28, 33) || dark.DangerText != RGB(255, 162, 168) {
-		t.Fatal("dark danger palette changed")
+func TestExitAndCloseStatesRemainSemanticallyDistinct(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		palette := ForTheme(dark)
+		if palette.DangerBackground == palette.WindowBackground || palette.DangerText == palette.PrimaryText {
+			t.Fatalf("dark=%v exit state is not visually distinct", dark)
+		}
+		if palette.CloseHover == palette.DangerHover || palette.CloseActiveText == palette.DangerText {
+			t.Fatalf("dark=%v warning close state must stay neutral rather than inherit exit colors", dark)
+		}
 	}
 }
 
