@@ -32,7 +32,8 @@ import (
 )
 
 type Callbacks struct {
-	OnConfigChanged func(config.Config)
+	OnConfigChanged  func(config.Config)
+	ShowPopupOnStart bool
 }
 
 type trayState struct {
@@ -126,6 +127,9 @@ func Run(cfg config.Config, cbs Callbacks) {
 		}()
 		go s.batteryLoop()
 		go s.watchConfig()
+		if cbs.ShowPopupOnStart {
+			systray.Post(s.showPopup)
+		}
 
 		systray.OnLeftClick = func() { s.showPopup() }
 		systray.OnPowerChange = func() {
@@ -370,7 +374,7 @@ func (s *trayState) startMonitor() {
 		// balloons are silently suppressed on many Windows 11 configurations.
 		func() {
 			actName := i18n.T(lang, actionTranslationKey(action))
-			title := i18n.T(lang, "app_title")
+			title := i18n.T(lang, "idle_warning_title")
 			mylog.Info("Idle warning displayed: action=%s seconds=%d", action, warningSeconds)
 			idlewarning.ShowCountdown(title, warningSeconds, func(remaining int) string {
 				if remaining < 0 {
@@ -972,6 +976,14 @@ type popupSnapshot struct {
 }
 
 func (s *trayState) showPopup() {
+	s.openPopup(false)
+}
+
+func (s *trayState) refreshPopup() {
+	s.openPopup(true)
+}
+
+func (s *trayState) openPopup(refresh bool) {
 	result := make(chan popupSnapshot, 1)
 	s.stateCh <- stateRequest{fn: func() string {
 		result <- popupSnapshot{
@@ -1003,9 +1015,17 @@ func (s *trayState) showPopup() {
 		return ""
 	}}
 	snapshot := <-result
-	if err := popup.Show(snapshot.state, func(action popup.Action, value int) {
+	onAction := func(action popup.Action, value int) {
 		s.post(func() { s.handlePopupAction(action, value) })
-	}, func(key string) string { return i18n.T(snapshot.lang, key) }); err != nil {
+	}
+	langFn := func(key string) string { return i18n.T(snapshot.lang, key) }
+	var err error
+	if refresh {
+		err = popup.Refresh(snapshot.state, onAction, langFn)
+	} else {
+		err = popup.Show(snapshot.state, onAction, langFn)
+	}
+	if err != nil {
 		mylog.Info("Popup open failed: %v", err)
 	}
 }
@@ -1141,11 +1161,15 @@ func (s *trayState) handlePopupAction(action popup.Action, value int) {
 		s.updateIcon()
 		s.saveConfig()
 	case popup.ActLanguage:
+		previous := s.lang
 		switch value {
 		case 0:
 			s.switchLanguage("en")
 		case 1:
 			s.switchLanguage("zh-CN")
+		}
+		if s.lang != previous {
+			systray.Post(s.refreshPopup)
 		}
 	case popup.ActConfig:
 		path, err := config.Path()

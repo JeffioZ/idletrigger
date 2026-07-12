@@ -45,29 +45,30 @@ type paintStruct struct{ data [72]byte }
 const (
 	warningClass = "IdleTriggerIdleWarning"
 
-	wmDestroy      = 0x0002
-	wmClose        = 0x0010
-	wmPaint        = 0x000F
-	wmEraseBkgnd   = 0x0014
-	wmLButtonDown  = 0x0201
-	wmLButtonUp    = 0x0202
-	wmMouseMove    = 0x0200
-	wmMouseLeave   = 0x02A3
-	wsPopup        = 0x80000000
-	wsBorder       = 0x00800000
-	wsExTool       = 0x00000080
-	wsExTopmost    = 0x00000008
-	wsExNoActivate = 0x08000000
-	swpNoActivate  = 0x0010
-	swpShowWindow  = 0x0040
-	monitorNearest = 2
-	dtLeft         = 0x00000000
-	dtCenter       = 0x00000001
-	dtVCenter      = 0x00000004
-	dtWordBreak    = 0x00000010
-	dtCalcRect     = 0x00000400
-	transparent    = 1
-	tmeLeave       = 0x00000002
+	wmDestroy        = 0x0002
+	wmClose          = 0x0010
+	wmPaint          = 0x000F
+	wmEraseBkgnd     = 0x0014
+	wmLButtonDown    = 0x0201
+	wmLButtonUp      = 0x0202
+	wmMouseMove      = 0x0200
+	wmMouseLeave     = 0x02A3
+	wsPopup          = 0x80000000
+	wsBorder         = 0x00800000
+	wsExTool         = 0x00000080
+	wsExTopmost      = 0x00000008
+	wsExNoActivate   = 0x08000000
+	swpNoActivate    = 0x0010
+	swpShowWindow    = 0x0040
+	monitorNearest   = 2
+	dtLeft           = 0x00000000
+	dtCenter         = 0x00000001
+	dtVCenter        = 0x00000004
+	dtWordBreak      = 0x00000010
+	dtCalcRect       = 0x00000400
+	transparent      = 1
+	tmeLeave         = 0x00000002
+	warningMinHeight = 92
 )
 
 var (
@@ -244,8 +245,8 @@ func position(hwnd windows.Handle) {
 	sc := func(v int32) int32 { return scaleForWindow(hwnd, v) }
 	width, margin := sc(348), sc(16)
 	bodyHeight := measureText(hwnd, body, sc(13), 400, width-2*margin)
-	height := sc(48) + bodyHeight + sc(14)
-	if minimum := sc(112); height < minimum {
+	height := sc(44) + bodyHeight + sc(16)
+	if minimum := sc(warningMinHeight); height < minimum {
 		height = minimum
 	}
 	monitor, _, _ := pMonitorFromWindow.Call(uintptr(hwnd), monitorNearest)
@@ -365,26 +366,32 @@ func paint(hwnd windows.Handle) {
 	var client rect
 	pGetClientRect.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&client)))
 	dark := themeswitch.Current() == themeswitch.ModeDark
-	background, foreground, accent := rgb(246, 248, 250), rgb(25, 30, 36), rgb(0, 111, 177)
+	background, foreground, muted, accent := rgb(246, 248, 250), rgb(25, 30, 36), rgb(99, 108, 118), rgb(0, 111, 177)
 	closeForeground, closeHover, closePressed := rgb(99, 108, 118), rgb(255, 239, 240), rgb(255, 207, 211)
 	closeActiveText := rgb(190, 24, 34)
 	if dark {
-		background, foreground, accent = rgb(31, 34, 38), rgb(244, 247, 250), rgb(47, 151, 208)
+		background, foreground, muted, accent = rgb(31, 34, 38), rgb(244, 247, 250), rgb(174, 182, 191), rgb(47, 151, 208)
 		closeForeground, closeHover, closePressed = rgb(174, 182, 191), rgb(68, 43, 49), rgb(88, 50, 57)
 		closeActiveText = rgb(255, 162, 168)
 	}
 	brush := makeBrush(background)
 	defer pDeleteObject.Call(uintptr(brush))
 	pFillRect.Call(dc, uintptr(unsafe.Pointer(&client)), uintptr(brush))
-	accentRect := client
-	accentRect.Bottom = accentRect.Top + 4
+	sc := func(v int32) int32 { return scaleForWindow(hwnd, v) }
+	margin := sc(16)
+	titleTop, titleBottom := sc(15), sc(42)
+	// Use the same compact title accent as the main panel.  A taller bar makes
+	// the smaller warning title look visually top-heavy at higher DPI scales.
+	accentHeight := sc(16)
+	// DrawText places this font's visible glyphs slightly above the centre of
+	// its layout rectangle. Compensate for that GDI ascent so the accent aligns
+	// with the title the user actually sees, rather than only with its bounds.
+	accentTop := titleTop + (titleBottom-titleTop-accentHeight)/2 - sc(3)
+	accentRect := rect{Left: margin, Top: accentTop, Right: margin + sc(3), Bottom: accentTop + accentHeight}
 	accentBrush := makeBrush(accent)
 	pFillRect.Call(dc, uintptr(unsafe.Pointer(&accentRect)), uintptr(accentBrush))
 	pDeleteObject.Call(uintptr(accentBrush))
-	pSetTextColor.Call(dc, uintptr(foreground))
 	pSetBkMode.Call(dc, transparent)
-	sc := func(v int32) int32 { return scaleForWindow(hwnd, v) }
-	margin := sc(16)
 	close := closeRect(hwnd)
 	closeText := closeForeground
 	if closeHot {
@@ -397,8 +404,10 @@ func paint(hwnd windows.Handle) {
 		pDeleteObject.Call(uintptr(closeBrush))
 		closeText = closeActiveText
 	}
-	drawText(dc, title, rect{Left: margin, Top: sc(17), Right: close.Left - sc(6), Bottom: sc(43)}, sc(15), 600, dtLeft)
-	drawText(dc, body, rect{Left: margin, Top: sc(48), Right: client.Right - margin, Bottom: client.Bottom - sc(14)}, sc(13), 400, dtLeft|dtWordBreak)
+	pSetTextColor.Call(dc, uintptr(foreground))
+	drawText(dc, title, rect{Left: margin + sc(10), Top: titleTop, Right: close.Left - sc(6), Bottom: titleBottom}, sc(15), 600, dtLeft)
+	pSetTextColor.Call(dc, uintptr(muted))
+	drawText(dc, body, rect{Left: margin + sc(10), Top: sc(47), Right: client.Right - margin, Bottom: client.Bottom - sc(14)}, sc(13), 400, dtLeft|dtWordBreak)
 	drawCloseGlyph(dc, close, closeText)
 }
 

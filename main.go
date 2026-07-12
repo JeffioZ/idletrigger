@@ -28,10 +28,12 @@ func main() {
 	darkmode.Enable()
 
 	isCLI := false
+	startMinimized := false
 	startupDelay := 0
 	for _, a := range os.Args[1:] {
 		if a == "--minimized" {
 			isCLI = false
+			startMinimized = true
 		} else if strings.HasPrefix(a, "--delay=") {
 			v, err := strconv.Atoi(strings.TrimPrefix(a, "--delay="))
 			if err == nil && v > 0 && v <= 60 {
@@ -95,7 +97,7 @@ func main() {
 	if startupDelay > 0 {
 		time.Sleep(time.Duration(startupDelay) * time.Second)
 	}
-	tray.Run(cfg, tray.Callbacks{})
+	tray.Run(cfg, tray.Callbacks{ShowPopupOnStart: !startMinimized})
 }
 
 func enableConsoleOutput() {

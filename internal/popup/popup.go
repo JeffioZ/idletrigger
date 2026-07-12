@@ -27,6 +27,20 @@ type wndClassExW struct {
 
 type rect struct{ Left, Top, Right, Bottom int32 }
 
+type buttonRole uint8
+
+const (
+	buttonCommand buttonRole = iota
+	buttonToggle
+	buttonChoice
+)
+
+type buttonVisualState struct {
+	Role     buttonRole
+	Active   bool
+	Disabled bool
+}
+
 type monitorInfo struct {
 	Size          uint32
 	Monitor, Work rect
@@ -182,6 +196,7 @@ const (
 	ttfIDIsHwnd        = 0x0001
 	ttfSubclass        = 0x0010
 	ttmAddTool         = 0x0432
+	ttmUpdateTipText   = 0x0439
 	ttmSetTipBkColor   = 0x0413
 	ttmSetTipTextColor = 0x0414
 	ttmSetMaxTipWidth  = 0x0418
@@ -357,6 +372,24 @@ func Show(state State, onAction OnAction, langFn LangFunc) error {
 		pDestroyWindow.Call(uintptr(hwnd))
 		return nil
 	}
+	panelMu.Unlock()
+	return createPanel(state, onAction, langFn)
+}
+
+// Refresh rebuilds an already visible panel instead of treating it as a
+// toggle. Native controls store captions at creation time, so callers use
+// this after a language change to update every caption immediately.
+func Refresh(state State, onAction OnAction, langFn LangFunc) error {
+	panelMu.Lock()
+	old := active
+	panelMu.Unlock()
+	if old != nil && old.hwnd != 0 {
+		pDestroyWindow.Call(uintptr(old.hwnd))
+	}
+	return createPanel(state, onAction, langFn)
+}
+
+func createPanel(state State, onAction OnAction, langFn LangFunc) error {
 	p := &panel{
 		onAction:           onAction,
 		lang:               langFn,
@@ -395,6 +428,7 @@ func Show(state State, onAction OnAction, langFn LangFunc) error {
 	} else {
 		p.setChoice(languageIDs(), idLangEN)
 	}
+	panelMu.Lock()
 	active = p
 	panelMu.Unlock()
 
@@ -527,7 +561,7 @@ func (p *panel) create() error {
 		pDestroyWindow.Call(uintptr(p.hwnd))
 		return err
 	}
-	p.position(style, exStyle, cursor)
+	p.position(style, exStyle)
 	pSetForeground.Call(uintptr(p.hwnd))
 	return nil
 }
@@ -627,6 +661,25 @@ func (p *panel) addTooltip(id uint16, hwnd windows.Handle) {
 	pSendMessage.Call(uintptr(p.tooltip), ttmAddTool, 0, uintptr(unsafe.Pointer(&ti)))
 }
 
+func (p *panel) refreshTooltip(id uint16) {
+	if p.tooltip == 0 || p.controls[id] == 0 {
+		return
+	}
+	text := p.tooltipText(id)
+	if text == "" {
+		return
+	}
+	p.tooltips[id] = windows.StringToUTF16(text)
+	ti := toolInfo{
+		Size:  uint32(unsafe.Sizeof(toolInfo{})),
+		Flags: ttfIDIsHwnd,
+		Hwnd:  p.hwnd,
+		ID:    uintptr(p.controls[id]),
+		Text:  &p.tooltips[id][0],
+	}
+	pSendMessage.Call(uintptr(p.tooltip), ttmUpdateTipText, 0, uintptr(unsafe.Pointer(&ti)))
+}
+
 func (p *panel) tooltipText(id uint16) string {
 	key := ""
 	switch id {
@@ -643,7 +696,7 @@ func (p *panel) tooltipText(id uint16) string {
 	case idNoSleep:
 		key = "tip_nosleep"
 	case idProcess:
-		return p.processWatchTooltip()
+		return p.withStateTooltip(id, p.processWatchTooltip())
 	case idIdle:
 		key = "tip_idle"
 	case idIdleWarning:
@@ -682,7 +735,27 @@ func (p *panel) tooltipText(id uint16) string {
 	if key == "" {
 		return ""
 	}
-	return p.text(key)
+	return p.withStateTooltip(id, p.text(key))
+}
+
+func (p *panel) withStateTooltip(id uint16, body string) string {
+	state := p.visualState(id)
+	switch state.Role {
+	case buttonToggle:
+		key := "tip_state_disabled"
+		if state.Active {
+			key = "tip_state_enabled"
+		}
+		return fmt.Sprintf(p.text("tip_toggle_state"), p.text(key), body)
+	case buttonChoice:
+		key := "tip_state_not_selected"
+		if state.Active {
+			key = "tip_state_selected"
+		}
+		return fmt.Sprintf(p.text("tip_choice_state"), p.text(key), body)
+	default:
+		return body
+	}
 }
 
 func (p *panel) processWatchTooltip() string {
@@ -940,6 +1013,37 @@ func actionIDs() []uint16 {
 	return []uint16{idActionSleep, idActionHibernate, idActionShutdown, idActionLock}
 }
 func languageIDs() []uint16 { return []uint16{idLangEN, idLangZH} }
+
+func roleForButton(id uint16) buttonRole {
+	switch id {
+	case idNoSleep, idProcess, idIdle, idIdleWarning, idIdleKeepalive,
+		idTheme, idBattery, idFullscreen, idIPLocation, idHotkeys, idAutostart, idLogging:
+		return buttonToggle
+	case idActionSleep, idActionHibernate, idActionShutdown, idActionLock, idLangEN, idLangZH:
+		return buttonChoice
+	default:
+		return buttonCommand
+	}
+}
+
+func visualStateForButton(id uint16, toggleOn, choiceSelected, disabled bool) buttonVisualState {
+	role := roleForButton(id)
+	active := false
+	switch role {
+	case buttonToggle:
+		active = toggleOn
+	case buttonChoice:
+		active = choiceSelected
+	}
+	return buttonVisualState{Role: role, Active: active, Disabled: disabled}
+}
+
+func (p *panel) visualState(id uint16) buttonVisualState {
+	return visualStateForButton(id, p.toggles[id], p.selected[id], p.disabled[id])
+}
+
+func focusOutlineUsesSurface(active bool) bool { return active }
+
 func actionID(value string) uint16 {
 	for i, action := range []string{"sleep", "hibernate", "shutdown", "lock"} {
 		if value == action {
@@ -953,14 +1057,20 @@ func (p *panel) setChoice(group []uint16, selected uint16) {
 		p.selected[id] = id == selected
 	}
 }
-func (p *panel) toggle(id uint16) { p.toggles[id] = !p.toggles[id]; p.invalidate(id) }
+func (p *panel) toggle(id uint16) {
+	p.toggles[id] = !p.toggles[id]
+	p.refreshTooltip(id)
+	p.invalidate(id)
+}
 func (p *panel) setToggle(id uint16, value bool) {
 	p.toggles[id] = value
+	p.refreshTooltip(id)
 	p.invalidate(id)
 }
 func (p *panel) choose(group []uint16, selected uint16) {
 	p.setChoice(group, selected)
 	for _, id := range group {
+		p.refreshTooltip(id)
 		p.invalidate(id)
 	}
 }
@@ -1041,7 +1151,19 @@ func (p *panel) controlID(hwnd windows.Handle) uint16 {
 	return 0
 }
 
-func (p *panel) position(style, exStyle uint32, cursor struct{ X, Y int32 }) {
+func panelOrigin(work rect, width, height, margin int32) (int32, int32) {
+	x := work.Right - width - margin
+	y := work.Bottom - height - margin
+	if x < work.Left {
+		x = work.Left
+	}
+	if y < work.Top {
+		y = work.Top
+	}
+	return x, y
+}
+
+func (p *panel) position(style, exStyle uint32) {
 	r := rect{Right: int32(p.sc(baseW)), Bottom: int32(p.sc(p.clientH))}
 	pAdjustWindowRect.Call(uintptr(unsafe.Pointer(&r)), uintptr(style), 0, uintptr(exStyle))
 	width, height := r.Right-r.Left, r.Bottom-r.Top
@@ -1052,22 +1174,7 @@ func (p *panel) position(style, exStyle uint32, cursor struct{ X, Y int32 }) {
 	} else {
 		info.Work = rect{Right: width, Bottom: height}
 	}
-	x, y := cursor.X-width/2, cursor.Y-height-int32(p.sc(gap))
-	if y < info.Work.Top {
-		y = cursor.Y + int32(p.sc(gap))
-	}
-	if x < info.Work.Left {
-		x = info.Work.Left
-	}
-	if x+width > info.Work.Right {
-		x = info.Work.Right - width
-	}
-	if y < info.Work.Top {
-		y = info.Work.Top
-	}
-	if y+height > info.Work.Bottom {
-		y = info.Work.Bottom - height
-	}
+	x, y := panelOrigin(info.Work, width, height, int32(p.sc(16)))
 	insertAfter := ^uintptr(0)
 	if captureMode() {
 		insertAfter = 0
@@ -1213,7 +1320,7 @@ func (p *panel) handleCommand(id uint16) {
 		value = 1
 	case id == idTestWarning:
 		Hide()
-		idlewarning.Show(p.text("app_title"), p.text("msg_idle_warning_test"))
+		idlewarning.Show(p.text("idle_warning_title"), p.text("msg_idle_warning_test"))
 		return
 	case id == idConfig:
 		action = ActConfig
@@ -1222,12 +1329,16 @@ func (p *panel) handleCommand(id uint16) {
 	default:
 		return
 	}
-	if action <= ActRestart || action == ActLanguage || action == ActConfig || action == ActExit || action == ActSwitchTheme || action == ActRepairTheme {
+	if actionClosesPanel(action) {
 		Hide()
 	}
 	if p.onAction != nil {
 		p.onAction(action, value)
 	}
+}
+
+func actionClosesPanel(action Action) bool {
+	return action <= ActRestart || action == ActConfig || action == ActExit || action == ActSwitchTheme || action == ActRepairTheme
 }
 
 func (p *panel) handleTimeoutSelection() {
@@ -1335,7 +1446,8 @@ func (p *panel) applyFrameTheme(dark bool) {
 
 func (p *panel) drawButton(item *drawItem) {
 	id := uint16(item.CtlID)
-	selected := p.toggles[id] || p.selected[id]
+	state := p.visualState(id)
+	selected := state.Active
 	brush := p.surfaceBrush
 	textColor := p.palette.text
 	if p.hoverID == id || item.ItemState&odsHotlight != 0 {
@@ -1363,7 +1475,7 @@ func (p *panel) drawButton(item *drawItem) {
 			textColor = p.palette.dangerText
 		}
 	}
-	if p.disabled[id] || item.ItemState&odsDisabled != 0 {
+	if state.Disabled || item.ItemState&odsDisabled != 0 {
 		brush = p.disabledBrush
 		textColor = p.palette.mutedText
 	}
@@ -1381,7 +1493,7 @@ func (p *panel) drawButton(item *drawItem) {
 		focus.Bottom -= inset
 		if focus.Left < focus.Right && focus.Top < focus.Bottom {
 			focusBrush := p.accentBrush
-			if selected {
+			if focusOutlineUsesSurface(selected) {
 				// An accent outline disappears into an enabled/selected button.
 				// The surface color keeps focus equally visible in both themes.
 				focusBrush = p.surfaceBrush
@@ -1447,6 +1559,11 @@ func (p *panel) drawStatic(item *drawItem) {
 	if kind == staticSection {
 		accent := bounds
 		accent.Right = accent.Left + int32(p.sc(3))
+		// Match the rendered title glyph height while keeping the accent centered
+		// in its row at every DPI scale.
+		accentHeight := int32(p.sc(16))
+		accent.Top += (accent.Bottom - accent.Top - accentHeight) / 2
+		accent.Bottom = accent.Top + accentHeight
 		pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&accent)), uintptr(p.accentBrush))
 		bounds.Left += int32(p.sc(10))
 		pSetTextColor.Call(uintptr(item.HDC), uintptr(p.palette.text))

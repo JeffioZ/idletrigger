@@ -11,3 +11,9 @@ func TestShowHideRepeat(t *testing.T) {
 		Hide()
 	}
 }
+
+func TestWarningMinimumHeightIsCompact(t *testing.T) {
+	if warningMinHeight >= 112 {
+		t.Fatalf("minimum warning height = %d, expected a more compact card", warningMinHeight)
+	}
+}
