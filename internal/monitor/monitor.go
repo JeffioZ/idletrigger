@@ -15,6 +15,7 @@ var user32 = windows.NewLazySystemDLL("user32.dll")
 var kernel32dll = windows.NewLazySystemDLL("kernel32.dll")
 var getLastInputInfoProc = user32.NewProc("GetLastInputInfo")
 var getTickCountProc = kernel32dll.NewProc("GetTickCount")
+var getTickCount64Proc = kernel32dll.NewProc("GetTickCount64")
 
 type lastInputInfo struct {
 	cbSize uint32
@@ -36,13 +37,47 @@ func getTickCount() uint32 {
 	return uint32(r)
 }
 
+func getTickCount64() uint64 {
+	r, _, _ := getTickCount64Proc.Call()
+	return uint64(r)
+}
+
+// IdleSnapshot contains the raw Windows idle-time inputs and IdleTrigger's
+// converted value. It is intended for diagnostics and tests.
+type IdleSnapshot struct {
+	NowTick64     uint64
+	NowTick32     uint32
+	LastInputTick uint32
+	RawDeltaMS    int32
+	Idle          time.Duration
+}
+
+// Snapshot returns the raw GetLastInputInfo/GetTickCount values used to derive
+// the current session's idle duration.
+func Snapshot() (IdleSnapshot, error) {
+	last, err := getLastInputTime()
+	if err != nil {
+		return IdleSnapshot{}, err
+	}
+	now64 := getTickCount64()
+	now32 := uint32(now64)
+	rawDelta := int32(now32 - last)
+	return IdleSnapshot{
+		NowTick64:     now64,
+		NowTick32:     now32,
+		LastInputTick: last,
+		RawDeltaMS:    rawDelta,
+		Idle:          elapsedSinceLastInput(now32, last),
+	}, nil
+}
+
 // IdleDuration returns how long the user has been idle.
 func IdleDuration() (time.Duration, error) {
 	last, err := getLastInputTime()
 	if err != nil {
 		return 0, err
 	}
-	return elapsedSinceLastInput(getTickCount(), last) * time.Millisecond, nil
+	return elapsedSinceLastInput(getTickCount(), last), nil
 }
 
 func elapsedSinceLastInput(now, last uint32) time.Duration {
@@ -64,16 +99,20 @@ func elapsedSinceLastInput(now, last uint32) time.Duration {
 // Both fire at most once per idle session and reset when activity resumes.
 type Monitor struct {
 	thresholdNs    atomic.Int64 // nanoseconds
+	ignorePeriodic atomic.Bool
 	warningOffset  time.Duration
 	onWarning      func()
 	onTrigger      func()
 	onActivity     func()
+	onSample       func(Sample)
+	onInputReset   func(InputReset)
 	pollInterval   time.Duration
 	idleDuration   func() (time.Duration, error)
 	inputTimestamp func() (uint32, error)
 	startedAt      time.Time
 	lastInputTick  uint32
 	seenInputTick  bool
+	periodic       periodicInputState
 
 	warned    atomic.Bool
 	triggered atomic.Bool
@@ -82,6 +121,48 @@ type Monitor struct {
 	running   bool
 	mu        sync.Mutex
 }
+
+// Sample describes one successful idle-monitor poll after startup-window
+// clamping has been applied.
+type Sample struct {
+	Idle                    time.Duration
+	Threshold               time.Duration
+	WarnAt                  time.Duration
+	InputTimestampAvailable bool
+	LastInputTick           uint32
+	StartWindowClamped      bool
+	Warned                  bool
+	Triggered               bool
+}
+
+// InputReset describes a GetLastInputInfo timestamp change that starts a new
+// idle session.
+type InputReset struct {
+	PreviousLastInputTick  uint32
+	LastInputTick          uint32
+	SessionIdleBeforeReset time.Duration
+	Threshold              time.Duration
+	WarnAt                 time.Duration
+	WasWarned              bool
+	WasTriggered           bool
+	Ignored                bool
+	Reason                 string
+	PeriodicCount          int
+	PeriodicBaseline       time.Duration
+}
+
+type periodicInputState struct {
+	count          int
+	baseline       time.Duration
+	useLogicalIdle bool
+}
+
+const (
+	periodicInputMinInterval = 20 * time.Second
+	periodicInputMaxInterval = 2 * time.Minute
+	periodicInputTolerance   = 5 * time.Second
+	periodicInputRequired    = 3
+)
 
 // New creates a Monitor.
 //   - threshold: idle duration after which onTrigger fires
@@ -123,6 +204,7 @@ func (m *Monitor) Start() {
 	m.doneCh = make(chan struct{})
 	m.startedAt = time.Now()
 	m.seenInputTick = false
+	m.periodic = periodicInputState{}
 	m.running = true
 	go m.loop(m.stopCh, m.doneCh)
 }
@@ -148,9 +230,21 @@ func (m *Monitor) SetThreshold(d time.Duration) { m.thresholdNs.Store(int64(d)) 
 // Threshold returns the current idle threshold.
 func (m *Monitor) Threshold() time.Duration { return time.Duration(m.thresholdNs.Load()) }
 
+// SetIgnoreKeepaliveInput enables an advanced compatibility mode that ignores
+// stable, low-frequency input timestamp changes after a pattern is established.
+func (m *Monitor) SetIgnoreKeepaliveInput(enabled bool) { m.ignorePeriodic.Store(enabled) }
+
 // SetOnActivity sets a callback for the first user activity after a warning.
 // It must be configured before Start.
 func (m *Monitor) SetOnActivity(fn func()) { m.onActivity = fn }
+
+// SetOnSample sets a callback for successful idle polls. It must be configured
+// before Start.
+func (m *Monitor) SetOnSample(fn func(Sample)) { m.onSample = fn }
+
+// SetOnInputReset sets a callback for input timestamp changes. It must be
+// configured before Start.
+func (m *Monitor) SetOnInputReset(fn func(InputReset)) { m.onInputReset = fn }
 
 func (m *Monitor) loop(stopCh <-chan struct{}, doneCh chan<- struct{}) {
 	ticker := time.NewTicker(m.pollInterval)
@@ -167,12 +261,40 @@ func (m *Monitor) loop(stopCh <-chan struct{}, doneCh chan<- struct{}) {
 				inputTimestampAvailable = true
 				if m.seenInputTick && tick != m.lastInputTick {
 					wasWarned := m.warned.Load()
-					m.lastInputTick = tick
-					m.resetSession()
-					if wasWarned && m.onActivity != nil {
-						m.onActivity()
+					wasTriggered := m.triggered.Load()
+					previousTick := m.lastInputTick
+					interval := elapsedSinceLastInput(tick, previousTick)
+					threshold := time.Duration(m.thresholdNs.Load())
+					warnAt := threshold - m.warningOffset
+					if warnAt < 0 {
+						warnAt = 0
 					}
-					continue
+					ignored, reason := m.classifyInputReset(interval)
+					if m.onInputReset != nil {
+						m.onInputReset(InputReset{
+							PreviousLastInputTick:  previousTick,
+							LastInputTick:          tick,
+							SessionIdleBeforeReset: interval,
+							Threshold:              threshold,
+							WarnAt:                 warnAt,
+							WasWarned:              wasWarned,
+							WasTriggered:           wasTriggered,
+							Ignored:                ignored,
+							Reason:                 reason,
+							PeriodicCount:          m.periodic.count,
+							PeriodicBaseline:       m.periodic.baseline,
+						})
+					}
+					m.lastInputTick = tick
+					if ignored {
+						m.periodic.useLogicalIdle = true
+					} else {
+						m.resetSession()
+						if wasWarned && m.onActivity != nil {
+							m.onActivity()
+						}
+						continue
+					}
 				}
 				m.lastInputTick = tick
 				m.seenInputTick = true
@@ -185,24 +307,42 @@ func (m *Monitor) loop(stopCh <-chan struct{}, doneCh chan<- struct{}) {
 			// GetLastInputInfo reports activity that predates this monitor. A
 			// newly launched or re-enabled monitor must begin its own timeout
 			// window rather than immediately act on that historic idle period.
-			if sinceStart := time.Since(m.startedAt); dur > sinceStart {
+			startWindowClamped := false
+			sinceStart := time.Since(m.startedAt)
+			if m.periodic.useLogicalIdle && m.ignorePeriodic.Load() {
 				dur = sinceStart
+			} else if dur > sinceStart {
+				dur = sinceStart
+				startWindowClamped = true
 			}
 
-			warnAt := time.Duration(m.thresholdNs.Load()) - m.warningOffset
+			threshold := time.Duration(m.thresholdNs.Load())
+			warnAt := threshold - m.warningOffset
 			if warnAt < 0 {
 				warnAt = 0
 			}
+			if m.onSample != nil {
+				m.onSample(Sample{
+					Idle:                    dur,
+					Threshold:               threshold,
+					WarnAt:                  warnAt,
+					InputTimestampAvailable: inputTimestampAvailable,
+					LastInputTick:           m.lastInputTick,
+					StartWindowClamped:      startWindowClamped,
+					Warned:                  m.warned.Load(),
+					Triggered:               m.triggered.Load(),
+				})
+			}
 
 			// Phase 1: warning window — idle >= (threshold − offset) but < threshold
-			if dur >= warnAt && dur < time.Duration(m.thresholdNs.Load()) {
+			if dur >= warnAt && dur < threshold {
 				if !m.warned.Swap(true) && m.onWarning != nil {
 					m.onWarning()
 				}
 			}
 
 			// Phase 2: trigger — idle >= threshold
-			if dur >= time.Duration(m.thresholdNs.Load()) {
+			if dur >= threshold {
 				if !m.triggered.Swap(true) && m.onTrigger != nil {
 					m.onTrigger()
 					// An accepted action ends this idle session. Start a fresh
@@ -228,4 +368,47 @@ func (m *Monitor) resetSession() {
 	m.startedAt = time.Now()
 	m.warned.Store(false)
 	m.triggered.Store(false)
+	m.periodic.useLogicalIdle = false
+}
+
+func (m *Monitor) classifyInputReset(interval time.Duration) (bool, string) {
+	if !m.ignorePeriodic.Load() {
+		m.periodic = periodicInputState{}
+		return false, "accepted_standard_input"
+	}
+	if interval < periodicInputMinInterval || interval > periodicInputMaxInterval {
+		m.periodic.count = 0
+		m.periodic.baseline = 0
+		return false, "accepted_outside_periodic_window"
+	}
+	if m.periodic.count == 0 || m.periodic.baseline <= 0 {
+		m.periodic.count = 1
+		m.periodic.baseline = interval
+		return false, "accepted_collecting_periodic_pattern"
+	}
+	if !durationClose(interval, m.periodic.baseline, periodicInputTolerance) {
+		m.periodic.count = 1
+		m.periodic.baseline = interval
+		return false, "accepted_periodic_pattern_changed"
+	}
+	m.periodic.baseline = rollingAverageDuration(m.periodic.baseline, m.periodic.count, interval)
+	m.periodic.count++
+	if m.periodic.count < periodicInputRequired {
+		return false, "accepted_collecting_periodic_pattern"
+	}
+	return true, "ignored_as_periodic_input"
+}
+
+func durationClose(a, b, tolerance time.Duration) bool {
+	if a > b {
+		return a-b <= tolerance
+	}
+	return b-a <= tolerance
+}
+
+func rollingAverageDuration(current time.Duration, count int, next time.Duration) time.Duration {
+	if count <= 0 {
+		return next
+	}
+	return time.Duration((int64(current)*int64(count) + int64(next)) / int64(count+1))
 }

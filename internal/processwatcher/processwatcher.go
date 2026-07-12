@@ -1,6 +1,5 @@
-// Package processwatcher monitors the running process list and
-// automatically toggles NoSleep when user-specified applications are
-// detected — useful for presentations, video playback, etc.
+// Package processwatcher monitors the running process list and reports whether
+// user-specified applications are detected.
 package processwatcher
 
 import (

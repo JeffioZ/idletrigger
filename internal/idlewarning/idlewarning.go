@@ -4,6 +4,8 @@ package idlewarning
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -107,6 +109,8 @@ var (
 	body      string
 	closeHot  bool
 	closeDown bool
+	activeSeq uint64
+	nextSeq   atomic.Uint64
 	dismissMu sync.RWMutex
 	onDismiss func()
 
@@ -123,11 +127,48 @@ type trackMouseEvent struct {
 // Show schedules a warning on the tray UI thread. It never activates the
 // window, so displaying it does not itself reset the user's idle time.
 func Show(titleText, bodyText string) {
+	seq := nextSeq.Add(1)
 	if !systray.Post(func() {
-		showNow(titleText, bodyText)
+		showNow(titleText, bodyText, seq)
 	}) {
 		return
 	}
+}
+
+// ShowCountdown displays a warning and refreshes its body once per second.
+// bodyForSecond receives the remaining second count, including the initial
+// value. The warning remains non-activating; user activity is still observed by
+// the idle monitor rather than by this window.
+func ShowCountdown(titleText string, seconds int, bodyForSecond func(int) string) {
+	if bodyForSecond == nil {
+		return
+	}
+	if seconds < 0 {
+		seconds = 0
+	}
+	seq := nextSeq.Add(1)
+	if !systray.Post(func() {
+		showNow(titleText, bodyForSecond(seconds), seq)
+	}) {
+		return
+	}
+	if seconds == 0 {
+		return
+	}
+	go func() {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for remaining := seconds - 1; remaining >= 0; remaining-- {
+			<-ticker.C
+			text := bodyForSecond(remaining)
+			if !systray.Post(func() { updateBodyNow(seq, text) }) {
+				return
+			}
+			if remaining == 0 {
+				return
+			}
+		}
+	}()
 }
 
 // SetOnDismiss sets the callback used when the user explicitly closes the warning.
@@ -142,11 +183,12 @@ func Hide() {
 	if active != 0 {
 		pDestroyWindow.Call(uintptr(active))
 	}
+	activeSeq = 0
 	closeHot = false
 	closeDown = false
 }
 
-func showNow(titleText, bodyText string) {
+func showNow(titleText, bodyText string, seq uint64) {
 	Hide()
 	if err := ensureClass(); err != nil {
 		return
@@ -164,8 +206,22 @@ func showNow(titleText, bodyText string) {
 		return
 	}
 	active = windows.Handle(hwnd)
+	activeSeq = seq
 	title, body = titleText, bodyText
 	position(active)
+}
+
+func updateBodyNow(seq uint64, bodyText string) {
+	if active == 0 || activeSeq != seq {
+		return
+	}
+	if body == bodyText {
+		return
+	}
+	body = bodyText
+	position(active)
+	pInvalidateRect.Call(uintptr(active), 0, 0)
+	pUpdateWindow.Call(uintptr(active))
 }
 
 func ensureClass() error {
@@ -272,6 +328,7 @@ func wndProc(hwnd windows.Handle, message uint32, wParam, lParam uintptr) uintpt
 	case wmDestroy:
 		if active == hwnd {
 			active = 0
+			activeSeq = 0
 		}
 		return 0
 	}

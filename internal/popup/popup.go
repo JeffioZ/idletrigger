@@ -4,6 +4,7 @@ package popup
 import (
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -65,6 +66,7 @@ const (
 	ActIdleTimeout Action = 100 + iota
 	ActIdleAction
 	ActIdleWarningToggle
+	ActIdleIgnoreKeepaliveInputToggle
 	ActThemeToggle
 	ActBatteryToggle
 	ActFullscreenToggle
@@ -82,8 +84,11 @@ const (
 type State struct {
 	NoSleepEnabled, ProcessWatchEnabled, IdleEnabled, IdlePaused bool
 	IdleWarningEnabled                                           bool
+	IdleIgnoreKeepaliveInput                                     bool
 	IdleTimeout                                                  int
 	IdleAction                                                   string
+	ProcessWatchList                                             []string
+	ProcessWatchActive                                           bool
 	ThemeSwitchEnabled, DarkOnBattery, SkipFullscreen            bool
 	IPLocationEnabled                                            bool
 	HotkeysEnabled, AutostartEnabled, LoggingEnabled             bool
@@ -197,6 +202,7 @@ const (
 	idProcess         = 11
 	idIdle            = 20
 	idIdleWarning     = 21
+	idIdleKeepalive   = 22
 	idTheme           = 30
 	idBattery         = 32
 	idFullscreen      = 33
@@ -333,6 +339,8 @@ type panel struct {
 	nextStaticID                    uint16
 	themeScheduleID                 uint16
 	idlePaused                      bool
+	processWatchList                []string
+	processWatchActive              bool
 	themeSchedule                   string
 	timeoutOptions                  []timeoutChoice
 }
@@ -348,29 +356,32 @@ func Show(state State, onAction OnAction, langFn LangFunc) error {
 		return nil
 	}
 	p := &panel{
-		onAction:      onAction,
-		lang:          langFn,
-		scale:         1,
-		themeSchedule: state.ThemeSchedule,
-		appVersion:    state.AppVersion,
-		idlePaused:    state.IdlePaused,
-		idleTimeout:   state.IdleTimeout,
-		isChinese:     state.IsChinese,
-		owner:         state.Owner,
-		controls:      make(map[uint16]windows.Handle),
-		labels:        make(map[uint16]string),
-		staticKinds:   make(map[uint16]staticKind),
-		nextStaticID:  700,
-		tooltips:      make(map[uint16][]uint16),
+		onAction:           onAction,
+		lang:               langFn,
+		scale:              1,
+		themeSchedule:      state.ThemeSchedule,
+		appVersion:         state.AppVersion,
+		idlePaused:         state.IdlePaused,
+		idleTimeout:        state.IdleTimeout,
+		isChinese:          state.IsChinese,
+		owner:              state.Owner,
+		processWatchList:   append([]string(nil), state.ProcessWatchList...),
+		processWatchActive: state.ProcessWatchActive,
+		controls:           make(map[uint16]windows.Handle),
+		labels:             make(map[uint16]string),
+		staticKinds:        make(map[uint16]staticKind),
+		nextStaticID:       700,
+		tooltips:           make(map[uint16][]uint16),
 		toggles: map[uint16]bool{
 			idNoSleep: state.NoSleepEnabled, idProcess: state.ProcessWatchEnabled,
 			idIdle: state.IdleEnabled && !state.IdlePaused, idIdleWarning: state.IdleWarningEnabled,
-			idTheme:      state.ThemeSwitchEnabled,
-			idBattery:    state.DarkOnBattery,
-			idFullscreen: state.SkipFullscreen,
-			idIPLocation: state.IPLocationEnabled,
-			idHotkeys:    state.HotkeysEnabled,
-			idAutostart:  state.AutostartEnabled, idLogging: state.LoggingEnabled,
+			idIdleKeepalive: state.IdleIgnoreKeepaliveInput,
+			idTheme:         state.ThemeSwitchEnabled,
+			idBattery:       state.DarkOnBattery,
+			idFullscreen:    state.SkipFullscreen,
+			idIPLocation:    state.IPLocationEnabled,
+			idHotkeys:       state.HotkeysEnabled,
+			idAutostart:     state.AutostartEnabled, idLogging: state.LoggingEnabled,
 		},
 		selected:      make(map[uint16]bool),
 		disabled:      make(map[uint16]bool),
@@ -630,11 +641,13 @@ func (p *panel) tooltipText(id uint16) string {
 	case idNoSleep:
 		key = "tip_nosleep"
 	case idProcess:
-		key = "tip_process_watch"
+		return p.processWatchTooltip()
 	case idIdle:
 		key = "tip_idle"
 	case idIdleWarning:
 		key = "tip_idle_warning"
+	case idIdleKeepalive:
+		key = "tip_idle_keepalive"
 	case idIdleTimeout:
 		key = "tip_idle_timeout"
 	case idActionSleep, idActionHibernate, idActionShutdown, idActionLock:
@@ -668,6 +681,17 @@ func (p *panel) tooltipText(id uint16) string {
 		return ""
 	}
 	return p.text(key)
+}
+
+func (p *panel) processWatchTooltip() string {
+	if len(p.processWatchList) == 0 {
+		return p.text("tip_process_watch_empty")
+	}
+	status := p.text("tip_process_watch_waiting")
+	if p.processWatchActive {
+		status = p.text("tip_process_watch_active")
+	}
+	return fmt.Sprintf(p.text("tip_process_watch_configured"), status, strings.Join(p.processWatchList, ", "))
 }
 
 func (p *panel) build() error {
@@ -749,7 +773,7 @@ func (p *panel) build() error {
 	if p.idlePaused {
 		idleLabel = p.text("menu_idle_paused")
 	}
-	height, err = choiceRow(childX, y, childW, []string{idleLabel, p.text("menu_idle_warning")}, []uint16{idIdle, idIdleWarning})
+	height, err = choiceRow(childX, y, childW, []string{idleLabel, p.text("menu_idle_warning"), p.text("menu_idle_keepalive")}, []uint16{idIdle, idIdleWarning, idIdleKeepalive})
 	if err != nil {
 		return err
 	}
@@ -1145,6 +1169,9 @@ func (p *panel) handleCommand(id uint16) {
 	case id == idIdleWarning:
 		p.toggle(id)
 		action = ActIdleWarningToggle
+	case id == idIdleKeepalive:
+		p.toggle(id)
+		action = ActIdleIgnoreKeepaliveInputToggle
 	case id >= idActionSleep && id <= idActionLock:
 		p.choose(actionIDs(), id)
 		action = ActIdleAction

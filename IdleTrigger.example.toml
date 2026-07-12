@@ -1,7 +1,7 @@
 # IdleTrigger 配置示例 / Configuration Example
 # 复制为 IdleTrigger.toml 放在 EXE 同目录即可生效
 # Copy to IdleTrigger.toml next to the EXE to apply
-# config_template_version = 5
+# config_template_version = 7
 
 # -- 保持唤醒 / Stay Awake --
 # 手动启用保持唤醒，阻止系统自动睡眠 / Manually keep the system awake and prevent automatic sleep
@@ -12,9 +12,9 @@ keep_screen_on = false
 nosleep_on_battery = false
 # 电池电量低于此百分比时强制关闭保持唤醒 / Force-disable Stay Awake below this battery percentage
 nosleep_battery_threshold = 20
-# 检测到指定进程运行时自动保持唤醒 / Auto-enable Stay Awake while any listed process is running
+# 保持唤醒已开启时，按指定进程限制生效范围；不会单独启用保持唤醒 / When Stay Awake is enabled, limit it to listed processes; this does not enable Stay Awake by itself
 process_watch_enabled = false
-# 不区分大小写的 .exe 文件名，例如 ["chrome.exe", "powerpnt.exe"] / Case-insensitive .exe names, e.g. ["chrome.exe", "powerpnt.exe"]
+# 不区分大小写的 .exe 文件名；空列表是正常状态，表示不按进程限制 / Case-insensitive .exe names; an empty list is valid and means no process limit
 process_watch_list = []
 
 # -- 空闲监测 / Idle Monitor --
@@ -24,6 +24,8 @@ idle_timeout_minutes = 30
 idle_action = "sleep"
 # 触发前多少秒显示不抢焦点的应用内预警；键鼠操作或关闭预警会取消本次动作，设为 0 静默执行 / Non-activating in-app warning seconds before trigger; keyboard/mouse input or closing it cancels this action, 0 = silent
 idle_warning_seconds = 30
+# 忽略稳定的保活输入，适合系统睡眠也被固定间隔输入干扰的机器；默认关闭，开启后仍会记录每次接受或忽略的原因 / Ignore stable keepalive input when system sleep is also disturbed by fixed-interval input; off by default, and every accepted or ignored reset is logged
+idle_ignore_keepalive_input = false
 
 # -- 昼夜主题 / Day/Night Theme --
 # 启用按时间自动切换 Windows 深浅色 / Automatically switch Windows light/dark theme by schedule

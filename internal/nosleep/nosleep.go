@@ -3,6 +3,7 @@
 package nosleep
 
 import (
+	"fmt"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -26,7 +27,7 @@ type executionWorker struct {
 
 type updateRequest struct {
 	keepScreen bool
-	done       chan struct{}
+	done       chan error
 }
 
 const (
@@ -37,26 +38,41 @@ const (
 
 // Enable activates NoSleep. Calls are serialized onto one locked OS thread,
 // because Windows tracks continuous execution requests per calling thread.
-func Enable(keepScreenOn bool) {
+func Enable(keepScreenOn bool) error {
 	mu.Lock()
 	defer mu.Unlock()
 
+	var err error
+	created := false
 	if worker == nil {
 		worker = &executionWorker{
 			updates: make(chan updateRequest),
 			stop:    make(chan chan struct{}),
 		}
-		ready := make(chan struct{})
+		created = true
+		ready := make(chan error)
 		go worker.loop(keepScreenOn, ready)
-		<-ready
+		err = <-ready
 	} else {
-		done := make(chan struct{})
+		done := make(chan error)
 		worker.updates <- updateRequest{keepScreen: keepScreenOn, done: done}
-		<-done
+		err = <-done
 	}
 
+	if err != nil {
+		if created && worker != nil {
+			done := make(chan struct{})
+			worker.stop <- done
+			<-done
+			worker = nil
+		}
+		keepScr.Store(false)
+		enabled.Store(false)
+		return err
+	}
 	keepScr.Store(keepScreenOn)
 	enabled.Store(true)
+	return nil
 }
 
 // Disable clears the request on the same OS thread that created it.
@@ -82,18 +98,16 @@ func IsEnabled() bool { return enabled.Load() }
 
 func IsKeepingScreenOn() bool { return keepScr.Load() }
 
-func (w *executionWorker) loop(initialKeepScreen bool, ready chan struct{}) {
+func (w *executionWorker) loop(initialKeepScreen bool, ready chan error) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	setExecutionState(initialKeepScreen)
-	close(ready)
+	ready <- setExecutionState(initialKeepScreen)
 
 	for {
 		select {
 		case req := <-w.updates:
-			setExecutionState(req.keepScreen)
-			close(req.done)
+			req.done <- setExecutionState(req.keepScreen)
 		case done := <-w.stop:
 			proc := kernel32.NewProc("SetThreadExecutionState")
 			proc.Call(uintptr(esContinuous))
@@ -103,11 +117,15 @@ func (w *executionWorker) loop(initialKeepScreen bool, ready chan struct{}) {
 	}
 }
 
-func setExecutionState(keepScreen bool) {
+func setExecutionState(keepScreen bool) error {
 	flags := uintptr(esContinuous | esSystemRequired)
 	if keepScreen {
 		flags |= esDisplayRequired
 	}
 	proc := kernel32.NewProc("SetThreadExecutionState")
-	proc.Call(flags)
+	r, _, err := proc.Call(flags)
+	if r == 0 {
+		return fmt.Errorf("SetThreadExecutionState flags=0x%x: %w", flags, err)
+	}
+	return nil
 }

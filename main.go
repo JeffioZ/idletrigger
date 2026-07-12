@@ -15,6 +15,7 @@ import (
 	"github.com/JeffioZ/idletrigger/internal/darkmode"
 	"github.com/JeffioZ/idletrigger/internal/dpi"
 	"github.com/JeffioZ/idletrigger/internal/i18n"
+	"github.com/JeffioZ/idletrigger/internal/inputdiag"
 	"github.com/JeffioZ/idletrigger/internal/ipc"
 	mylog "github.com/JeffioZ/idletrigger/internal/log"
 	"github.com/JeffioZ/idletrigger/internal/singleinstance"
@@ -75,9 +76,18 @@ func main() {
 
 	// GUI mode
 	exePath, _ := os.Executable()
+	if os.Getenv("IDLETRIGGER_DEBUG_LOG") == "1" {
+		cfg.LoggingEnabled = true
+	}
 	mylog.Init(cfg.LoggingEnabled, filepath.Dir(exePath))
 	defer mylog.Close()
 	mylog.Info("IdleTrigger starting: version=%s mode=GUI", version.Value)
+	if os.Getenv("IDLETRIGGER_DEBUG_LOG") == "1" {
+		mylog.Info("Debug logging enabled by IDLETRIGGER_DEBUG_LOG")
+	}
+	if stopInputDiagnostics := inputdiag.Start(); stopInputDiagnostics != nil {
+		defer stopInputDiagnostics()
+	}
 	if configLoadErr != nil {
 		mylog.Info("Config load failed; using defaults without modifying the file: %v", configLoadErr)
 	}

@@ -55,6 +55,8 @@ The monitor uses Windows `GetLastInputInfo` to observe real keyboard and mouse a
 
 Enable the warning to receive a non-activating prompt before the action. Any keyboard or mouse input cancels the pending action; closing the prompt does the same. Set `idle_warning_seconds = 0` for silent operation.
 
+If Windows itself never becomes idle because a device, driver, or app sends fixed-interval keepalive input, enable the Ignore Keepalive Input switch. It is off by default; when enabled, IdleTrigger first logs and learns a stable reset pattern, then ignores matching keepalive resets while continuing to log why each reset was accepted or ignored.
+
 ## Command Line
 
 Run the EXE without arguments to launch the tray app.

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -111,9 +112,7 @@ func Run(cfg config.Config, cbs Callbacks) {
 		}
 
 		// Process watcher
-		if s.cfg.ProcessWatchEnabled && len(s.cfg.ProcessWatchList) > 0 {
-			s.startProcessWatcher()
-		}
+		s.syncProcessWatcher()
 		if s.cfg.ThemeSwitchEnabled {
 			s.startThemeScheduler()
 		}
@@ -202,8 +201,8 @@ func (s *trayState) buildTooltip() string {
 		lines = append(lines, s.statusLine("tooltip_idle", shortStatus(s.lang, false)))
 	}
 	lines = append(lines, s.statusLine("tooltip_theme", s.themeTooltipValueShort()))
-	if s.cfg.ProcessWatchEnabled {
-		lines = append(lines, s.statusLine("tooltip_process", shortStatus(s.lang, s.processNoSleep)))
+	if s.cfg.ProcessWatchEnabled || len(s.cfg.ProcessWatchList) > 0 {
+		lines = append(lines, s.statusLine("tooltip_process", s.processTooltipValueShort()))
 	}
 	return tooltipText(lines)
 }
@@ -237,6 +236,19 @@ func (s *trayState) themeTooltipValueShort() string {
 		return i18n.T(s.lang, "status_short_on") + " " + compactThemeSchedule(schedule)
 	}
 	return i18n.T(s.lang, "status_short_on")
+}
+
+func (s *trayState) processTooltipValueShort() string {
+	if len(effectiveProcessWatchList(s.cfg)) == 0 {
+		return i18n.T(s.lang, "status_process_not_configured")
+	}
+	if !s.cfg.ProcessWatchEnabled {
+		return shortStatus(s.lang, false)
+	}
+	if s.processNoSleep {
+		return i18n.T(s.lang, "status_process_matched")
+	}
+	return i18n.T(s.lang, "status_process_waiting")
 }
 
 func compactThemeSchedule(schedule string) string {
@@ -317,11 +329,34 @@ func (s *trayState) startMonitor() {
 		return
 	}
 	threshold := time.Duration(s.cfg.IdleTimeoutMinutes) * time.Minute
+	if testThreshold := idleTestThreshold(); testThreshold > 0 {
+		threshold = testThreshold
+		mylog.Info("Idle monitor test threshold override active: threshold=%s source=IDLETRIGGER_IDLE_TEST_SECONDS", threshold)
+	}
 	warnOffset := time.Duration(s.cfg.IdleWarningSeconds) * time.Second
-	mylog.Info("Idle monitor started: %d min -> %s", s.cfg.IdleTimeoutMinutes, string(s.cfg.IdleAction))
+	snap, snapErr := monitor.Snapshot()
+	if snapErr != nil {
+		mylog.Info("Idle monitor starting: config_timeout_min=%d effective_threshold=%s warning=%s action=%s idle_snapshot_error=%v",
+			s.cfg.IdleTimeoutMinutes, threshold, warnOffset, string(s.cfg.IdleAction), snapErr)
+	} else {
+		mylog.Info("Idle monitor starting: config_timeout_min=%d effective_threshold=%s warning=%s action=%s tick_now=%d tick32=%d last_input=%d raw_delta_ms=%d idle=%s",
+			s.cfg.IdleTimeoutMinutes, threshold, warnOffset, string(s.cfg.IdleAction), snap.NowTick64, snap.NowTick32, snap.LastInputTick, snap.RawDeltaMS, snap.Idle.Round(time.Second))
+	}
+	mylog.Info("Idle monitor input policy: ignore_keepalive_input=%v periodic_window=%s..%s periodic_tolerance=%s periodic_required=%d",
+		s.cfg.IdleIgnoreKeepaliveInput, 20*time.Second, 2*time.Minute, 5*time.Second, 3)
 	action := s.cfg.IdleAction
 	lang := s.lang
 	warningSeconds := s.cfg.IdleWarningSeconds
+	processWatchEnabled := s.cfg.ProcessWatchEnabled
+	processListCount := len(effectiveProcessWatchList(s.cfg))
+	noSleepEnabled := s.cfg.NoSleepEnabled
+	keepScreenOn := s.cfg.KeepScreenOn
+	ignoreKeepaliveInput := s.cfg.IdleIgnoreKeepaliveInput
+	sampleLogInterval := 5 * time.Second
+	if idleTestThreshold() > 0 {
+		sampleLogInterval = 2 * time.Second
+	}
+	var lastSampleLog time.Time
 	idlewarning.SetOnDismiss(func() {
 		s.post(func() {
 			if s.mon != nil && s.cfg.IdleTimeoutMinutes > 0 {
@@ -335,10 +370,14 @@ func (s *trayState) startMonitor() {
 		// balloons are silently suppressed on many Windows 11 configurations.
 		func() {
 			actName := i18n.T(lang, actionTranslationKey(action))
-			msg := fmt.Sprintf(i18n.T(lang, "msg_idle_warning"), actName, warningSeconds)
 			title := i18n.T(lang, "app_title")
 			mylog.Info("Idle warning displayed: action=%s seconds=%d", action, warningSeconds)
-			idlewarning.Show(title, msg)
+			idlewarning.ShowCountdown(title, warningSeconds, func(remaining int) string {
+				if remaining < 0 {
+					remaining = 0
+				}
+				return fmt.Sprintf(i18n.T(lang, "msg_idle_warning"), actName, remaining)
+			})
 		},
 		// Execute directly from the monitor goroutine. Waiting for the tray
 		// state queue would make an overdue power action depend on UI work.
@@ -360,7 +399,32 @@ func (s *trayState) startMonitor() {
 		},
 		time.Second,
 	)
+	s.mon.SetIgnoreKeepaliveInput(ignoreKeepaliveInput)
 	s.mon.SetOnActivity(func() { systray.Post(idlewarning.Hide) })
+	s.mon.SetOnInputReset(func(reset monitor.InputReset) {
+		mylog.Info("Idle monitor input reset: previous_last_input=%d last_input=%d session_idle_before_reset=%s threshold=%s warn_at=%s was_warned=%v was_triggered=%v ignored=%v reason=%s periodic_count=%d periodic_baseline=%s ignore_keepalive_input=%v action=%s source=GetLastInputInfo",
+			reset.PreviousLastInputTick, reset.LastInputTick, reset.SessionIdleBeforeReset.Round(time.Millisecond),
+			reset.Threshold, reset.WarnAt, reset.WasWarned, reset.WasTriggered, reset.Ignored, reset.Reason,
+			reset.PeriodicCount, reset.PeriodicBaseline.Round(time.Millisecond), ignoreKeepaliveInput, action)
+	})
+	s.mon.SetOnSample(func(sample monitor.Sample) {
+		now := time.Now()
+		if !lastSampleLog.IsZero() && now.Sub(lastSampleLog) < sampleLogInterval {
+			return
+		}
+		lastSampleLog = now
+		if snap, err := monitor.Snapshot(); err == nil {
+			mylog.Info("Idle monitor sample: effective_idle=%s raw_idle=%s raw_delta_ms=%d threshold=%s warn_at=%s last_input=%d tick_now=%d clamped_to_start=%v warned=%v triggered=%v input_timestamp=%v ignore_keepalive_input=%v nosleep_enabled=%v keep_screen_on=%v process_watch_enabled=%v process_list_count=%d",
+				sample.Idle.Round(time.Millisecond), snap.Idle.Round(time.Millisecond), snap.RawDeltaMS,
+				sample.Threshold, sample.WarnAt, sample.LastInputTick, snap.NowTick64,
+				sample.StartWindowClamped, sample.Warned, sample.Triggered, sample.InputTimestampAvailable,
+				ignoreKeepaliveInput, noSleepEnabled, keepScreenOn, processWatchEnabled, processListCount)
+		} else {
+			mylog.Info("Idle monitor sample: effective_idle=%s threshold=%s warn_at=%s last_input=%d clamped_to_start=%v warned=%v triggered=%v input_timestamp=%v snapshot_error=%v",
+				sample.Idle.Round(time.Millisecond), sample.Threshold, sample.WarnAt, sample.LastInputTick,
+				sample.StartWindowClamped, sample.Warned, sample.Triggered, sample.InputTimestampAvailable, err)
+		}
+	})
 	s.mon.Start()
 }
 
@@ -370,14 +434,22 @@ func (s *trayState) stopMonitor() {
 	if s.mon != nil {
 		s.mon.Stop()
 		s.mon = nil
+		mylog.Info("Idle monitor stopped")
 	}
 }
 
 func (s *trayState) reconcileRuntime() {
 	wantsNoSleep := noSleepRequested(s.cfg, s.processNoSleep)
+	mylog.Info("Runtime reconcile: nosleep_enabled=%v process_watch_enabled=%v process_list_count=%d process_match=%v wants_nosleep=%v battery_blocked=%v idle_timeout_min=%d monitor_running=%v",
+		s.cfg.NoSleepEnabled, s.cfg.ProcessWatchEnabled, len(effectiveProcessWatchList(s.cfg)), s.processNoSleep, wantsNoSleep, s.batteryBlocked, s.cfg.IdleTimeoutMinutes, s.mon != nil)
 	if wantsNoSleep && !s.batteryBlocked {
 		s.stopMonitor()
-		nosleep.Enable(s.cfg.KeepScreenOn)
+		if err := nosleep.Enable(s.cfg.KeepScreenOn); err != nil {
+			mylog.Info("Stay Awake enable failed: keep_screen_on=%v error=%v", s.cfg.KeepScreenOn, err)
+			s.showError("menu_nosleep", err)
+		} else {
+			mylog.Info("Stay Awake enabled: keep_screen_on=%v", s.cfg.KeepScreenOn)
+		}
 		return
 	}
 
@@ -390,14 +462,19 @@ func (s *trayState) reconcileRuntime() {
 }
 
 func noSleepRequested(cfg config.Config, processRequested bool) bool {
-	return cfg.NoSleepEnabled || processRequested
+	if !cfg.NoSleepEnabled {
+		return false
+	}
+	if !cfg.ProcessWatchEnabled || len(effectiveProcessWatchList(cfg)) == 0 {
+		return true
+	}
+	return processRequested
 }
 
-// idleSuspended reports the intentional conflict resolution between process
-// based keep-awake and the idle action. The saved idle setting is retained so
-// it resumes automatically after the watched process exits.
+// idleSuspended reports the intentional conflict resolution between effective
+// keep-awake and the idle action.
 func (s *trayState) idleSuspended() bool {
-	return s.cfg.IdleTimeoutMinutes > 0 && s.processNoSleep && s.mon == nil
+	return s.cfg.IdleTimeoutMinutes > 0 && noSleepRequested(s.cfg, s.processNoSleep) && s.mon == nil
 }
 
 // ---- hotkeys ----------------------------------------------------------
@@ -454,6 +531,7 @@ func (s *trayState) toggleNoSleep() {
 		s.cfg.NoSleepEnabled = true
 		s.cfg.IdleTimeoutMinutes = 0
 	}
+	s.syncProcessWatcher()
 	s.reconcileRuntime()
 	mylog.Info("NoSleep toggled: enabled=%v keep_screen_on=%v", nosleep.IsEnabled(), nosleep.IsKeepingScreenOn())
 
@@ -465,14 +543,17 @@ func (s *trayState) toggleNoSleep() {
 
 func (s *trayState) startProcessWatcher() {
 	s.stopProcessWatcher()
-	if len(s.cfg.ProcessWatchList) == 0 {
+	list := effectiveProcessWatchList(s.cfg)
+	if len(list) == 0 {
+		mylog.Info("Process watcher not started: process_watch_list is empty")
 		return
 	}
-	s.procWatch = processwatcher.New(s.cfg.ProcessWatchList,
+	mylog.Info("Process watcher started: exes=%s", strings.Join(list, ","))
+	s.procWatch = processwatcher.New(list,
 		processwatcher.Callbacks{
 			OnEnable: func() {
 				s.post(func() {
-					mylog.Info("Process watcher: watched app detected, requesting NoSleep")
+					mylog.Info("Process watcher: watched app detected")
 					s.processNoSleep = true
 					s.reconcileRuntime()
 
@@ -481,7 +562,7 @@ func (s *trayState) startProcessWatcher() {
 			},
 			OnDisable: func() {
 				s.post(func() {
-					mylog.Info("Process watcher: no watched apps running, releasing NoSleep")
+					mylog.Info("Process watcher: no watched apps running")
 					s.processNoSleep = false
 					s.reconcileRuntime()
 
@@ -496,8 +577,42 @@ func (s *trayState) stopProcessWatcher() {
 	if s.procWatch != nil {
 		s.procWatch.Stop()
 		s.procWatch = nil
+		mylog.Info("Process watcher stopped")
 	}
 	s.processNoSleep = false
+}
+
+func (s *trayState) syncProcessWatcher() {
+	if shouldRunProcessWatcher(s.cfg) {
+		s.startProcessWatcher()
+		return
+	}
+	s.stopProcessWatcher()
+	if s.cfg.ProcessWatchEnabled && len(effectiveProcessWatchList(s.cfg)) == 0 {
+		mylog.Info("Process watcher disabled at runtime: process_watch_list is empty")
+	}
+}
+
+func shouldRunProcessWatcher(cfg config.Config) bool {
+	return cfg.NoSleepEnabled && cfg.ProcessWatchEnabled && len(effectiveProcessWatchList(cfg)) > 0
+}
+
+func effectiveProcessWatchList(cfg config.Config) []string {
+	out := make([]string, 0, len(cfg.ProcessWatchList))
+	seen := make(map[string]struct{}, len(cfg.ProcessWatchList))
+	for _, value := range cfg.ProcessWatchList {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		key := strings.ToLower(value)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 // ---- battery awareness ------------------------------------------------
@@ -684,9 +799,7 @@ func (s *trayState) reloadConfig() error {
 	if s.cfg.HotkeysEnabled {
 		s.startHotkeys()
 	}
-	if s.cfg.ProcessWatchEnabled && len(s.cfg.ProcessWatchList) > 0 {
-		s.startProcessWatcher()
-	}
+	s.syncProcessWatcher()
 	if s.cfg.ThemeSwitchEnabled {
 		s.startThemeScheduler()
 	}
@@ -863,24 +976,27 @@ func (s *trayState) showPopup() {
 	s.stateCh <- stateRequest{fn: func() string {
 		result <- popupSnapshot{
 			state: popup.State{
-				NoSleepEnabled:      s.cfg.NoSleepEnabled,
-				ProcessWatchEnabled: s.cfg.ProcessWatchEnabled,
-				IdleEnabled:         s.cfg.IdleTimeoutMinutes > 0,
-				IdlePaused:          s.idleSuspended(),
-				IdleWarningEnabled:  s.cfg.IdleWarningSeconds > 0,
-				IdleTimeout:         s.cfg.IdleTimeoutMinutes,
-				IdleAction:          string(s.cfg.IdleAction),
-				ThemeSwitchEnabled:  s.cfg.ThemeSwitchEnabled,
-				DarkOnBattery:       s.cfg.ThemeDarkOnBattery,
-				SkipFullscreen:      s.cfg.ThemeSkipFullscreen,
-				IPLocationEnabled:   s.cfg.ThemeIPLocationEnabled,
-				HotkeysEnabled:      s.cfg.HotkeysEnabled,
-				AutostartEnabled:    s.cfg.AutostartEnabled,
-				LoggingEnabled:      s.cfg.LoggingEnabled,
-				IsChinese:           i18n.ResolveLanguage(s.lang) == "zh-CN",
-				ThemeSchedule:       s.themeScheduleText(true),
-				AppVersion:          version.Value,
-				Owner:               systray.WindowHandle(),
+				NoSleepEnabled:           s.cfg.NoSleepEnabled,
+				ProcessWatchEnabled:      s.cfg.ProcessWatchEnabled,
+				IdleEnabled:              s.cfg.IdleTimeoutMinutes > 0,
+				IdlePaused:               s.idleSuspended(),
+				IdleWarningEnabled:       s.cfg.IdleWarningSeconds > 0,
+				IdleIgnoreKeepaliveInput: s.cfg.IdleIgnoreKeepaliveInput,
+				IdleTimeout:              s.cfg.IdleTimeoutMinutes,
+				IdleAction:               string(s.cfg.IdleAction),
+				ProcessWatchList:         effectiveProcessWatchList(s.cfg),
+				ProcessWatchActive:       s.processNoSleep,
+				ThemeSwitchEnabled:       s.cfg.ThemeSwitchEnabled,
+				DarkOnBattery:            s.cfg.ThemeDarkOnBattery,
+				SkipFullscreen:           s.cfg.ThemeSkipFullscreen,
+				IPLocationEnabled:        s.cfg.ThemeIPLocationEnabled,
+				HotkeysEnabled:           s.cfg.HotkeysEnabled,
+				AutostartEnabled:         s.cfg.AutostartEnabled,
+				LoggingEnabled:           s.cfg.LoggingEnabled,
+				IsChinese:                i18n.ResolveLanguage(s.lang) == "zh-CN",
+				ThemeSchedule:            s.themeScheduleText(true),
+				AppVersion:               version.Value,
+				Owner:                    systray.WindowHandle(),
 			},
 			lang: s.lang,
 		}
@@ -914,11 +1030,7 @@ func (s *trayState) handlePopupAction(action popup.Action, value int) {
 		s.toggleNoSleep()
 	case popup.ActProcessWatchToggle:
 		s.cfg.ProcessWatchEnabled = !s.cfg.ProcessWatchEnabled
-		if s.cfg.ProcessWatchEnabled && len(s.cfg.ProcessWatchList) > 0 {
-			s.startProcessWatcher()
-		} else {
-			s.stopProcessWatcher()
-		}
+		s.syncProcessWatcher()
 		s.reconcileRuntime()
 		s.updateIcon()
 		s.saveConfig()
@@ -953,6 +1065,11 @@ func (s *trayState) handlePopupAction(action popup.Action, value int) {
 		} else {
 			s.cfg.IdleWarningSeconds = 30
 		}
+		s.reconcileRuntime()
+		s.saveConfig()
+	case popup.ActIdleIgnoreKeepaliveInputToggle:
+		s.cfg.IdleIgnoreKeepaliveInput = !s.cfg.IdleIgnoreKeepaliveInput
+		mylog.Info("Idle monitor keepalive input filter toggled: enabled=%v", s.cfg.IdleIgnoreKeepaliveInput)
 		s.reconcileRuntime()
 		s.saveConfig()
 	case popup.ActThemeToggle:
@@ -1043,6 +1160,19 @@ func (s *trayState) handlePopupAction(action popup.Action, value int) {
 		popup.Destroy()
 		systray.Quit()
 	}
+}
+
+func idleTestThreshold() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("IDLETRIGGER_IDLE_TEST_SECONDS"))
+	if raw == "" {
+		return 0
+	}
+	seconds, err := strconv.Atoi(raw)
+	if err != nil || seconds <= 0 || seconds > 3600 {
+		mylog.Info("Ignoring invalid IDLETRIGGER_IDLE_TEST_SECONDS=%q", raw)
+		return 0
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 func (s *trayState) restartThemeScheduler() {

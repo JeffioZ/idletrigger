@@ -13,12 +13,23 @@ func TestNoSleepRequestSources(t *testing.T) {
 	if noSleepRequested(cfg, false) {
 		t.Fatal("unexpected request")
 	}
-	if !noSleepRequested(cfg, true) {
-		t.Fatal("process request was ignored")
+	if noSleepRequested(cfg, true) {
+		t.Fatal("process request should not enable Stay Awake by itself")
 	}
 	cfg.NoSleepEnabled = true
 	if !noSleepRequested(cfg, false) {
 		t.Fatal("user request was ignored")
+	}
+	cfg.ProcessWatchEnabled = true
+	if !noSleepRequested(cfg, false) {
+		t.Fatal("empty process list should not block Stay Awake")
+	}
+	cfg.ProcessWatchList = []string{"obs64.exe"}
+	if noSleepRequested(cfg, false) {
+		t.Fatal("configured process watch should wait for a matching process")
+	}
+	if !noSleepRequested(cfg, true) {
+		t.Fatal("matching process should allow enabled Stay Awake")
 	}
 }
 
@@ -114,19 +125,53 @@ func TestTooltipTitleAddsReleaseVersion(t *testing.T) {
 	}
 }
 
-func TestIdleSuspendedByProcessKeepAwake(t *testing.T) {
+func TestProcessMatchDoesNotSuspendIdleWhenStayAwakeIsOff(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Language = "zh-CN"
+	cfg.IdleTimeoutMinutes = 30
 	cfg.ProcessWatchEnabled = true
+	cfg.ProcessWatchList = []string{"obs64.exe"}
 	state := trayState{cfg: cfg, lang: "zh-CN", processNoSleep: true}
+	if state.idleSuspended() {
+		t.Fatal("process match should not suspend idle monitoring when Stay Awake is off")
+	}
+	if got := state.monitorStatusText(); got != "已禁用" {
+		t.Fatalf("monitor status = %q, want disabled", got)
+	}
+}
+
+func TestIdleSuspendedByEffectiveKeepAwake(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Language = "zh-CN"
+	cfg.NoSleepEnabled = true
+	cfg.IdleTimeoutMinutes = 30
+	state := trayState{cfg: cfg, lang: "zh-CN"}
 	if !state.idleSuspended() {
-		t.Fatal("process keep-awake should suspend the configured idle monitor")
+		t.Fatal("effective keep-awake should suspend the configured idle monitor")
 	}
 	if got := state.buildTooltip(); !strings.Contains(got, "空闲监测：已暂停") {
 		t.Fatalf("tooltip should expose idle suspension: %q", got)
 	}
 	if got := state.monitorStatusText(); got != "保持唤醒时暂停" {
 		t.Fatalf("monitor status = %q, want paused by Stay Awake", got)
+	}
+}
+
+func TestProcessWatchHelpersTreatEmptyListAsNormal(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.NoSleepEnabled = true
+	cfg.ProcessWatchEnabled = true
+	cfg.ProcessWatchList = []string{"", " OBS64.exe ", "obs64.exe", "Code.exe"}
+	got := effectiveProcessWatchList(cfg)
+	if strings.Join(got, ",") != "OBS64.exe,Code.exe" {
+		t.Fatalf("effective list = %v", got)
+	}
+	cfg.ProcessWatchList = nil
+	if !noSleepRequested(cfg, false) {
+		t.Fatal("empty process list should not disable Stay Awake")
+	}
+	if shouldRunProcessWatcher(cfg) {
+		t.Fatal("empty process list should not start watcher")
 	}
 }
 
