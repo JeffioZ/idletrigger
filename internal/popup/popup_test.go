@@ -1,6 +1,10 @@
 package popup
 
-import "testing"
+import (
+	"testing"
+
+	"golang.org/x/sys/windows"
+)
 
 func TestTimeoutChoices(t *testing.T) {
 	choices, selected := timeoutChoices(30, true)
@@ -72,6 +76,75 @@ func TestFocusOutlineKeepsSelectedButtonsDistinct(t *testing.T) {
 	}
 	if !focusOutlineUsesLightOnAccent(true) {
 		t.Fatal("active button should use the dedicated selected-control focus outline")
+	}
+}
+
+func TestFocusOutlineIsVisibleOnlyDuringKeyboardNavigation(t *testing.T) {
+	p := &panel{}
+	if p.shouldDrawFocusOutline(odsFocus) {
+		t.Fatal("initial mouse-oriented panel should not show a focus outline")
+	}
+	p.enterKeyboardNavigation()
+	if !p.shouldDrawFocusOutline(odsFocus) {
+		t.Fatal("keyboard navigation should show the focused control outline")
+	}
+	p.leaveKeyboardNavigation()
+	if p.shouldDrawFocusOutline(odsFocus) {
+		t.Fatal("mouse interaction should hide the focus-visible outline without changing focus")
+	}
+	if p.shouldDrawFocusOutline(0) {
+		t.Fatal("an unfocused control must not show a focus outline")
+	}
+}
+
+func TestComboFocusOutlineRequiresKeyboardFocusedSelectionField(t *testing.T) {
+	combo := windows.Handle(120)
+	other := windows.Handle(121)
+	selectionField := uint32(odsComboBoxEdit)
+	tests := []struct {
+		name               string
+		keyboardNavigation bool
+		itemState          uint32
+		focused            windows.Handle
+		want               bool
+	}{
+		{name: "tab focus on selection field", keyboardNavigation: true, itemState: selectionField, focused: combo, want: true},
+		{name: "initial panel", itemState: selectionField, focused: combo, want: false},
+		{name: "mouse focus", itemState: selectionField, focused: combo, want: false},
+		{name: "another focused control", keyboardNavigation: true, itemState: selectionField, focused: other, want: false},
+		{name: "drop-down item", keyboardNavigation: true, focused: combo, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := comboFocusVisible(tt.keyboardNavigation, tt.itemState, tt.focused, combo); got != tt.want {
+				t.Fatalf("comboFocusVisible() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestWindowIconThemeAndReloadDecisions(t *testing.T) {
+	if got := windowIconResourceID(false); got != trayDarkIconResourceID {
+		t.Fatalf("light theme resource = %d, want %d", got, trayDarkIconResourceID)
+	}
+	if got := windowIconResourceID(true); got != trayLightIconResourceID {
+		t.Fatalf("dark theme resource = %d, want %d", got, trayLightIconResourceID)
+	}
+	for _, tt := range []struct {
+		name                                   string
+		initialized, current, requested, force bool
+		want                                   bool
+	}{
+		{name: "initial load", want: true},
+		{name: "theme change", initialized: true, current: false, requested: true, want: true},
+		{name: "dpi refresh", initialized: true, current: true, requested: true, force: true, want: true},
+		{name: "same theme skips reload", initialized: true, current: true, requested: true, want: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shouldReloadWindowIcons(tt.initialized, tt.current, tt.requested, tt.force); got != tt.want {
+				t.Fatalf("shouldReloadWindowIcons() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 

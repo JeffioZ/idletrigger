@@ -12,6 +12,7 @@ import (
 
 	"github.com/JeffioZ/idletrigger/internal/idlewarning"
 	mylog "github.com/JeffioZ/idletrigger/internal/log"
+	"github.com/JeffioZ/idletrigger/internal/systray"
 	"github.com/JeffioZ/idletrigger/internal/themeswitch"
 	"github.com/JeffioZ/idletrigger/internal/uicolors"
 	"github.com/JeffioZ/idletrigger/internal/uifont"
@@ -133,7 +134,9 @@ const (
 	wmClose           = 0x0010
 	wmActivate        = 0x0006
 	wmMouseMove       = 0x0200
+	wmLButtonDown     = 0x0201
 	wmMouseLeave      = 0x02A3
+	wmParentNotify    = 0x0210
 	wmEraseBkgnd      = 0x0014
 	wmSysColorChange  = 0x0015
 	wmSettingChange   = 0x001A
@@ -264,6 +267,7 @@ var (
 	pSetWindowLong         = user32.NewProc("SetWindowLongW")
 	pSetWindowLongPtr      = user32.NewProc("SetWindowLongPtrW")
 	pSetWindowPos          = user32.NewProc("SetWindowPos")
+	pGetFocus              = user32.NewProc("GetFocus")
 	pGetCursorPos          = user32.NewProc("GetCursorPos")
 	pMonitorFromWindow     = user32.NewProc("MonitorFromWindow")
 	pGetMonitorInfo        = user32.NewProc("GetMonitorInfoW")
@@ -350,6 +354,8 @@ type panel struct {
 	isChinese                       bool
 	owner                           windows.Handle
 	largeIcon, smallIcon            windows.Handle
+	iconThemeDark                   bool
+	iconsInitialized                bool
 	tooltip                         windows.Handle
 	palette                         uicolors.Palette
 	fontChoice                      uifont.Choice
@@ -361,6 +367,7 @@ type panel struct {
 	disabled                        map[uint16]bool
 	oldButtonProc                   map[windows.Handle]uintptr
 	hoverID                         uint16
+	keyboardNavigation              bool
 	nextStaticID                    uint16
 	themeScheduleID                 uint16
 	idlePaused                      bool
@@ -505,8 +512,6 @@ func ensureClass() error {
 			Size:      uint32(unsafe.Sizeof(wndClassExW{})),
 			WndProc:   windows.NewCallback(wndProc),
 			ClassName: name,
-			Icon:      appIcon(32),
-			IconSm:    appIcon(16),
 		}
 		if result, _, callErr := pRegisterClassEx.Call(uintptr(unsafe.Pointer(&wc))); result == 0 && callErr != syscall.Errno(1410) {
 			classErr = fmt.Errorf("register popup class: %w", callErr)
@@ -515,31 +520,61 @@ func ensureClass() error {
 	return classErr
 }
 
-func appIcon(size int) windows.Handle {
+const (
+	trayDarkIconResourceID  = 3 // Dark mark for a light title bar.
+	trayLightIconResourceID = 4 // Light mark for a dark title bar.
+)
+
+func windowIconResourceID(dark bool) uintptr {
+	if dark {
+		return trayLightIconResourceID
+	}
+	return trayDarkIconResourceID
+}
+
+func windowIcon(dark bool, size int) windows.Handle {
 	module, _, _ := pGetModuleHandle.Call(0)
 	if module == 0 {
 		return 0
 	}
-	const (
-		imageIcon         = 1
-		appIconResourceID = 2 // scripts/gen_resource.go reserves ID 1 for the manifest.
-	)
-	icon, _, _ := pLoadImage.Call(module, appIconResourceID, imageIcon, uintptr(size), uintptr(size), 0)
+	const imageIcon = 1
+	icon, _, _ := pLoadImage.Call(module, windowIconResourceID(dark), imageIcon, uintptr(size), uintptr(size), 0)
 	return windows.Handle(icon)
 }
 
-func (p *panel) setWindowIcons() {
-	p.largeIcon = appIcon(p.sc(32))
-	p.smallIcon = appIcon(p.sc(16))
+func shouldReloadWindowIcons(initialized, currentDark, requestedDark, force bool) bool {
+	return !initialized || force || currentDark != requestedDark
+}
+
+func (p *panel) setWindowIcons(dark, force bool) {
+	if p.hwnd == 0 || !shouldReloadWindowIcons(p.iconsInitialized, p.iconThemeDark, dark, force) {
+		return
+	}
+	largeIcon := windowIcon(dark, p.sc(32))
+	smallIcon := windowIcon(dark, p.sc(16))
+	if largeIcon == 0 || smallIcon == 0 {
+		if largeIcon != 0 {
+			pDestroyIcon.Call(uintptr(largeIcon))
+		}
+		if smallIcon != 0 {
+			pDestroyIcon.Call(uintptr(smallIcon))
+		}
+		mylog.Info("UI icon: surface=popup load failed theme_dark=%v dpi=%d", dark, int(p.scale*96+0.5))
+		return
+	}
+	oldLargeIcon, oldSmallIcon := p.largeIcon, p.smallIcon
+	p.largeIcon, p.smallIcon = largeIcon, smallIcon
+	p.iconThemeDark, p.iconsInitialized = dark, true
 	const (
 		iconSmall = 0
 		iconBig   = 1
 	)
-	if p.largeIcon != 0 {
-		pSendMessage.Call(uintptr(p.hwnd), wmSetIcon, iconBig, uintptr(p.largeIcon))
-	}
-	if p.smallIcon != 0 {
-		pSendMessage.Call(uintptr(p.hwnd), wmSetIcon, iconSmall, uintptr(p.smallIcon))
+	pSendMessage.Call(uintptr(p.hwnd), wmSetIcon, iconBig, uintptr(p.largeIcon))
+	pSendMessage.Call(uintptr(p.hwnd), wmSetIcon, iconSmall, uintptr(p.smallIcon))
+	for _, icon := range []windows.Handle{oldLargeIcon, oldSmallIcon} {
+		if icon != 0 {
+			pDestroyIcon.Call(uintptr(icon))
+		}
 	}
 }
 
@@ -569,7 +604,6 @@ func (p *panel) create() error {
 	p.hwnd = windows.Handle(hwnd)
 	p.style, p.exStyle = style, exStyle
 	p.scale = dpiForWindow(p.hwnd)
-	p.setWindowIcons()
 	p.font = p.makeFont(14, 400)
 	p.sectionFont = p.makeFont(14, 700)
 	p.subtitleFont = p.makeFont(12, 600)
@@ -583,6 +617,7 @@ func (p *panel) create() error {
 		pDestroyWindow.Call(uintptr(p.hwnd))
 		return err
 	}
+	systray.SetTabNavigationWindow(p.hwnd, p.enterKeyboardNavigation)
 	p.position(style, exStyle)
 	pSetForeground.Call(uintptr(p.hwnd))
 	return nil
@@ -1094,6 +1129,33 @@ func (p *panel) invalidate(id uint16) {
 	}
 }
 
+func (p *panel) setKeyboardNavigation(active bool) {
+	if p.keyboardNavigation == active {
+		return
+	}
+	p.keyboardNavigation = active
+	for id := range p.controls {
+		p.invalidate(id)
+	}
+}
+
+func (p *panel) enterKeyboardNavigation() { p.setKeyboardNavigation(true) }
+
+func (p *panel) leaveKeyboardNavigation() { p.setKeyboardNavigation(false) }
+
+func (p *panel) shouldDrawFocusOutline(itemState uint32) bool {
+	return p.keyboardNavigation && itemState&odsFocus != 0
+}
+
+func comboFocusVisible(keyboardNavigation bool, itemState uint32, focused, combo windows.Handle) bool {
+	return keyboardNavigation && itemState&odsComboBoxEdit != 0 && focused != 0 && focused == combo
+}
+
+func (p *panel) shouldDrawComboFocusOutline(itemState uint32) bool {
+	focused, _, _ := pGetFocus.Call()
+	return comboFocusVisible(p.keyboardNavigation, itemState, windows.Handle(focused), p.controls[idIdleTimeout])
+}
+
 func (p *panel) subclassButton(hwnd windows.Handle) {
 	if hwnd == 0 {
 		return
@@ -1121,6 +1183,8 @@ func buttonWndProc(hwnd windows.Handle, msg uint32, wp, lp uintptr) uintptr {
 			p.setHover(hwnd)
 		case wmMouseLeave:
 			p.clearHover(hwnd)
+		case wmLButtonDown:
+			p.leaveKeyboardNavigation()
 		}
 	}
 	if old != 0 {
@@ -1208,6 +1272,12 @@ func wndProc(hwnd windows.Handle, msg uint32, wp, lp uintptr) uintptr {
 		case wmClose:
 			Hide()
 			return 0
+		case wmLButtonDown:
+			p.leaveKeyboardNavigation()
+		case wmParentNotify:
+			if uint16(wp) == wmLButtonDown {
+				p.leaveKeyboardNavigation()
+			}
 		case wmDestroy:
 			clearPanel(p, hwnd)
 		case wmEraseBkgnd:
@@ -1278,6 +1348,7 @@ func (p *panel) refreshFontsForDPI() {
 	}
 	oldFont, oldSection, oldSubtitle := p.font, p.sectionFont, p.subtitleFont
 	p.font, p.sectionFont, p.subtitleFont = newFont, newSectionFont, newSubtitleFont
+	p.setWindowIcons(themeswitch.Current() == themeswitch.ModeDark, true)
 	for id, hwnd := range p.controls {
 		if bounds, ok := p.controlBounds[id]; ok {
 			pSetWindowPos.Call(uintptr(hwnd), 0, uintptr(p.sc(bounds.x)), uintptr(p.sc(bounds.y)), uintptr(p.sc(bounds.width)), uintptr(p.sc(bounds.height)), 0x0004|0x0010)
@@ -1416,6 +1487,7 @@ func (p *panel) handleTimeoutSelection() {
 
 func (p *panel) refreshTheme(invalidate bool) {
 	dark := themeswitch.Current() == themeswitch.ModeDark
+	p.setWindowIcons(dark, false)
 	p.palette = uicolors.ForTheme(dark)
 	p.releaseBrushes()
 	p.backgroundBrush = makeBrush(p.palette.WindowBackground)
@@ -1554,7 +1626,7 @@ func (p *panel) drawButton(item *drawItem) {
 	// Owner-drawn buttons do not get the native focus cue automatically. Keep
 	// a visible inset outline so keyboard navigation remains discoverable in
 	// both themes without changing the selected/on color semantics.
-	if item.ItemState&odsFocus != 0 {
+	if p.shouldDrawFocusOutline(item.ItemState) {
 		focus := item.Rect
 		inset := int32(p.sc(2))
 		focus.Left += inset
@@ -1595,6 +1667,20 @@ func (p *panel) drawTimeoutChoice(item *drawItem) {
 		textColor = p.palette.AccentText
 	}
 	pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&item.Rect)), uintptr(brush))
+	// The combo box keeps its native frame, drop arrow, list, and keyboard
+	// handling. Its owner-drawn selection field gets the same focus-visible
+	// token as buttons, but only while Tab navigation is active.
+	if p.shouldDrawComboFocusOutline(item.ItemState) {
+		focus := item.Rect
+		inset := int32(p.sc(2))
+		focus.Left += inset
+		focus.Top += inset
+		focus.Right -= inset
+		focus.Bottom -= inset
+		if focus.Left < focus.Right && focus.Top < focus.Bottom {
+			pFrameRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&focus)), uintptr(p.focusBrush))
+		}
+	}
 
 	// UINT_MAX means that the combo box has no current item to paint.
 	if item.ItemID == ^uint32(0) || int(item.ItemID) >= len(p.timeoutOptions) {
@@ -1741,6 +1827,7 @@ func clearPanel(p *panel, hwnd windows.Handle) {
 	}
 	active = nil
 	panelMu.Unlock()
+	systray.ClearTabNavigationWindow(p.hwnd)
 	for hwnd, old := range p.oldButtonProc {
 		if hwnd != 0 && old != 0 {
 			setWindowProc(hwnd, old)

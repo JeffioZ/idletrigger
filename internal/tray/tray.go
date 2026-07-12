@@ -140,6 +140,9 @@ func Run(cfg config.Config, cbs Callbacks) {
 		systray.OnPowerChange = func() {
 			s.post(func() { s.refreshBatteryPolicy() })
 		}
+		systray.OnThemeChange = func() {
+			s.post(s.refreshTrayThemeIcon)
+		}
 	}
 
 	onExit := func() {

@@ -48,11 +48,14 @@ const (
 	wmClose          = 0x0010
 	wmPaint          = 0x000F
 	wmEraseBkgnd     = 0x0014
+	wmSysColorChange = 0x0015
+	wmSettingChange  = 0x001A
 	wmLButtonDown    = 0x0201
 	wmLButtonUp      = 0x0202
 	wmMouseMove      = 0x0200
 	wmMouseLeave     = 0x02A3
 	wmDpiChanged     = 0x02E0
+	wmThemeChanged   = 0x031A
 	wsPopup          = 0x80000000
 	wsExTool         = 0x00000080
 	wsExTopmost      = 0x00000008
@@ -357,6 +360,11 @@ func rebuildFonts(hwnd windows.Handle) {
 
 func wndProc(hwnd windows.Handle, message uint32, wParam, lParam uintptr) uintptr {
 	switch message {
+	case wmSettingChange, wmSysColorChange, wmThemeChanged:
+		// paint reads the current system theme, so a repaint is enough to update
+		// this opaque, self-drawn warning without changing its interaction model.
+		pInvalidateRect.Call(uintptr(hwnd), 0, 0)
+		return 0
 	case wmPaint:
 		paint(hwnd)
 		return 0

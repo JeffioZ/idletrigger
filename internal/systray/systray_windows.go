@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"unsafe"
 
@@ -48,6 +49,8 @@ var (
 	pGetCursorPos          = u32.NewProc("GetCursorPos")
 	pGetDC                 = u32.NewProc("GetDC")
 	pGetMessage            = u32.NewProc("GetMessageW")
+	pIsChild               = u32.NewProc("IsChild")
+	pIsDialogMessage       = u32.NewProc("IsDialogMessageW")
 	pGetSystemMetrics      = u32.NewProc("GetSystemMetrics")
 	pInsertMenuItem        = u32.NewProc("InsertMenuItemW")
 	pLoadCursor            = u32.NewProc("LoadCursorW")
@@ -67,6 +70,104 @@ var (
 	pUnregisterClass       = u32.NewProc("UnregisterClassW")
 	pUpdateWindow          = u32.NewProc("UpdateWindow")
 )
+
+const (
+	wmKeyDown = 0x0100
+	vkTab     = 0x09
+)
+
+// message matches the Win32 MSG layout used by GetMessageW and
+// IsDialogMessageW.
+type message struct {
+	WindowHandle windows.Handle
+	Message      uint32
+	Wparam       uintptr
+	Lparam       uintptr
+	Time         uint32
+	Pt           point
+}
+
+var tabNavigation struct {
+	sync.RWMutex
+	hwnd        windows.Handle
+	onNavigated func()
+}
+
+var themeChangePending atomic.Bool
+
+const (
+	wmSysColorChange = 0x0015
+	wmSettingChange  = 0x001A
+	wmThemeChanged   = 0x031A
+)
+
+func isThemeChangeMessage(message uint32) bool {
+	return message == wmSettingChange || message == wmSysColorChange || message == wmThemeChanged
+}
+
+func notifyThemeChange() {
+	callback := OnThemeChange
+	if callback == nil || !themeChangePending.CompareAndSwap(false, true) {
+		return
+	}
+	go func() {
+		defer themeChangePending.Store(false)
+		callback()
+	}()
+}
+
+// SetTabNavigationWindow restricts standard dialog Tab navigation to one
+// modeless window. Only WM_KEYDOWN/VK_TAB messages addressed to that window or
+// one of its children are passed to IsDialogMessageW; all other messages stay
+// on the normal tray message path.
+func SetTabNavigationWindow(hwnd windows.Handle, onNavigated func()) {
+	tabNavigation.Lock()
+	tabNavigation.hwnd = hwnd
+	tabNavigation.onNavigated = onNavigated
+	tabNavigation.Unlock()
+}
+
+// ClearTabNavigationWindow removes a window's Tab-navigation registration.
+// The handle check prevents an older popup's destruction from clearing a newer
+// popup registration.
+func ClearTabNavigationWindow(hwnd windows.Handle) {
+	tabNavigation.Lock()
+	if tabNavigation.hwnd == hwnd {
+		tabNavigation.hwnd = 0
+		tabNavigation.onNavigated = nil
+	}
+	tabNavigation.Unlock()
+}
+
+func isTabNavigationMessage(m *message, dialog windows.Handle, isChild bool) bool {
+	return dialog != 0 && m != nil && m.Message == wmKeyDown && m.Wparam == vkTab && (m.WindowHandle == dialog || isChild)
+}
+
+func dispatchTabNavigation(m *message) bool {
+	tabNavigation.RLock()
+	dialog := tabNavigation.hwnd
+	onNavigated := tabNavigation.onNavigated
+	tabNavigation.RUnlock()
+	if dialog == 0 || m == nil {
+		return false
+	}
+	isChild := false
+	if m.WindowHandle != 0 && m.WindowHandle != dialog {
+		child, _, _ := pIsChild.Call(uintptr(dialog), uintptr(m.WindowHandle))
+		isChild = child != 0
+	}
+	if !isTabNavigationMessage(m, dialog, isChild) {
+		return false
+	}
+	processed, _, _ := pIsDialogMessage.Call(uintptr(dialog), uintptr(unsafe.Pointer(m)))
+	if processed == 0 {
+		return false
+	}
+	if onNavigated != nil {
+		onNavigated()
+	}
+	return true
+}
 
 // Contains window class information.
 // It is used with the RegisterClassEx and GetClassInfoEx functions.
@@ -361,6 +462,8 @@ func (t *winTray) wndProc(hWnd windows.Handle, message uint32, wParam, lParam ui
 		WM_DESTROY        = 0x0002
 	)
 	switch message {
+	case wmSettingChange, wmSysColorChange, wmThemeChanged:
+		notifyThemeChange()
 	case wmRunUITask:
 		t.drainUITasks()
 	case WM_COMMAND:
@@ -914,14 +1017,7 @@ func registerSystray() {
 
 func nativeLoop() {
 	// Main message pump.
-	m := &struct {
-		WindowHandle windows.Handle
-		Message      uint32
-		Wparam       uintptr
-		Lparam       uintptr
-		Time         uint32
-		Pt           point
-	}{}
+	m := &message{}
 	for {
 		ret, _, err := pGetMessage.Call(uintptr(unsafe.Pointer(m)), 0, 0, 0)
 
@@ -936,6 +1032,9 @@ func nativeLoop() {
 		case 0:
 			return
 		default:
+			if dispatchTabNavigation(m) {
+				continue
+			}
 			pTranslateMessage.Call(uintptr(unsafe.Pointer(m)))
 			pDispatchMessage.Call(uintptr(unsafe.Pointer(m)))
 		}

@@ -256,3 +256,7 @@ var OnLeftClick func()
 
 // OnPowerChange is called when Windows broadcasts a power-state change.
 var OnPowerChange func()
+
+// OnThemeChange is called once for a burst of Windows theme/color broadcasts.
+// It lets the application refresh theme-dependent shell surfaces immediately.
+var OnThemeChange func()

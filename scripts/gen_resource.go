@@ -45,6 +45,8 @@ func main() {
 	version := flag.String("version", "0.0.0", "product version string")
 	manifest := flag.String("manifest", "assets/manifest.xml", "manifest path")
 	icon := flag.String("ico", "assets/app.ico", "icon path")
+	trayDarkIcon := flag.String("tray-dark-ico", "assets/tray_icon_dark.ico", "dark tray icon path")
+	trayLightIcon := flag.String("tray-light-ico", "assets/tray_icon_light.ico", "light tray icon path")
 	flag.Parse()
 
 	targets := []struct {
@@ -54,7 +56,7 @@ func main() {
 		{"amd64", "rsrc_windows_amd64.syso", "IdleTrigger-x64.exe"},
 	}
 	for _, target := range targets {
-		if err := generate(target.arch, target.output, target.filename, *manifest, *icon, *version); err != nil {
+		if err := generate(target.arch, target.output, target.filename, *manifest, *icon, *trayDarkIcon, *trayLightIcon, *version); err != nil {
 			fmt.Fprintf(os.Stderr, "%s: %v\n", target.output, err)
 			os.Exit(1)
 		}
@@ -62,11 +64,17 @@ func main() {
 	}
 }
 
-func generate(arch, output, originalFilename, manifestPath, iconPath, version string) error {
-	lastID := uint16(0)
-	newID := func() uint16 {
-		lastID++
-		return lastID
+func generate(arch, output, originalFilename, manifestPath, iconPath, trayDarkIconPath, trayLightIconPath, version string) error {
+	const (
+		manifestResourceID      = 1
+		appIconResourceID       = 2
+		trayDarkIconResourceID  = 3
+		trayLightIconResourceID = 4
+	)
+	lastIconImageID := uint16(trayLightIconResourceID)
+	newIconImageID := func() uint16 {
+		lastIconImageID++
+		return lastIconImageID
 	}
 
 	out := coff.NewRSRC()
@@ -79,20 +87,30 @@ func generate(arch, output, originalFilename, manifestPath, iconPath, version st
 		return fmt.Errorf("open manifest: %w", err)
 	}
 	defer manifest.Close()
-	out.AddResource(coff.RT_MANIFEST, newID(), manifest)
+	out.AddResource(coff.RT_MANIFEST, manifestResourceID, manifest)
 
-	iconFile, err := addIcon(out, iconPath, newID)
+	iconFile, err := addIcon(out, iconPath, appIconResourceID, newIconImageID)
 	if err != nil {
 		return err
 	}
 	defer iconFile.Close()
+	trayDarkIconFile, err := addIcon(out, trayDarkIconPath, trayDarkIconResourceID, newIconImageID)
+	if err != nil {
+		return err
+	}
+	defer trayDarkIconFile.Close()
+	trayLightIconFile, err := addIcon(out, trayLightIconPath, trayLightIconResourceID, newIconImageID)
+	if err != nil {
+		return err
+	}
+	defer trayLightIconFile.Close()
 
 	out.AddResource(rtVersion, 1, byteResource(versionInfo(version, originalFilename)))
 	out.Freeze()
 	return writeCOFF(out, output)
 }
 
-func addIcon(out *coff.Coff, path string, newID func() uint16) (io.Closer, error) {
+func addIcon(out *coff.Coff, path string, groupID uint16, newIconImageID func() uint16) (io.Closer, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -103,9 +121,8 @@ func addIcon(out *coff.Coff, path string, newID func() uint16) (io.Closer, error
 		return nil, err
 	}
 	group := grpIconDir{ICONDIR: ico.ICONDIR{Reserved: 0, Type: 1, Count: uint16(len(icons))}}
-	groupID := newID()
 	for _, icon := range icons {
-		id := newID()
+		id := newIconImageID()
 		out.AddResource(coff.RT_ICON, id, io.NewSectionReader(f, int64(icon.ImageOffset), int64(icon.BytesInRes)))
 		group.Entries = append(group.Entries, grpIconDirEntry{IconDirEntryCommon: icon.IconDirEntryCommon, ID: id})
 	}
