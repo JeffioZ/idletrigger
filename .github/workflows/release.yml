@@ -69,10 +69,10 @@ jobs:
 
             ### Highlights
 
-            - Redesigned the Windows application and tray icon assets with refreshed light/dark variants.
-            - Added a repository social preview image and documented the icon generation workflow.
-            - Reduced background overhead by polling battery state only when Stay Awake or theme rules need it.
-            - Kept the native single-EXE distribution model and regenerated Windows version resources for this release.
+            - Improved native UI font selection for English and Simplified Chinese, with safer fallbacks and DPI rebuild handling.
+            - Refined tooltip state wording and idle-warning text rendering.
+            - Replaced the idle-warning close icon font dependency with a drawn glyph for better compatibility.
+            - Stopped tracking generated Windows `.syso` resource files; the release workflow regenerates them from the tag version.
 
             Download the native 64-bit build `IdleTrigger-x64.exe` (recommended) or
             the 32-bit compatibility build `IdleTrigger-x86.exe` — no installation needed.
@@ -83,10 +83,10 @@ jobs:
 
             ### 更新重点
 
-            - 重新设计 Windows 应用图标和托盘图标，并刷新深浅色托盘变体。
-            - 新增仓库社交预览图，并补充图标生成流程说明。
-            - 仅在保持唤醒或主题规则需要时轮询电池状态，降低后台开销。
-            - 保持单 EXE 原生分发方式，并为本次发布重新生成 Windows 版本资源。
+            - 优化英文和简体中文界面的原生字体选择，补充更稳妥的字体回退和 DPI 变化重建。
+            - 调整 tooltip 状态文案和空闲预警文字绘制。
+            - 空闲预警关闭按钮改为绘制图形，不再依赖特定图标字体。
+            - 不再跟踪生成型 Windows `.syso` 资源文件；发布工作流会按 tag 版本自动重新生成。
 
             下载原生 64 位版本 `IdleTrigger-x64.exe`（推荐），或下载 32 位兼容版本
             `IdleTrigger-x86.exe`。无需安装，直接运行即可。
