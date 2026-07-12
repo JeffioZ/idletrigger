@@ -64,33 +64,6 @@ jobs:
             dist/IdleTrigger-x86.exe
             dist/IdleTrigger-x64.exe
             SHA256SUMS.txt
-          body: |
-            ## English
-
-            ### Highlights
-
-            - Improved native UI font selection for English and Simplified Chinese, with safer fallbacks and DPI rebuild handling.
-            - Refined tooltip state wording and idle-warning text rendering.
-            - Replaced the idle-warning close icon font dependency with a drawn glyph for better compatibility.
-            - Stopped tracking generated Windows `.syso` resource files; the release workflow regenerates them from the tag version.
-
-            Download the native 64-bit build `IdleTrigger-x64.exe` (recommended) or
-            the 32-bit compatibility build `IdleTrigger-x86.exe` — no installation needed.
-
-            See [README.md](https://github.com/JeffioZ/idletrigger/blob/master/README.md) for full documentation.
-
-            ## 中文
-
-            ### 更新重点
-
-            - 优化英文和简体中文界面的原生字体选择，补充更稳妥的字体回退和 DPI 变化重建。
-            - 调整 tooltip 状态文案和空闲预警文字绘制。
-            - 空闲预警关闭按钮改为绘制图形，不再依赖特定图标字体。
-            - 不再跟踪生成型 Windows `.syso` 资源文件；发布工作流会按 tag 版本自动重新生成。
-
-            下载原生 64 位版本 `IdleTrigger-x64.exe`（推荐），或下载 32 位兼容版本
-            `IdleTrigger-x86.exe`。无需安装，直接运行即可。
-
-            完整说明见 [README.zh-CN.md](https://github.com/JeffioZ/idletrigger/blob/master/README.zh-CN.md)。
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

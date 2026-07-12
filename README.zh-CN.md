@@ -74,6 +74,8 @@ IdleTrigger nosleep off | toggle | status
 
 IdleTrigger monitor on | off
 
+IdleTrigger diagnostics idle [--watch]
+
 IdleTrigger autostart enable | disable | status
 IdleTrigger config:reload
 IdleTrigger status
@@ -81,6 +83,8 @@ IdleTrigger version
 ```
 
 `nosleep`、`monitor` 与 `config:reload` 会通过 `\\.\pipe\IdleTrigger-<session>` 转发给运行中的托盘实例，因此需要先启动托盘程序。一次性电源动作直接执行。
+
+`diagnostics idle` 会输出一次原始 Windows 空闲计时数据；排查输入重置时加上 `--watch` 可每秒刷新一次。它不需要托盘程序正在运行。
 
 ## 配置
 

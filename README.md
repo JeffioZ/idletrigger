@@ -76,6 +76,8 @@ IdleTrigger nosleep off | toggle | status
 
 IdleTrigger monitor on | off
 
+IdleTrigger diagnostics idle [--watch]
+
 IdleTrigger autostart enable | disable | status
 IdleTrigger config:reload
 IdleTrigger status
@@ -83,6 +85,8 @@ IdleTrigger version
 ```
 
 `nosleep`, `monitor`, and `config:reload` forward to the active tray instance through `\\.\pipe\IdleTrigger-<session>`. Start the tray app first for these stateful commands. One-shot power actions execute directly.
+
+`diagnostics idle` prints the raw Windows idle-timing values once; add `--watch` to refresh them every second while investigating input resets. It does not require a running tray instance.
 
 ## Configuration
 

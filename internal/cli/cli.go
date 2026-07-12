@@ -93,7 +93,7 @@ func Run(lang string) {
 
 func cmdDiagnostics(lang string) {
 	if len(os.Args) < 3 || os.Args[2] != "idle" {
-		fmt.Fprintln(os.Stderr, "Usage: IdleTrigger diagnostics idle [--watch]")
+		fmt.Fprintln(os.Stderr, i18n.T(lang, "cli_usage_diagnostics"))
 		os.Exit(1)
 	}
 	watch := false
@@ -105,7 +105,7 @@ func cmdDiagnostics(lang string) {
 	for {
 		snap, err := monitor.Snapshot()
 		if err != nil {
-			printError(lang, fmt.Sprintf("idle diagnostics failed: %v", err))
+			printError(lang, fmt.Sprintf(i18n.T(lang, "cli_error_idle_diagnostics"), err))
 			os.Exit(1)
 		}
 		fmt.Printf("idle_diagnostics tick_now=%d tick32=%d last_input=%d raw_delta_ms=%d idle=%s\n",
