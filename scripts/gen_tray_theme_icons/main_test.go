@@ -7,8 +7,39 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
+
+func TestICOFrameCoverageMatchesDeclaredResources(t *testing.T) {
+	cases := map[string][]int{
+		"app.ico":             {16, 20, 24, 32, 40, 48, 64, 128, 256},
+		"tray_icon_dark.ico":  {16, 20, 24, 32, 40, 48, 64},
+		"tray_icon_light.ico": {16, 20, 24, 32, 40, 48, 64},
+	}
+	for name, want := range cases {
+		t.Run(name, func(t *testing.T) {
+			frames, err := readFrames(filepath.Join("..", "..", "assets", name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := make([]int, 0, len(frames))
+			for _, frame := range frames {
+				if frame.width != frame.height {
+					t.Fatalf("non-square frame: %dx%d", frame.width, frame.height)
+				}
+				size := int(frame.width)
+				if size == 0 {
+					size = 256
+				}
+				got = append(got, size)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("frame coverage mismatch: got %v, want %v", got, want)
+			}
+		})
+	}
+}
 
 func TestAppIconContainsTrayDPIFrames(t *testing.T) {
 	frames, err := readFrames(filepath.Join("..", "..", "assets", "app.ico"))
@@ -62,8 +93,8 @@ func TestTrayThemeFramesShareAlphaMask(t *testing.T) {
 	light := filepath.Join("..", "..", "assets", "tray_icon_light.ico")
 	for _, size := range []byte{16, 20, 24, 32, 40, 48, 64} {
 		t.Run(string(rune(size)), func(t *testing.T) {
-			darkImage := decodePNGFrame(t, dark, size)
-			lightImage := decodePNGFrame(t, light, size)
+			darkImage := decodePNGFrame(t, dark, int(size))
+			lightImage := decodePNGFrame(t, light, int(size))
 			for y := 0; y < int(size); y++ {
 				for x := 0; x < int(size); x++ {
 					_, _, _, darkAlpha := darkImage.At(x, y).RGBA()
@@ -77,7 +108,29 @@ func TestTrayThemeFramesShareAlphaMask(t *testing.T) {
 	}
 }
 
-func decodePNGFrame(t *testing.T, path string, wantSize byte) image.Image {
+func TestICOFramesArePNGsWithExpectedDimensions(t *testing.T) {
+	for _, name := range []string{"app.ico", "tray_icon_dark.ico", "tray_icon_light.ico"} {
+		t.Run(name, func(t *testing.T) {
+			frames, err := readFrames(filepath.Join("..", "..", "assets", name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, frame := range frames {
+				size := int(frame.width)
+				if size == 0 {
+					size = 256
+				}
+				image := decodePNGFrame(t, filepath.Join("..", "..", "assets", name), size)
+				bounds := image.Bounds()
+				if bounds.Dx() != int(size) || bounds.Dy() != int(size) {
+					t.Fatalf("decoded frame dimensions = %dx%d, want %dx%d", bounds.Dx(), bounds.Dy(), size, size)
+				}
+			}
+		})
+	}
+}
+
+func decodePNGFrame(t *testing.T, path string, wantSize int) image.Image {
 	t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -86,7 +139,15 @@ func decodePNGFrame(t *testing.T, path string, wantSize byte) image.Image {
 	count := int(binary.LittleEndian.Uint16(data[4:6]))
 	for i := 0; i < count; i++ {
 		offset := 6 + i*16
-		if data[offset] != wantSize || data[offset+1] != wantSize {
+		frameSize := int(data[offset])
+		if frameSize == 0 {
+			frameSize = 256
+		}
+		frameHeight := int(data[offset+1])
+		if frameHeight == 0 {
+			frameHeight = 256
+		}
+		if frameSize != wantSize || frameHeight != wantSize {
 			continue
 		}
 		length := binary.LittleEndian.Uint32(data[offset+8 : offset+12])

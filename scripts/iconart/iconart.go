@@ -1,5 +1,5 @@
-// Package iconart defines the pixel-oriented artwork shared by the release
-// application icon and the two purpose-built Windows notification-area icons.
+// Package iconart defines the Quiet Trigger Mark used by the application icon
+// and the two purpose-built Windows notification-area variants.
 package iconart
 
 import (
@@ -8,135 +8,147 @@ import (
 	"math"
 )
 
+const supersample = 8
+
 type point struct{ x, y float64 }
 
-// App draws the full application mark. Its material layers are deliberately
-// restrained so that the lightning remains legible at the 16 px ICO frame.
+type iconSpec struct {
+	margin float64
+	radius float64
+	border float64 // logical output pixels; zero means no visible rim.
+	bolt   []point
+}
+
+// App draws the single Quiet Trigger application mark. It intentionally keeps
+// one dark-blue tile in every context: the app icon is a brand asset, not a
+// taskbar-adaptive glyph. The 16 px frame drops only the fragile thin rim.
 func App(size int) image.Image {
+	spec := markSpec(size)
 	return render(size, func(x, y float64) color.NRGBA {
-		m := 0.055
-		if !roundedRect(x, y, m, m, 1-m, 1-m, 0.205) {
+		if !roundedRect(x, y, spec.margin, spec.margin, 1-spec.margin, 1-spec.margin, spec.radius) {
 			return color.NRGBA{}
 		}
-		// Midnight surface with an intentionally low-contrast blue/purple rim.
-		t := clamp01((x + y) * 0.5)
-		base := lerp(color.NRGBA{14, 25, 45, 255}, color.NRGBA{24, 38, 68, 255}, t)
-		if roundedRect(x, y, 0.105, 0.105, 0.895, 0.895, 0.155) {
-			inner := lerp(color.NRGBA{18, 37, 69, 255}, color.NRGBA{11, 23, 43, 255}, y)
-			base = over(base, inner, 0.72)
+		if isBorder(x, y, spec, size) {
+			return color.NRGBA{48, 83, 116, 255} // #305374: restrained blue rim.
 		}
-		// A faint cool halo behind the mark, omitted visually at tiny scales.
-		dx, dy := x-0.51, y-0.52
-		d := math.Sqrt(dx*dx + dy*dy)
-		if d < 0.34 {
-			base = over(base, color.NRGBA{29, 120, 186, 255}, 0.10*(1-d/0.34))
+		if inPolygon(x, y, spec.bolt) {
+			return color.NRGBA{53, 190, 240, 255} // #35BEF0: Quiet Trigger cyan.
 		}
-		bolt := appBolt()
-		if inPolygon(x, y, bolt) {
-			return lerp(color.NRGBA{41, 226, 255, 255}, color.NRGBA{39, 112, 255, 255}, y)
-		}
-		return base
+		return color.NRGBA{17, 34, 56, 255} // #112238: quiet midnight surface.
 	})
 }
 
-// Tray draws a separate, compact tile and high-contrast mark. It is
-// intentionally not derived from App: Windows normally renders this at
-// 16-20 px against an unknown taskbar color.
+// Tray draws the compact, high-contrast Windows notification-area mark. The
+// geometry is identical for both themes; only the contrast palette changes.
+// onDarkBackground selects the pale resource for dark taskbars/title bars.
 func Tray(size int, onDarkBackground bool) image.Image {
+	spec := markSpec(size)
+	var rim, tile, bolt color.NRGBA
+	if onDarkBackground {
+		rim = color.NRGBA{151, 190, 214, 255}  // #97BED6
+		tile = color.NRGBA{226, 238, 247, 255} // #E2EEF7
+		bolt = color.NRGBA{4, 70, 108, 255}    // #04466C
+	} else {
+		rim = color.NRGBA{42, 92, 133, 255}   // #2A5C85
+		tile = color.NRGBA{15, 38, 62, 255}   // #0F263E
+		bolt = color.NRGBA{51, 187, 229, 255} // #33BBE5
+	}
 	return render(size, func(x, y float64) color.NRGBA {
-		const margin = 0.055
-		if !roundedRect(x, y, margin, margin, 1-margin, 1-margin, 0.205) {
+		if !roundedRect(x, y, spec.margin, spec.margin, 1-spec.margin, 1-spec.margin, spec.radius) {
 			return color.NRGBA{}
 		}
-		var rim, tile, inset, boltTop, boltBottom color.NRGBA
-		if onDarkBackground {
-			// A pale tile remains visible on Windows' dark taskbar without relying
-			// on a fragile glow or a one-pixel outline.
-			rim = color.NRGBA{191, 221, 238, 255}
-			tile = color.NRGBA{230, 242, 250, 255}
-			inset = color.NRGBA{244, 250, 255, 255}
-			boltTop = color.NRGBA{0, 95, 135, 255}
-			boltBottom = color.NRGBA{0, 57, 96, 255}
-		} else {
-			rim = color.NRGBA{28, 65, 113, 255}
-			tile = color.NRGBA{14, 30, 55, 255}
-			inset = color.NRGBA{21, 47, 82, 255}
-			boltTop = color.NRGBA{53, 231, 255, 255}
-			boltBottom = color.NRGBA{33, 140, 255, 255}
+		if isBorder(x, y, spec, size) {
+			return rim
 		}
-		if size >= 32 {
-			// High-DPI notification areas can afford the same restrained material
-			// hierarchy as the app icon: a rim, recessed surface and one soft
-			// directional light. Small frames intentionally skip these layers.
-			if !roundedRect(x, y, 0.082, 0.082, 0.918, 0.918, 0.165) {
-				return lerp(rim, tile, y*0.30)
-			}
-			tile = lerp(tile, inset, 0.12*(1-y))
-			if roundedRect(x, y, 0.125, 0.125, 0.875, 0.875, 0.125) {
-				tile = lerp(tile, inset, 0.66)
-			}
-		} else if roundedRect(x, y, 0.105, 0.105, 0.895, 0.895, 0.145) {
-			tile = lerp(tile, inset, 0.78)
+		if inPolygon(x, y, spec.bolt) {
+			return bolt
 		}
-		bolt := trayBolt()
-		if !inPolygon(x, y, bolt) {
-			return tile
-		}
-		return lerp(boltTop, boltBottom, y)
+		return tile
 	})
 }
 
-func appBolt() []point {
-	return []point{{0.598, 0.178}, {0.315, 0.548}, {0.473, 0.548}, {0.424, 0.822}, {0.704, 0.437}, {0.545, 0.437}}
+// markSpec uses size-specific geometry rather than resizing a 256 px drawing.
+// The 16 px frame prioritizes a stable lightning silhouette; 20 px and above
+// recover a one-pixel-class rim, and high-DPI frames progressively restore the
+// full Quiet Trigger proportions.
+func markSpec(size int) iconSpec {
+	switch size {
+	case 16:
+		return iconSpec{0.100, 0.190, 0, points(0.605, 0.175, 0.300, 0.545, 0.470, 0.545, 0.410, 0.815, 0.715, 0.420, 0.545, 0.420)}
+	case 20:
+		return iconSpec{0.085, 0.185, 0.85, points(0.605, 0.155, 0.285, 0.548, 0.465, 0.548, 0.400, 0.835, 0.728, 0.418, 0.545, 0.418)}
+	case 24:
+		return iconSpec{0.080, 0.180, 0.90, points(0.605, 0.145, 0.278, 0.550, 0.462, 0.550, 0.397, 0.842, 0.735, 0.415, 0.545, 0.415)}
+	case 32:
+		return iconSpec{0.070, 0.175, 1.00, points(0.603, 0.140, 0.270, 0.550, 0.460, 0.550, 0.392, 0.850, 0.742, 0.413, 0.542, 0.413)}
+	case 40:
+		return iconSpec{0.067, 0.172, 1.10, points(0.602, 0.137, 0.268, 0.550, 0.459, 0.550, 0.390, 0.853, 0.744, 0.412, 0.541, 0.412)}
+	case 48:
+		return iconSpec{0.065, 0.170, 1.15, points(0.600, 0.135, 0.265, 0.550, 0.458, 0.550, 0.388, 0.855, 0.746, 0.410, 0.540, 0.410)}
+	case 64:
+		return iconSpec{0.060, 0.180, 1.35, points(0.600, 0.135, 0.265, 0.550, 0.458, 0.550, 0.388, 0.855, 0.746, 0.410, 0.540, 0.410)}
+	case 128:
+		return iconSpec{0.057, 0.195, 1.85, points(0.600, 0.135, 0.265, 0.550, 0.458, 0.550, 0.388, 0.855, 0.746, 0.410, 0.540, 0.410)}
+	default: // 256 px and any future high-resolution source frame.
+		return iconSpec{0.055, 0.205, 2.50, points(0.600, 0.135, 0.265, 0.550, 0.458, 0.550, 0.388, 0.855, 0.746, 0.410, 0.540, 0.410)}
+	}
 }
 
-// This is wider and has fewer acute inner corners than appBolt, preventing
-// the 16 px tray rendition from becoming a fuzzy miniature app icon.
-func trayBolt() []point {
-	return []point{{0.600, 0.132}, {0.255, 0.550}, {0.456, 0.550}, {0.393, 0.867}, {0.752, 0.426}, {0.548, 0.426}}
+func points(values ...float64) []point {
+	result := make([]point, 0, len(values)/2)
+	for i := 0; i < len(values); i += 2 {
+		result = append(result, point{values[i], values[i+1]})
+	}
+	return result
+}
+
+func isBorder(x, y float64, spec iconSpec, size int) bool {
+	if spec.border <= 0 {
+		return false
+	}
+	inset := spec.border / float64(size)
+	innerRadius := math.Max(0, spec.radius-inset)
+	return !roundedRect(x, y, spec.margin+inset, spec.margin+inset, 1-spec.margin-inset, 1-spec.margin-inset, innerRadius)
 }
 
 func render(size int, sample func(x, y float64) color.NRGBA) image.Image {
-	const scale = 8
-	large := image.NewNRGBA(image.Rect(0, 0, size*scale, size*scale))
+	large := image.NewNRGBA(image.Rect(0, 0, size*supersample, size*supersample))
 	for y := 0; y < large.Bounds().Dy(); y++ {
 		for x := 0; x < large.Bounds().Dx(); x++ {
-			large.SetNRGBA(x, y, sample((float64(x)+0.5)/float64(size*scale), (float64(y)+0.5)/float64(size*scale)))
+			large.SetNRGBA(x, y, sample((float64(x)+0.5)/float64(size*supersample), (float64(y)+0.5)/float64(size*supersample)))
 		}
 	}
-	return downsample(large, size, scale)
+	return downsample(large, size)
 }
 
-func downsample(src *image.NRGBA, size, scale int) image.Image {
+// downsample averages coverage in premultiplied-alpha space. This prevents
+// transparent black from contaminating antialiased rounded corners when the
+// Windows shell composites the PNG-backed ICO frame over a taskbar.
+func downsample(src *image.NRGBA, size int) image.Image {
 	dst := image.NewNRGBA(image.Rect(0, 0, size, size))
 	for y := 0; y < size; y++ {
 		for x := 0; x < size; x++ {
-			// Accumulate in premultiplied-alpha space. Averaging straight RGB with
-			// transparent black pixels creates dark fringes around curved ICO
-			// edges when Windows composites the icon over a taskbar.
 			var pr, pg, pb, a uint32
-			for yy := 0; yy < scale; yy++ {
-				for xx := 0; xx < scale; xx++ {
-					c := src.NRGBAAt(x*scale+xx, y*scale+yy)
+			for yy := 0; yy < supersample; yy++ {
+				for xx := 0; xx < supersample; xx++ {
+					c := src.NRGBAAt(x*supersample+xx, y*supersample+yy)
 					pr += uint32(c.R) * uint32(c.A)
 					pg += uint32(c.G) * uint32(c.A)
 					pb += uint32(c.B) * uint32(c.A)
 					a += uint32(c.A)
 				}
 			}
-			n := uint32(scale * scale)
 			if a == 0 {
 				continue
 			}
-			// Convert back to straight-alpha NRGBA after averaging.
-			dst.SetNRGBA(x, y, color.NRGBA{uint8(pr / a), uint8(pg / a), uint8(pb / a), uint8(a / n)})
+			dst.SetNRGBA(x, y, color.NRGBA{uint8(pr / a), uint8(pg / a), uint8(pb / a), uint8(a / uint32(supersample*supersample))})
 		}
 	}
 	return dst
 }
 
 func roundedRect(x, y, left, top, right, bottom, radius float64) bool {
-	if x >= left+radius && x <= right-radius || y >= top+radius && y <= bottom-radius {
+	if (x >= left+radius && x <= right-radius) || (y >= top+radius && y <= bottom-radius) {
 		return x >= left && x <= right && y >= top && y <= bottom
 	}
 	cx := math.Max(left+radius, math.Min(x, right-radius))
@@ -155,14 +167,3 @@ func inPolygon(x, y float64, polygon []point) bool {
 	}
 	return inside
 }
-
-func lerp(a, b color.NRGBA, t float64) color.NRGBA {
-	return color.NRGBA{mix(a.R, b.R, t), mix(a.G, b.G, t), mix(a.B, b.B, t), mix(a.A, b.A, t)}
-}
-
-func over(bottom, top color.NRGBA, opacity float64) color.NRGBA {
-	return lerp(bottom, top, opacity)
-}
-
-func mix(a, b uint8, t float64) uint8 { return uint8(float64(a)*(1-t) + float64(b)*t + 0.5) }
-func clamp01(v float64) float64       { return math.Max(0, math.Min(1, v)) }
