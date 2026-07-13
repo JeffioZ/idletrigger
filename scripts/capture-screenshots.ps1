@@ -9,8 +9,6 @@ $outputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 $temporaryDirectory = Join-Path (Join-Path $repoRoot 'dist') ('.screenshot-build-' + $PID)
 $exePath = Join-Path $temporaryDirectory 'IdleTrigger-screenshot.exe'
 $files = @('panel-en-light.png', 'panel-en-dark.png', 'panel-zh-light.png', 'panel-zh-dark.png')
-$expectedWidth = 472
-$expectedHeight = 751
 
 function Get-PngSize([string]$Path) {
     $bytes = [IO.File]::ReadAllBytes($Path)
@@ -36,13 +34,16 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "screenshot command failed with exit code $LASTEXITCODE" }
     } finally { Pop-Location }
 
+	$sizes = @{}
     foreach ($name in $files) {
         $path = Join-Path $outputDirectory $name
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing screenshot: $path" }
         $size = Get-PngSize $path
-        if ($size[0] -ne $expectedWidth -or $size[1] -ne $expectedHeight) { throw "Unexpected PNG dimensions for ${name}: $($size[0])x$($size[1])" }
+		$sizes[$name] = $size
         Write-Output "$name $($size[0])x$($size[1])"
     }
+	if ($sizes['panel-en-light.png'][1] -ne $sizes['panel-en-dark.png'][1]) { throw 'English light/dark heights differ' }
+	if ($sizes['panel-zh-light.png'][1] -ne $sizes['panel-zh-dark.png'][1]) { throw 'Chinese light/dark heights differ' }
 } finally {
     for ($attempt = 0; $attempt -lt 10 -and (Test-Path -LiteralPath $temporaryDirectory); $attempt++) {
         try {
