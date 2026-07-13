@@ -95,6 +95,39 @@ func TestMenuTriggersAreLimitedToHoverMenus(t *testing.T) {
 	}
 }
 
+func TestTriggerOpenUsesOnlyItsRealMenuState(t *testing.T) {
+	p := &panel{}
+	if p.triggerOpen(idQuickActions) || p.triggerOpen(idLanguage) || p.triggerOpen(idIdleTimeout) {
+		t.Fatal("fresh panel must not report any trigger as open")
+	}
+	p.quickMenuOpen = true
+	if !p.triggerOpen(idQuickActions) || p.triggerOpen(idLanguage) {
+		t.Fatal("quick menu open state was not isolated")
+	}
+	p.quickMenuOpen, p.languageMenuOpen = false, true
+	if p.triggerOpen(idQuickActions) || !p.triggerOpen(idLanguage) {
+		t.Fatal("language menu open state was not isolated")
+	}
+	p.languageMenuOpen = false
+	p.choice.openID = idIdleAction
+	if p.triggerOpen(idIdleTimeout) || !p.triggerOpen(idIdleAction) {
+		t.Fatal("choice trigger must use its matching open ID")
+	}
+}
+
+func TestDangerQuickActionsAreLimitedToShutdownAndRestart(t *testing.T) {
+	for _, id := range []uint16{idLock, idSleep, idHibernate} {
+		if isDangerQuickAction(id) {
+			t.Fatalf("ordinary quick action %d was marked dangerous", id)
+		}
+	}
+	for _, id := range []uint16{idShutdown, idRestart} {
+		if !isDangerQuickAction(id) {
+			t.Fatalf("danger quick action %d was not marked dangerous", id)
+		}
+	}
+}
+
 func TestButtonRoleMappingCoversEveryPanelAction(t *testing.T) {
 	for _, id := range []uint16{idNoSleep, idProcess, idIdle, idIdleWarning, idIdleEnhanced, idTheme, idBattery, idFullscreen, idIPLocation, idHotkeys, idAutostart, idLogging} {
 		if got := roleForButton(id); got != buttonToggle {
@@ -215,6 +248,20 @@ func TestPopupMetricsUseOneDPITransform(t *testing.T) {
 	}
 }
 
+func TestVisualStateTokensKeepSpecifiedLogicalSizes(t *testing.T) {
+	control := defaultPopupStyle.Control
+	if control.FocusInset != 2 || control.FocusRingWidth != 2 {
+		t.Fatalf("focus tokens = inset %d width %d, want 2/2", control.FocusInset, control.FocusRingWidth)
+	}
+	if control.ArrowWidth != 8 || control.ArrowHeight != 4 || control.SelectedMarkerWidth != 3 {
+		t.Fatalf("disclosure tokens = arrow %dx%d marker %d, want 8x4/3", control.ArrowWidth, control.ArrowHeight, control.SelectedMarkerWidth)
+	}
+	metrics := newPopupMetrics(defaultPopupStyle, 1.5)
+	if got := metrics.px(control.FocusRingWidth); got != 3 {
+		t.Fatalf("scaled focus ring width = %d, want 3", got)
+	}
+}
+
 func TestExplicitThemeDoesNotReadSystemTheme(t *testing.T) {
 	if (&panel{theme: ThemeLight}).resolveTheme() {
 		t.Fatal("explicit light theme resolved as dark")
@@ -235,5 +282,58 @@ func TestControlStateCombinesModelAndNativeState(t *testing.T) {
 	state := p.controlState(idIdle, odsSelected|odsFocus)
 	if !state.Active || !state.Hovered || !state.Pressed || !state.Focused || state.Disabled {
 		t.Fatalf("control state = %#v", state)
+	}
+}
+
+func TestMenuAndChoiceTriggersIgnoreStaleNativeHotlight(t *testing.T) {
+	p := &panel{
+		toggles:  map[uint16]bool{},
+		selected: map[uint16]bool{},
+		disabled: map[uint16]bool{},
+	}
+	for _, id := range []uint16{idQuickActions, idLanguage, idIdleTimeout, idIdleAction} {
+		if state := p.controlState(id, odsHotlight); state.Hovered {
+			t.Fatalf("trigger %d retained native hotlight after mouse leave", id)
+		}
+	}
+	p.hoverID = idLanguage
+	if state := p.controlState(idLanguage, 0); !state.Hovered {
+		t.Fatal("tracked hover must remain visible for language trigger")
+	}
+}
+
+func TestClosingHoverMenuClearsTrackedHover(t *testing.T) {
+	p := &panel{
+		quickMenuOpen:    true,
+		languageMenuOpen: true,
+		hoverID:          idQuickActions,
+		controls:         map[uint16]windows.Handle{},
+	}
+	p.closeQuickMenu()
+	if p.quickMenuOpen || p.hoverID != 0 {
+		t.Fatalf("quick menu close retained state: open=%v hover=%d", p.quickMenuOpen, p.hoverID)
+	}
+	p.hoverID = idLanguage
+	p.closeLanguageMenu()
+	if p.languageMenuOpen || p.hoverID != 0 {
+		t.Fatalf("language menu close retained state: open=%v hover=%d", p.languageMenuOpen, p.hoverID)
+	}
+}
+
+func TestChoiceOpenOnlyEntersFocusVisibleForKeyboard(t *testing.T) {
+	mouse := &panel{choice: choiceSurface{scroll: map[uint16]int{}, selected: map[uint16]int{}}}
+	if mouse.beginChoiceOpen(idIdleTimeout) || mouse.keyboardNavigation || mouse.choice.restoreFocus {
+		t.Fatal("mouse-opened choice must not enable keyboard focus-visible")
+	}
+	keyboard := &panel{choice: choiceSurface{
+		focusOnOpen: true,
+		scroll:      map[uint16]int{},
+		selected:    map[uint16]int{idIdleTimeout: 3},
+	}}
+	if !keyboard.beginChoiceOpen(idIdleTimeout) || !keyboard.keyboardNavigation || !keyboard.choice.restoreFocus {
+		t.Fatal("keyboard-opened choice must preserve focus-visible restoration")
+	}
+	if got := keyboard.choice.scroll[idIdleTimeout]; got != 3 {
+		t.Fatalf("keyboard choice scroll = %d, want selected option 3", got)
 	}
 }

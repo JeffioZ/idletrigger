@@ -11,7 +11,7 @@ import (
 // destroyed by Windows with their parent. Fonts, brushes, and icons below are
 // created by IdleTrigger and must be explicitly released exactly once.
 type panelResources struct {
-	font, sectionFont, subtitleFont windows.Handle
+	font, sectionFont, subtitleFont, choiceSelectedFont windows.Handle
 
 	backgroundBrush, elevatedBrush windows.Handle
 	surfaceBrush                   windows.Handle
@@ -103,12 +103,12 @@ func (p *panel) rebuildBrushes(palette uicolors.Palette) {
 }
 
 func (p *panel) releaseFonts() {
-	for _, font := range []windows.Handle{p.font, p.sectionFont, p.subtitleFont} {
+	for _, font := range []windows.Handle{p.font, p.sectionFont, p.subtitleFont, p.choiceSelectedFont} {
 		if font != 0 {
 			pDeleteObject.Call(uintptr(font))
 		}
 	}
-	p.font, p.sectionFont, p.subtitleFont = 0, 0, 0
+	p.font, p.sectionFont, p.subtitleFont, p.choiceSelectedFont = 0, 0, 0, 0
 }
 
 func (p *panel) releaseIcons() {

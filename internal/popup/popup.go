@@ -315,6 +315,7 @@ var (
 	pDeleteObject          = gdi32.NewProc("DeleteObject")
 	pCreateBrush           = gdi32.NewProc("CreateSolidBrush")
 	pCreatePen             = gdi32.NewProc("CreatePen")
+	pGetStockObject        = gdi32.NewProc("GetStockObject")
 	pRoundRect             = gdi32.NewProc("RoundRect")
 	pSetTextColor          = gdi32.NewProc("SetTextColor")
 	pSetBkColor            = gdi32.NewProc("SetBkColor")
@@ -704,8 +705,11 @@ func (p *panel) create() error {
 	p.font = p.makeFont(p.metrics.style.Fonts.BodySize, p.metrics.style.Fonts.BodyWeight)
 	p.sectionFont = p.makeFont(p.metrics.style.Fonts.SectionSize, p.metrics.style.Fonts.SectionWeight)
 	p.subtitleFont = p.makeFont(p.metrics.style.Fonts.SubtitleSize, p.metrics.style.Fonts.SubtitleWeight)
+	// Choice rows use the body size and family with a stronger weight only. Do
+	// not reuse sectionFont: its type role may evolve independently.
+	p.choiceSelectedFont = p.makeFont(p.metrics.style.Fonts.BodySize, p.metrics.style.Fonts.SectionWeight)
 	p.createTooltip()
-	if p.font == 0 || p.sectionFont == 0 || p.subtitleFont == 0 {
+	if p.font == 0 || p.sectionFont == 0 || p.subtitleFont == 0 || p.choiceSelectedFont == 0 {
 		pDestroyWindow.Call(uintptr(p.hwnd))
 		return fmt.Errorf("create control panel fonts failed")
 	}
@@ -1329,10 +1333,10 @@ func (p *panel) controlState(id uint16, itemState uint32) buttonVisualState {
 		state.Active = p.choice.selected[owner] == index
 	}
 	state.Hovered = p.hoverID == id || itemState&odsHotlight != 0
-	// Native BUTTON hotlight can outlive WM_MOUSELEAVE while the choice
-	// surface is being hidden. Choice triggers use the panel's tracked hover
-	// state exclusively; their open appearance is handled separately below.
-	if id == idIdleTimeout || id == idIdleAction {
+	// Native BUTTON hotlight can outlive WM_MOUSELEAVE on owner-drawn menu and
+	// choice triggers. Those controls use the panel's tracked hover state
+	// exclusively; their open appearance is handled separately by triggerOpen.
+	if isMenuTrigger(id) || id == idIdleTimeout || id == idIdleAction {
 		state.Hovered = p.hoverID == id
 	}
 	state.Pressed = itemState&odsSelected != 0
@@ -1410,13 +1414,29 @@ func (p *panel) scheduleQuickMenuClose() {
 	}
 }
 
+func (p *panel) clearTrackedHover(ids []uint16) {
+	for _, id := range ids {
+		if p.hoverID == id {
+			p.hoverID = 0
+			p.invalidate(id)
+			return
+		}
+	}
+}
+
 func (p *panel) closeQuickMenu() {
 	if !p.quickMenuOpen {
 		return
 	}
 	pKillTimer.Call(uintptr(p.hwnd), quickMenuTimer)
 	p.quickMenuOpen = false
-	for _, id := range append([]uint16{idQuickMenu}, quickActionIDs()...) {
+	ids := append([]uint16{idQuickMenu}, quickActionIDs()...)
+	p.clearTrackedHover(append([]uint16{idQuickActions}, quickActionIDs()...))
+	// The close timer may run after the pointer has already left every child
+	// HWND. Always repaint the trigger after clearing open state so no stale
+	// hover/open pixels survive an owner-draw notification gap.
+	p.invalidate(idQuickActions)
+	for _, id := range ids {
 		if hwnd := p.controls[id]; hwnd != 0 {
 			pShowWindow.Call(uintptr(hwnd), swHide)
 		}
@@ -1466,7 +1486,10 @@ func (p *panel) closeLanguageMenu() {
 	}
 	pKillTimer.Call(uintptr(p.hwnd), languageMenuTimer)
 	p.languageMenuOpen = false
-	for _, id := range append([]uint16{idLanguageMenu}, languageIDs()...) {
+	ids := append([]uint16{idLanguageMenu}, languageIDs()...)
+	p.clearTrackedHover(append([]uint16{idLanguage}, languageIDs()...))
+	p.invalidate(idLanguage)
+	for _, id := range ids {
 		if hwnd := p.controls[id]; hwnd != 0 {
 			pShowWindow.Call(uintptr(hwnd), swHide)
 		}
@@ -1585,6 +1608,12 @@ func buttonWndProc(hwnd windows.Handle, msg uint32, wp, lp uintptr) uintptr {
 			}
 		case wmKeyDown:
 			id := p.controlID(hwnd)
+			switch wp {
+			case vkUp, vkDown, vkHome, vkEnd, vkReturn, vkSpace, vkF4, vkEscape:
+				// Programmatic SetFocus is not a modality change. Actual keyboard
+				// navigation is the only path that enables focus-visible drawing.
+				p.enterKeyboardNavigation()
+			}
 			if owner, index, ok := choiceOptionOwner(p, id); ok {
 				switch wp {
 				case vkUp:
@@ -1649,7 +1678,8 @@ func buttonWndProc(hwnd windows.Handle, msg uint32, wp, lp uintptr) uintptr {
 		case wmSysKeyDown:
 			id := p.controlID(hwnd)
 			if (wp == vkDown || wp == vkF4) && (id == idIdleTimeout || id == idIdleAction) {
-				p.requestChoice(id, false)
+				p.enterKeyboardNavigation()
+				p.requestChoice(id, true)
 				return 0
 			}
 		}
@@ -1789,6 +1819,17 @@ func choiceOptionOwner(p *panel, id uint16) (uint16, int, bool) {
 	return 0, 0, false
 }
 
+func (p *panel) beginChoiceOpen(id uint16) bool {
+	keyboardOpen := p.choice.focusOnOpen
+	p.choice.restoreFocus = keyboardOpen
+	p.choice.scroll[id] = 0
+	if keyboardOpen {
+		p.choice.scroll[id] = p.choice.selected[id]
+		p.enterKeyboardNavigation()
+	}
+	return keyboardOpen
+}
+
 func (p *panel) openChoice(id uint16) {
 	if p.disabled[id] {
 		return
@@ -1809,12 +1850,7 @@ func (p *panel) openChoice(id uint16) {
 		p.choice.selected[id] = 0
 	}
 	p.choice.openID = id
-	p.choice.restoreFocus = p.choice.focusOnOpen
-	p.choice.scroll[id] = 0
-	if p.choice.focusOnOpen {
-		p.choice.scroll[id] = p.choice.selected[id]
-	}
-	p.enterKeyboardNavigation()
+	keyboardOpen := p.beginChoiceOpen(id)
 	if p.controls[idChoiceSurface] == 0 {
 		if err := createMenuSurface(p, idChoiceSurface, 0, 0, 1, 1); err != nil {
 			p.choice.openID = 0
@@ -1828,7 +1864,7 @@ func (p *panel) openChoice(id uint16) {
 		}
 	}
 	p.positionChoiceLayer(id, len(options))
-	if p.choice.focusOnOpen {
+	if keyboardOpen {
 		if ids := p.choice.optionIDs[id]; len(ids) > p.choice.selected[id] {
 			pSetFocus.Call(uintptr(p.controls[ids[p.choice.selected[id]]]))
 		}
@@ -2209,8 +2245,9 @@ func (p *panel) refreshFontsForDPI() {
 	newFont := p.makeFont(p.metrics.style.Fonts.BodySize, p.metrics.style.Fonts.BodyWeight)
 	newSectionFont := p.makeFont(p.metrics.style.Fonts.SectionSize, p.metrics.style.Fonts.SectionWeight)
 	newSubtitleFont := p.makeFont(p.metrics.style.Fonts.SubtitleSize, p.metrics.style.Fonts.SubtitleWeight)
-	if newFont == 0 || newSectionFont == 0 || newSubtitleFont == 0 {
-		for _, font := range []windows.Handle{newFont, newSectionFont, newSubtitleFont} {
+	newChoiceSelectedFont := p.makeFont(p.metrics.style.Fonts.BodySize, p.metrics.style.Fonts.SectionWeight)
+	if newFont == 0 || newSectionFont == 0 || newSubtitleFont == 0 || newChoiceSelectedFont == 0 {
+		for _, font := range []windows.Handle{newFont, newSectionFont, newSubtitleFont, newChoiceSelectedFont} {
 			if font != 0 {
 				pDeleteObject.Call(uintptr(font))
 			}
@@ -2218,8 +2255,8 @@ func (p *panel) refreshFontsForDPI() {
 		p.metrics, p.fontChoice = oldMetrics, oldChoice
 		return
 	}
-	oldFont, oldSection, oldSubtitle := p.font, p.sectionFont, p.subtitleFont
-	p.font, p.sectionFont, p.subtitleFont = newFont, newSectionFont, newSubtitleFont
+	oldFont, oldSection, oldSubtitle, oldChoiceSelected := p.font, p.sectionFont, p.subtitleFont, p.choiceSelectedFont
+	p.font, p.sectionFont, p.subtitleFont, p.choiceSelectedFont = newFont, newSectionFont, newSubtitleFont, newChoiceSelectedFont
 	p.setWindowIcons(p.resolveTheme(), true)
 	for id, hwnd := range p.controls {
 		if bounds, ok := p.controlBounds[id]; ok {
@@ -2232,7 +2269,7 @@ func (p *panel) refreshFontsForDPI() {
 	if p.tooltip != 0 {
 		pSendMessage.Call(uintptr(p.tooltip), ttmSetMaxTipWidth, 0, uintptr(p.sc(360)))
 	}
-	for _, font := range []windows.Handle{oldFont, oldSection, oldSubtitle} {
+	for _, font := range []windows.Handle{oldFont, oldSection, oldSubtitle, oldChoiceSelected} {
 		if font != 0 {
 			pDeleteObject.Call(uintptr(font))
 		}
@@ -2435,14 +2472,97 @@ func (p *panel) applyFrameTheme(dark bool) {
 	}
 }
 
+func (p *panel) triggerOpen(id uint16) bool {
+	switch id {
+	case idQuickActions:
+		return p.quickMenuOpen
+	case idLanguage:
+		return p.languageMenuOpen
+	case idIdleTimeout, idIdleAction:
+		return p.choice.openID == id
+	default:
+		return false
+	}
+}
+
+func isDangerQuickAction(id uint16) bool { return id == idShutdown || id == idRestart }
+
+func (p *panel) drawDisclosureArrow(dc windows.Handle, bounds rect, up bool, color uint32) {
+	width := int32(p.sc(p.metrics.style.Control.ArrowWidth))
+	height := int32(p.sc(p.metrics.style.Control.ArrowHeight))
+	if width < 2 || height < 1 {
+		return
+	}
+	penWidth := p.sc(1)
+	if penWidth < 1 {
+		penWidth = 1
+	}
+	pen, _, _ := pCreatePen.Call(psSolid, uintptr(penWidth), uintptr(color))
+	if pen == 0 {
+		return
+	}
+	defer pDeleteObject.Call(pen)
+	old, _, _ := pSelectObject.Call(uintptr(dc), pen)
+	defer pSelectObject.Call(uintptr(dc), old)
+	cx := bounds.Right - int32(p.sc(18))
+	cy := (bounds.Top + bounds.Bottom) / 2
+	halfW := width / 2
+	halfH := height / 2
+	if up {
+		pMoveToEx.Call(uintptr(dc), uintptr(cx-halfW), uintptr(cy+halfH), 0)
+		pLineTo.Call(uintptr(dc), uintptr(cx), uintptr(cy-halfH))
+		pLineTo.Call(uintptr(dc), uintptr(cx+halfW), uintptr(cy+halfH))
+		return
+	}
+	pMoveToEx.Call(uintptr(dc), uintptr(cx-halfW), uintptr(cy-halfH), 0)
+	pLineTo.Call(uintptr(dc), uintptr(cx), uintptr(cy+halfH))
+	pLineTo.Call(uintptr(dc), uintptr(cx+halfW), uintptr(cy-halfH))
+}
+
+// roundRectFocusRing draws one inset outline using only temporary GDI objects.
+// The caller uses it only for rounded controls; checkbox focus intentionally
+// remains square and follows the existing native-control language.
+func (p *panel) roundRectFocusRing(dc windows.Handle, bounds rect, color uint32) {
+	inset := int32(p.sc(p.metrics.style.Control.FocusInset))
+	width := p.sc(p.metrics.style.Control.FocusRingWidth)
+	if width < 1 {
+		width = 1
+	}
+	ring := bounds
+	ring.Left += inset
+	ring.Top += inset
+	ring.Right -= inset
+	ring.Bottom -= inset
+	if ring.Right-ring.Left <= int32(width) || ring.Bottom-ring.Top <= int32(width) {
+		return
+	}
+	radius := p.sc(p.metrics.style.Control.CornerRadius) - int(inset)
+	if radius < 0 {
+		radius = 0
+	}
+	pen, _, _ := pCreatePen.Call(psSolid, uintptr(width), uintptr(color))
+	if pen == 0 {
+		return
+	}
+	defer pDeleteObject.Call(pen)
+	hollow, _, _ := pGetStockObject.Call(5) // HOLLOW_BRUSH
+	if hollow == 0 {
+		return
+	}
+	oldBrush, _, _ := pSelectObject.Call(uintptr(dc), hollow)
+	oldPen, _, _ := pSelectObject.Call(uintptr(dc), pen)
+	pRoundRect.Call(uintptr(dc), uintptr(ring.Left), uintptr(ring.Top), uintptr(ring.Right), uintptr(ring.Bottom), uintptr(radius), uintptr(radius))
+	pSelectObject.Call(uintptr(dc), oldPen)
+	pSelectObject.Call(uintptr(dc), oldBrush)
+}
+
 func (p *panel) drawButton(item *drawItem) {
 	id := uint16(item.CtlID)
 	state := p.controlState(id, item.ItemState)
-	// Choice rows are transiently created after the panel is built. Reassert
-	// their semantic selection here so a late owner-draw notification cannot
-	// fall back to the generic command-button state.
 	if owner, index, ok := choiceOptionOwner(p, id); ok {
 		state.Active = p.choice.selected[owner] == index
+		p.drawChoiceOption(item, state)
+		return
 	}
 	if id == idIdleTimeout || id == idIdleAction {
 		p.drawChoiceButton(item, state)
@@ -2457,67 +2577,43 @@ func (p *panel) drawButton(item *drawItem) {
 		return
 	}
 	selected := state.Active
-	brush := p.surfaceBrush
-	borderColor := p.palette.Border
-	textColor := p.palette.PrimaryText
+	danger := id == idExit || isDangerQuickAction(id)
+	brush, borderColor, textColor := p.surfaceBrush, p.palette.Border, p.palette.PrimaryText
 	if state.Hovered {
 		brush = p.hoverBrush
 	}
-	if id == idExit {
-		brush = p.dangerBrush
-		borderColor = p.palette.DangerBorder
-		textColor = p.palette.DangerText
+	if danger {
+		brush, borderColor, textColor = p.dangerBrush, p.palette.DangerBorder, p.palette.DangerText
 		if state.Hovered {
-			brush = p.dangerHoverBrush
-			borderColor = p.palette.DangerHoverBorder
+			brush, borderColor = p.dangerHoverBrush, p.palette.DangerHoverBorder
 		}
 	}
 	if selected {
-		brush = p.selectedBrush
-		textColor = p.palette.AccentText
+		brush, textColor = p.selectedBrush, p.palette.AccentText
 		if state.Hovered {
 			brush = p.selectedHoverBrush
 		}
 	}
 	if state.Pressed {
-		brush = p.pressedBrush
-		textColor = p.palette.AccentText
-		if id == idExit {
-			brush = p.dangerPressedBrush
-			borderColor = p.palette.DangerPressedBorder
-			textColor = p.palette.DangerText
+		brush, textColor = p.pressedBrush, p.palette.AccentText
+		if danger {
+			brush, borderColor, textColor = p.dangerPressedBrush, p.palette.DangerPressedBorder, p.palette.DangerText
 		}
 	}
 	if state.Disabled || item.ItemState&odsDisabled != 0 {
-		brush = p.disabledBrush
-		borderColor = p.palette.SubtleBorder
-		textColor = p.palette.DisabledText
+		brush, borderColor, textColor = p.disabledBrush, p.palette.SubtleBorder, p.palette.DisabledText
 	}
-	// RoundRect intentionally leaves its exterior corner pixels untouched.
-	// Clear the whole owner-draw item first so the panel, rather than the
-	// native BUTTON erase background, remains visible around the radius.
 	pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&item.Rect)), uintptr(p.backgroundBrush))
 	p.roundRect(item.HDC, item.Rect, brush, borderColor, p.sc(p.metrics.style.Control.CornerRadius))
-	// Owner-drawn buttons do not get the native focus cue automatically. Keep
-	// a visible inset outline so keyboard navigation remains discoverable in
-	// both themes without changing the selected/on color semantics.
-	if state.Focused {
-		focus := item.Rect
-		inset := int32(p.sc(p.metrics.style.Control.FocusInset))
-		focus.Left += inset
-		focus.Top += inset
-		focus.Right -= inset
-		focus.Bottom -= inset
-		if focus.Left < focus.Right && focus.Top < focus.Bottom {
-			focusBrush := p.focusBrush
-			if id == idExit {
-				focusBrush = p.dangerFocusBrush
-			} else if focusOutlineUsesLightOnAccent(selected) {
-				// Selected controls use a dedicated pale focus ring rather than their
-				// surface color, keeping keyboard focus independent from selection.
-				focusBrush = p.focusOnAccentBrush
-			}
-			pFrameRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&focus)), uintptr(focusBrush))
+	if id == idShutdown {
+		// Adjacent menu rows share an edge. Paint on the first danger row after
+		// its surface so no child HWND redraw can cover the separator.
+		separator := item.Rect
+		separator.Left += int32(p.sc(p.metrics.style.Control.MenuSurfaceInset))
+		separator.Right -= int32(p.sc(p.metrics.style.Control.MenuSurfaceInset))
+		separator.Bottom = separator.Top + int32(p.sc(1))
+		if separator.Left < separator.Right {
+			pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&separator)), uintptr(p.dangerBorderBrush))
 		}
 	}
 	pSetTextColor.Call(uintptr(item.HDC), uintptr(textColor))
@@ -2529,6 +2625,56 @@ func (p *panel) drawButton(item *drawItem) {
 	r.Left += int32(p.sc(p.metrics.style.Control.ButtonTextInset))
 	r.Right -= int32(p.sc(p.metrics.style.Control.ButtonTextInset))
 	drawTextCentered(item.HDC, text, r)
+	if state.Focused {
+		focusColor := p.palette.Focus
+		if danger {
+			focusColor = p.palette.DangerFocus
+		} else if focusOutlineUsesLightOnAccent(selected) {
+			focusColor = p.palette.FocusOnAccent
+		}
+		p.roundRectFocusRing(item.HDC, item.Rect, focusColor)
+	}
+}
+
+func (p *panel) drawChoiceOption(item *drawItem, state buttonVisualState) {
+	brush, border, textColor := p.surfaceBrush, p.palette.Border, p.palette.PrimaryText
+	if state.Hovered {
+		brush = p.hoverBrush
+	}
+	if state.Pressed {
+		brush, border = p.elevatedBrush, p.palette.AccentPressed
+	}
+	if state.Disabled || item.ItemState&odsDisabled != 0 {
+		brush, border, textColor = p.disabledBrush, p.palette.SubtleBorder, p.palette.DisabledText
+	}
+	pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&item.Rect)), uintptr(p.backgroundBrush))
+	p.roundRect(item.HDC, item.Rect, brush, border, p.sc(p.metrics.style.Control.CornerRadius))
+	if state.Active {
+		marker := item.Rect
+		marker.Left += int32(p.sc(p.metrics.style.Control.MenuSurfaceInset))
+		marker.Right = marker.Left + int32(p.sc(p.metrics.style.Control.SelectedMarkerWidth))
+		marker.Top += int32(p.sc(6))
+		marker.Bottom -= int32(p.sc(6))
+		if marker.Left < marker.Right && marker.Top < marker.Bottom {
+			pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&marker)), uintptr(p.accentBrush))
+		}
+	}
+	pSetTextColor.Call(uintptr(item.HDC), uintptr(textColor))
+	pSetBkMode.Call(uintptr(item.HDC), transparent)
+	font := p.font
+	if state.Active {
+		font = p.choiceSelectedFont
+	}
+	old, _, _ := pSelectObject.Call(uintptr(item.HDC), uintptr(font))
+	defer pSelectObject.Call(uintptr(item.HDC), old)
+	text, _ := windows.UTF16PtrFromString(p.labels[uint16(item.CtlID)])
+	bounds := item.Rect
+	bounds.Left += int32(p.sc(p.metrics.style.Control.ButtonTextInset))
+	bounds.Right -= int32(p.sc(p.metrics.style.Control.ButtonTextInset))
+	drawTextCentered(item.HDC, text, bounds)
+	if state.Focused {
+		p.roundRectFocusRing(item.HDC, item.Rect, p.palette.Focus)
+	}
 }
 
 func (p *panel) drawChoiceButton(item *drawItem, state buttonVisualState) {
@@ -2536,13 +2682,21 @@ func (p *panel) drawChoiceButton(item *drawItem, state buttonVisualState) {
 	border := p.palette.Border
 	textColor := p.palette.PrimaryText
 	arrowColor := p.palette.SecondaryText
-	if state.Hovered || p.choice.openID == uint16(item.CtlID) {
+	open := p.triggerOpen(uint16(item.CtlID))
+	if state.Hovered {
 		brush = p.hoverBrush
+		arrowColor = p.palette.Accent
+	}
+	if open {
+		brush = p.hoverBrush
+		border = p.palette.Accent
 		arrowColor = p.palette.Accent
 	}
 	if state.Pressed {
 		brush = p.pressedBrush
-		border = p.palette.AccentPressed
+		if !open {
+			border = p.palette.AccentPressed
+		}
 		textColor = p.palette.AccentText
 		arrowColor = p.palette.AccentText
 	}
@@ -2552,36 +2706,18 @@ func (p *panel) drawChoiceButton(item *drawItem, state buttonVisualState) {
 	}
 	pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&item.Rect)), uintptr(p.backgroundBrush))
 	p.roundRect(item.HDC, item.Rect, brush, border, p.sc(p.metrics.style.Control.CornerRadius))
-	arrowX := item.Rect.Right - int32(p.sc(18))
-	pen, _, _ := pCreatePen.Call(psSolid, uintptr(p.sc(1)), uintptr(arrowColor))
-	if pen != 0 {
-		old, _, _ := pSelectObject.Call(uintptr(item.HDC), pen)
-		mid := (item.Rect.Top + item.Rect.Bottom) / 2
-		pMoveToEx.Call(uintptr(item.HDC), uintptr(arrowX-4), uintptr(mid-2), 0)
-		pLineTo.Call(uintptr(item.HDC), uintptr(arrowX), uintptr(mid+2))
-		pLineTo.Call(uintptr(item.HDC), uintptr(arrowX+4), uintptr(mid-2))
-		pSelectObject.Call(uintptr(item.HDC), old)
-		pDeleteObject.Call(pen)
-	}
+	p.drawDisclosureArrow(item.HDC, item.Rect, open, arrowColor)
 	text, _ := windows.UTF16PtrFromString(p.labels[uint16(item.CtlID)])
 	old, _, _ := pSelectObject.Call(uintptr(item.HDC), uintptr(p.font))
 	pSetTextColor.Call(uintptr(item.HDC), uintptr(textColor))
 	pSetBkMode.Call(uintptr(item.HDC), transparent)
 	r := item.Rect
 	r.Left += int32(p.sc(8))
-	r.Right = arrowX - int32(p.sc(8))
+	r.Right -= int32(p.sc(34))
 	pDrawText.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(text)), ^uintptr(0), uintptr(unsafe.Pointer(&r)), dtLeft|dtVCenter|dtSingleLine)
 	pSelectObject.Call(uintptr(item.HDC), old)
 	if state.Focused {
-		focus := item.Rect
-		inset := int32(p.sc(p.metrics.style.Control.FocusInset))
-		focus.Left += inset
-		focus.Top += inset
-		focus.Right -= inset
-		focus.Bottom -= inset
-		if focus.Left < focus.Right && focus.Top < focus.Bottom {
-			pFrameRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&focus)), uintptr(p.focusBrush))
-		}
+		p.roundRectFocusRing(item.HDC, item.Rect, p.palette.Focus)
 	}
 }
 
@@ -2591,37 +2727,34 @@ func (p *panel) drawChoiceButton(item *drawItem, state buttonVisualState) {
 func (p *panel) drawMenuTrigger(item *drawItem) {
 	id := uint16(item.CtlID)
 	state := p.controlState(id, item.ItemState)
+	open := p.triggerOpen(id)
 	brush := p.elevatedBrush
 	borderColor := p.palette.SubtleBorder
 	textColor := p.palette.SecondaryText
-	hintBrush := p.borderBrush
+	arrowColor := p.palette.SecondaryText
 	if state.Hovered {
 		brush = p.hoverBrush
 		borderColor = p.palette.Accent
 		textColor = p.palette.PrimaryText
-		hintBrush = p.accentBrush
+		arrowColor = p.palette.Accent
+	}
+	if open {
+		brush = p.hoverBrush
+		borderColor = p.palette.Accent
+		textColor = p.palette.PrimaryText
+		arrowColor = p.palette.Accent
+	}
+	if state.Pressed {
+		brush = p.pressedBrush
+		if !open {
+			borderColor = p.palette.AccentPressed
+		}
+		textColor, arrowColor = p.palette.AccentText, p.palette.AccentText
 	}
 	pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&item.Rect)), uintptr(p.backgroundBrush))
 	p.roundRect(item.HDC, item.Rect, brush, borderColor, p.sc(p.metrics.style.Control.CornerRadius))
-	hint := item.Rect
-	hintWidth := int32(p.sc(p.metrics.style.Control.MenuHintWidth))
-	hint.Left += (hint.Right - hint.Left - hintWidth) / 2
-	hint.Right = hint.Left + hintWidth
-	hint.Top = hint.Bottom - int32(p.sc(p.metrics.style.Control.MenuHintHeight+4))
-	hint.Bottom = hint.Top + int32(p.sc(p.metrics.style.Control.MenuHintHeight))
-	pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&hint)), uintptr(hintBrush))
+	p.drawDisclosureArrow(item.HDC, item.Rect, open, arrowColor)
 
-	if state.Focused {
-		focus := item.Rect
-		inset := int32(p.sc(p.metrics.style.Control.MenuFocusInset))
-		focus.Left += inset
-		focus.Top += inset
-		focus.Right -= inset
-		focus.Bottom -= inset
-		if focus.Left < focus.Right && focus.Top < focus.Bottom {
-			pFrameRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&focus)), uintptr(p.focusBrush))
-		}
-	}
 	pSetTextColor.Call(uintptr(item.HDC), uintptr(textColor))
 	pSetBkMode.Call(uintptr(item.HDC), transparent)
 	old, _, _ := pSelectObject.Call(uintptr(item.HDC), uintptr(p.font))
@@ -2629,8 +2762,11 @@ func (p *panel) drawMenuTrigger(item *drawItem) {
 	text, _ := windows.UTF16PtrFromString(p.labels[id])
 	bounds := item.Rect
 	bounds.Left += int32(p.sc(p.metrics.style.Control.ButtonTextInset))
-	bounds.Right -= int32(p.sc(p.metrics.style.Control.ButtonTextInset))
+	bounds.Right -= int32(p.sc(34))
 	drawTextCentered(item.HDC, text, bounds)
+	if state.Focused {
+		p.roundRectFocusRing(item.HDC, item.Rect, p.palette.Focus)
+	}
 }
 
 func (p *panel) roundRect(dc windows.Handle, bounds rect, brush windows.Handle, borderColor uint32, radius int) {
@@ -2658,18 +2794,23 @@ func (p *panel) drawToggle(item *drawItem) {
 		Bottom: item.Rect.Top + (item.Rect.Bottom-item.Rect.Top-boxSize)/2 + boxSize,
 	}
 	brush, border, textColor := p.surfaceBrush, p.borderBrush, p.palette.PrimaryText
-	if state.Hovered {
-		brush = p.hoverBrush
-		textColor = p.palette.AccentHover
-	}
-	if state.Active {
-		brush, border = p.accentBrush, p.accentBrush
-	}
-	if state.Pressed {
-		textColor = p.palette.AccentPressed
-	}
+	// Keep label text stable for every interactive state. The checkbox box
+	// alone communicates hover, press, and checked state in the quiet native
+	// control language; disabled is the only text de-emphasis case.
 	if state.Disabled || item.ItemState&odsDisabled != 0 {
 		brush, border, textColor = p.disabledBrush, p.subtleBorderBrush, p.palette.DisabledText
+	} else if state.Pressed {
+		if state.Active {
+			brush, border = p.pressedBrush, p.pressedBrush
+		} else {
+			brush, border = p.elevatedBrush, p.pressedBrush
+		}
+	} else if state.Active && state.Hovered {
+		brush, border = p.accentHoverBrush, p.accentHoverBrush
+	} else if state.Active {
+		brush, border = p.accentBrush, p.accentBrush
+	} else if state.Hovered {
+		brush, border = p.hoverBrush, p.accentHoverBrush
 	}
 	pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&box)), uintptr(brush))
 	pFrameRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&box)), uintptr(border))

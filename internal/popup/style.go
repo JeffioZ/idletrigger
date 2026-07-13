@@ -27,7 +27,8 @@ type fontTokens struct {
 type controlTokens struct {
 	CornerRadius, ToggleBoxSize                     int
 	ButtonTextInset, ToggleTextGap, ToggleLeftInset int
-	FocusInset, MenuFocusInset                      int
+	FocusInset, FocusRingWidth, MenuFocusInset      int
+	ArrowWidth, ArrowHeight, SelectedMarkerWidth    int
 	MenuHintWidth, MenuHintHeight, MenuSurfaceInset int
 	MenuSurfaceWidthCompensation                    int
 	IconLarge, IconSmall                            int
@@ -52,7 +53,9 @@ var defaultPopupStyle = popupStyle{
 	},
 	Control: controlTokens{
 		CornerRadius: 6, ToggleBoxSize: 16, ButtonTextInset: 8, ToggleTextGap: 8, ToggleLeftInset: 2,
-		FocusInset: 2, MenuFocusInset: 3, MenuHintWidth: 28, MenuHintHeight: 1, MenuSurfaceInset: 4,
+		FocusInset: 2, FocusRingWidth: 2, MenuFocusInset: 3,
+		ArrowWidth: 8, ArrowHeight: 4, SelectedMarkerWidth: 3,
+		MenuHintWidth: 28, MenuHintHeight: 1, MenuSurfaceInset: 4,
 		MenuSurfaceWidthCompensation: 1,
 		IconLarge:                    32, IconSmall: 16,
 	},
