@@ -22,6 +22,10 @@ import (
 
 var pngSignature = []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a}
 
+// Keep README images independent of the workstation or CI runner DPI while
+// retaining the current 150% capture quality.
+const readmeCaptureScale = 1.5
+
 type options struct {
 	all      bool
 	language string
@@ -92,7 +96,7 @@ func Run(args []string) error {
 		capturedSizes := make(map[string]image.Point)
 		for _, job := range jobs {
 			state := fixedSnapshot(job.language, job.theme)
-			err := popup.Capture(state, func(key string) string { return i18n.T(job.language, key) }, 0, func(hwnd windows.Handle) error {
+			err := popup.Capture(state, func(key string) string { return i18n.T(job.language, key) }, readmeCaptureScale, func(hwnd windows.Handle) error {
 				img, err := printWindow(hwnd)
 				if err != nil {
 					return err

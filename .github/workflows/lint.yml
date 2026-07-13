@@ -41,6 +41,11 @@ jobs:
       - name: go vet
         run: go vet ./...
 
+      - name: Verify README screenshots
+        run: |
+          ./scripts/capture-screenshots.ps1
+          git diff --exit-code -- docs/images
+
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
 
