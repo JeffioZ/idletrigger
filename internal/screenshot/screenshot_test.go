@@ -81,14 +81,6 @@ func TestCropImage(t *testing.T) {
 	}
 }
 
-func TestNormalizeClientUsesFixedCanvas(t *testing.T) {
-	client := image.NewNRGBA(image.Rect(0, 0, 708, 891))
-	normalized := normalizeClient(client)
-	if got, want := normalized.Bounds().Size(), image.Pt(readmeClientWidth, readmeClientHeight); got != want {
-		t.Fatalf("size = %v, want %v", got, want)
-	}
-}
-
 func TestPNGValidationAndAtomicWrite(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "panel.png")
 	first := image.NewNRGBA(image.Rect(0, 0, 3, 2))

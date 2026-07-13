@@ -20,11 +20,6 @@ import (
 	"github.com/JeffioZ/idletrigger/internal/popup"
 )
 
-const (
-	readmeClientWidth  = 472
-	readmeClientHeight = 751
-)
-
 var pngSignature = []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a}
 
 type options struct {
@@ -89,15 +84,15 @@ func Run(args []string) error {
 		return err
 	}
 	dpi.Enable()
-	return dpi.WithFixed96(func() error {
+	run := func() error {
 		jobs, err := opts.jobs()
 		if err != nil {
 			return err
 		}
-		var capturedSize image.Point
+		capturedSizes := make(map[string]image.Point)
 		for _, job := range jobs {
 			state := fixedSnapshot(job.language, job.theme)
-			err := popup.Capture(state, func(key string) string { return i18n.T(job.language, key) }, 1, func(hwnd windows.Handle) error {
+			err := popup.Capture(state, func(key string) string { return i18n.T(job.language, key) }, 0, func(hwnd windows.Handle) error {
 				img, err := printWindow(hwnd)
 				if err != nil {
 					return err
@@ -106,23 +101,23 @@ func Run(args []string) error {
 				if err != nil {
 					return err
 				}
-				client = normalizeClient(client)
 				size := client.Bounds().Size()
-				if size.X != readmeClientWidth || size.Y != readmeClientHeight {
-					return fmt.Errorf("unexpected fixed client size %dx%d; expected %dx%d", size.X, size.Y, readmeClientWidth, readmeClientHeight)
+				if previous, ok := capturedSizes[job.language]; ok && size != previous {
+					return fmt.Errorf("inconsistent %s client capture size %dx%d; expected %dx%d", job.language, size.X, size.Y, previous.X, previous.Y)
 				}
-				if capturedSize != (image.Point{}) && size != capturedSize {
-					return fmt.Errorf("inconsistent client capture size %dx%d; expected %dx%d", size.X, size.Y, capturedSize.X, capturedSize.Y)
+				capturedSizes[job.language] = size
+				if err := writePNG(job.path, client); err != nil {
+					return err
 				}
-				capturedSize = size
-				return writePNG(job.path, client)
+				return nil
 			})
 			if err != nil {
 				return fmt.Errorf("capture %s: %w", filepath.Base(job.path), err)
 			}
 		}
 		return nil
-	})
+	}
+	return run()
 }
 
 func parse(args []string) (options, error) {
@@ -282,38 +277,6 @@ func cropImage(source image.Image, crop image.Rectangle) (*image.NRGBA, error) {
 		}
 	}
 	return result, nil
-}
-
-// normalizeClient maps the physical PrintWindow bitmap back to its fixed
-// logical width. Some Windows configurations still render PrintWindow at a
-// monitor scale despite the screenshot thread's 96-DPI context. The README
-// contract is a 472x751 client canvas; shorter language layouts retain their
-// surface-color bottom padding rather than changing the image dimensions.
-func normalizeClient(source *image.NRGBA) *image.NRGBA {
-	scaledHeight := (source.Bounds().Dy()*readmeClientWidth + source.Bounds().Dx()/2) / source.Bounds().Dx()
-	scaled := resizeNRGBA(source, readmeClientWidth, scaledHeight)
-	result := image.NewNRGBA(image.Rect(0, 0, readmeClientWidth, readmeClientHeight))
-	background := scaled.NRGBAAt(0, 0)
-	for y := 0; y < readmeClientHeight; y++ {
-		for x := 0; x < readmeClientWidth; x++ {
-			result.SetNRGBA(x, y, background)
-		}
-	}
-	copy(result.Pix, scaled.Pix)
-	return result
-}
-
-func resizeNRGBA(source *image.NRGBA, width, height int) *image.NRGBA {
-	result := image.NewNRGBA(image.Rect(0, 0, width, height))
-	bounds := source.Bounds()
-	for y := 0; y < height; y++ {
-		sy := bounds.Min.Y + (y*bounds.Dy())/height
-		for x := 0; x < width; x++ {
-			sx := bounds.Min.X + (x*bounds.Dx())/width
-			result.SetNRGBA(x, y, source.NRGBAAt(sx, sy))
-		}
-	}
-	return result
 }
 
 func writePNG(path string, img image.Image) error {
