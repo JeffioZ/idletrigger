@@ -184,3 +184,51 @@ func TestPanelOriginDoesNotEscapeSmallWorkArea(t *testing.T) {
 		t.Fatalf("panelOrigin() = (%d, %d), want (%d, %d)", x, y, work.Left, work.Top)
 	}
 }
+
+func TestOwnedBrushesIncludesEveryPanelBrush(t *testing.T) {
+	p := &panel{}
+	p.dangerPressedBorderBrush = windows.Handle(21)
+	brushes := p.ownedBrushes()
+	if len(brushes) != 21 {
+		t.Fatalf("owned brush count = %d, want 21", len(brushes))
+	}
+	for _, brush := range brushes {
+		if brush == p.dangerPressedBorderBrush {
+			return
+		}
+	}
+	t.Fatal("danger pressed border brush is missing from the release inventory")
+}
+
+func TestPopupMetricsUseOneDPITransform(t *testing.T) {
+	metrics := newPopupMetrics(defaultPopupStyle, 1.5)
+	if got := metrics.px(metrics.style.Layout.PanelWidth); got != 708 {
+		t.Fatalf("scaled panel width = %d, want 708", got)
+	}
+	if got := metrics.px(metrics.style.Control.ToggleBoxSize); got != 24 {
+		t.Fatalf("scaled toggle box = %d, want 24", got)
+	}
+}
+
+func TestExplicitThemeDoesNotReadSystemTheme(t *testing.T) {
+	if (&panel{theme: ThemeLight}).resolveTheme() {
+		t.Fatal("explicit light theme resolved as dark")
+	}
+	if !(&panel{theme: ThemeDark}).resolveTheme() {
+		t.Fatal("explicit dark theme resolved as light")
+	}
+}
+
+func TestControlStateCombinesModelAndNativeState(t *testing.T) {
+	p := &panel{
+		toggles:            map[uint16]bool{idIdle: true},
+		selected:           map[uint16]bool{},
+		disabled:           map[uint16]bool{},
+		hoverID:            idIdle,
+		keyboardNavigation: true,
+	}
+	state := p.controlState(idIdle, odsSelected|odsFocus)
+	if !state.Active || !state.Hovered || !state.Pressed || !state.Focused || state.Disabled {
+		t.Fatalf("control state = %#v", state)
+	}
+}

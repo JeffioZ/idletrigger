@@ -13,7 +13,6 @@ import (
 	"github.com/JeffioZ/idletrigger/internal/idlewarning"
 	mylog "github.com/JeffioZ/idletrigger/internal/log"
 	"github.com/JeffioZ/idletrigger/internal/systray"
-	"github.com/JeffioZ/idletrigger/internal/themeswitch"
 	"github.com/JeffioZ/idletrigger/internal/uicolors"
 	"github.com/JeffioZ/idletrigger/internal/uifont"
 )
@@ -39,9 +38,9 @@ const (
 )
 
 type buttonVisualState struct {
-	Role     buttonRole
-	Active   bool
-	Disabled bool
+	Role                      buttonRole
+	Active, Disabled          bool
+	Hovered, Pressed, Focused bool
 }
 
 type monitorInfo struct {
@@ -114,6 +113,7 @@ type State struct {
 	ThemeSchedule                                                string
 	IPLocationLabel                                              string
 	AppVersion                                                   string
+	Theme                                                        Theme
 	Owner                                                        windows.Handle
 	DeveloperCapturePanel, DeveloperWarningPreview               bool
 }
@@ -123,14 +123,6 @@ type OnAction func(action Action, value int)
 
 const (
 	panelClass = "IdleTriggerPopup"
-	baseW      = 472
-	pad        = 18
-	gap        = 8
-	sectionGap = 14
-	labelGap   = 2
-	buttonH    = 36
-	sectionH   = 22
-	subtitleH  = 18
 
 	wmDestroy         = 0x0002
 	wmClose           = 0x0010
@@ -292,6 +284,7 @@ var (
 	pGetDpiForWindow       = user32.NewProc("GetDpiForWindow")
 	pGetDpiForSystem       = user32.NewProc("GetDpiForSystem")
 	pSetForeground         = user32.NewProc("SetForegroundWindow")
+	pUpdateWindow          = user32.NewProc("UpdateWindow")
 	pSetFocus              = user32.NewProc("SetFocus")
 	pShowWindow            = user32.NewProc("ShowWindow")
 	pEnableWindow          = user32.NewProc("EnableWindow")
@@ -348,71 +341,54 @@ type initCommonControlsEx struct {
 }
 
 type panel struct {
-	hwnd                            windows.Handle
-	font, sectionFont, subtitleFont windows.Handle
-	backgroundBrush, elevatedBrush  windows.Handle
-	surfaceBrush                    windows.Handle
-	hoverBrush                      windows.Handle
-	borderBrush                     windows.Handle
-	subtleBorderBrush               windows.Handle
-	accentBrush                     windows.Handle
-	accentHoverBrush                windows.Handle
-	pressedBrush                    windows.Handle
-	selectedBrush                   windows.Handle
-	selectedHoverBrush              windows.Handle
-	disabledBrush                   windows.Handle
-	focusBrush                      windows.Handle
-	focusOnAccentBrush              windows.Handle
-	dangerBrush                     windows.Handle
-	dangerHoverBrush                windows.Handle
-	dangerPressedBrush              windows.Handle
-	dangerBorderBrush               windows.Handle
-	dangerHoverBorderBrush          windows.Handle
-	dangerPressedBorderBrush        windows.Handle
-	dangerFocusBrush                windows.Handle
-	onAction                        OnAction
-	lang                            LangFunc
-	scale                           float64
-	clientH                         int
-	appVersion                      string
-	idleTimeout                     int
-	idleWarningSeconds              int
-	idleAction                      string
-	isChinese                       bool
-	owner                           windows.Handle
-	largeIcon, smallIcon            windows.Handle
-	iconThemeDark                   bool
-	iconsInitialized                bool
-	tooltip                         windows.Handle
-	palette                         uicolors.Palette
-	fontChoice                      uifont.Choice
-	controls                        map[uint16]windows.Handle
-	labels                          map[uint16]string
-	staticKinds                     map[uint16]staticKind
-	tooltips                        map[uint16][]uint16
-	toggles, selected               map[uint16]bool
-	disabled                        map[uint16]bool
-	oldButtonProc                   map[windows.Handle]uintptr
-	hoverID                         uint16
-	keyboardNavigation              bool
-	nextStaticID                    uint16
-	themeScheduleID                 uint16
-	idlePaused                      bool
-	processWatchList                []string
-	processWatchActive              bool
-	developerCapturePanel           bool
-	developerWarningPreview         bool
-	quickMenuOpen                   bool
-	languageMenuOpen                bool
-	themeSchedule                   string
-	ipLocationLabel                 string
-	timeoutOptions                  []timeoutChoice
-	comboOptions                    map[uint16][]string
-	style, exStyle                  uint32
-	controlBounds                   map[uint16]logicalBounds
+	hwnd windows.Handle
+	// panelResources owns every GDI and icon handle created for this panel.
+	// It is embedded only to keep the drawing code compact; creation, refresh,
+	// and destruction are centralized in resources.go.
+	panelResources
+	onAction                OnAction
+	lang                    LangFunc
+	theme                   Theme
+	metrics                 popupMetrics
+	clientH                 int
+	appVersion              string
+	idleTimeout             int
+	idleWarningSeconds      int
+	idleAction              string
+	isChinese               bool
+	owner                   windows.Handle
+	iconThemeDark           bool
+	iconsInitialized        bool
+	tooltip                 windows.Handle
+	palette                 uicolors.Palette
+	fontChoice              uifont.Choice
+	controls                map[uint16]windows.Handle
+	labels                  map[uint16]string
+	staticKinds             map[uint16]staticKind
+	tooltips                map[uint16][]uint16
+	toggles, selected       map[uint16]bool
+	disabled                map[uint16]bool
+	oldButtonProc           map[windows.Handle]uintptr
+	hoverID                 uint16
+	keyboardNavigation      bool
+	nextStaticID            uint16
+	themeScheduleID         uint16
+	idlePaused              bool
+	processWatchList        []string
+	processWatchActive      bool
+	developerCapturePanel   bool
+	developerWarningPreview bool
+	quickMenuOpen           bool
+	languageMenuOpen        bool
+	themeSchedule           string
+	ipLocationLabel         string
+	timeoutOptions          []timeoutChoice
+	comboOptions            map[uint16][]string
+	style, exStyle          uint32
+	controlBounds           map[uint16]logicalBounds
+	captureScale            float64
+	captureHost             bool
 }
-
-type logicalBounds struct{ x, y, width, height int }
 
 // Show opens the panel or closes the currently open panel. It must be called
 // from the thread that owns the application's Win32 message loop.
@@ -442,10 +418,33 @@ func Refresh(state State, onAction OnAction, langFn LangFunc) error {
 }
 
 func createPanel(state State, onAction OnAction, langFn LangFunc) error {
+	_, err := createPanelForHost(state, onAction, langFn, 0, false)
+	return err
+}
+
+// Capture creates a real panel without initializing the tray. The capture
+// callback owns only its temporary resources; popup always destroys the HWND
+// and its fonts, brushes, and icons before returning.
+func Capture(state State, langFn LangFunc, scale float64, capture func(windows.Handle) error) error {
+	p, err := createPanelForHost(state, nil, langFn, scale, true)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if p.hwnd != 0 {
+			pDestroyWindow.Call(uintptr(p.hwnd))
+		}
+	}()
+	pUpdateWindow.Call(uintptr(p.hwnd))
+	return capture(p.hwnd)
+}
+
+func createPanelForHost(state State, onAction OnAction, langFn LangFunc, captureScale float64, captureHost bool) (*panel, error) {
 	p := &panel{
 		onAction:                onAction,
 		lang:                    langFn,
-		scale:                   1,
+		theme:                   state.Theme,
+		metrics:                 newPopupMetrics(defaultPopupStyle, 1),
 		themeSchedule:           state.ThemeSchedule,
 		ipLocationLabel:         state.IPLocationLabel,
 		appVersion:              state.AppVersion,
@@ -480,6 +479,8 @@ func createPanel(state State, onAction OnAction, langFn LangFunc) error {
 		oldButtonProc: make(map[windows.Handle]uintptr),
 		controlBounds: make(map[uint16]logicalBounds),
 		comboOptions:  make(map[uint16][]string),
+		captureScale:  captureScale,
+		captureHost:   captureHost,
 	}
 	if state.IsChinese {
 		p.setChoice(languageIDs(), idLangZH)
@@ -492,13 +493,13 @@ func createPanel(state State, onAction OnAction, langFn LangFunc) error {
 
 	if err := ensureClass(); err != nil {
 		clearPanel(p, 0)
-		return err
+		return nil, err
 	}
 	if err := p.create(); err != nil {
 		clearPanel(p, 0)
-		return err
+		return nil, err
 	}
-	return nil
+	return p, nil
 }
 
 // Hide destroys the currently visible panel and releases its native resources.
@@ -603,8 +604,8 @@ func (p *panel) setWindowIcons(dark, force bool) {
 	if p.hwnd == 0 || !shouldReloadWindowIcons(p.iconsInitialized, p.iconThemeDark, dark, force) {
 		return
 	}
-	largeIcon := windowIcon(dark, p.sc(32))
-	smallIcon := windowIcon(dark, p.sc(16))
+	largeIcon := windowIcon(dark, p.sc(p.metrics.style.Control.IconLarge))
+	smallIcon := windowIcon(dark, p.sc(p.metrics.style.Control.IconSmall))
 	if largeIcon == 0 || smallIcon == 0 {
 		if largeIcon != 0 {
 			pDestroyIcon.Call(uintptr(largeIcon))
@@ -612,7 +613,7 @@ func (p *panel) setWindowIcons(dark, force bool) {
 		if smallIcon != 0 {
 			pDestroyIcon.Call(uintptr(smallIcon))
 		}
-		mylog.Info("UI icon: surface=popup load failed theme_dark=%v dpi=%d", dark, int(p.scale*96+0.5))
+		mylog.Info("UI icon: surface=popup load failed theme_dark=%v dpi=%d", dark, int(p.metrics.scale*96+0.5))
 		return
 	}
 	oldLargeIcon, oldSmallIcon := p.largeIcon, p.smallIcon
@@ -643,7 +644,7 @@ func (p *panel) create() error {
 	style := uint32(wsPopup | wsCaption | wsSysMenu | wsClipChildren)
 	exStyle := uint32(wsExTopmost | wsExComposited)
 	owner := uintptr(p.owner)
-	if p.developerCapturePanel {
+	if p.developerCapturePanel || p.captureHost {
 		// Capture mode uses a normal app window shape so screenshot tools can
 		// detect the whole panel instead of treating it as a transient tray popup.
 		style = uint32(wsOverlappedWindow | wsClipChildren)
@@ -656,23 +657,32 @@ func (p *panel) create() error {
 	}
 	p.hwnd = windows.Handle(hwnd)
 	p.style, p.exStyle = style, exStyle
-	p.scale = dpiForWindow(p.hwnd)
-	p.font = p.makeFont(14, 400)
-	p.sectionFont = p.makeFont(14, 700)
-	p.subtitleFont = p.makeFont(12, 600)
+	scale := dpiForWindow(p.hwnd)
+	if p.captureScale > 0 {
+		scale = p.captureScale
+	}
+	p.metrics = newPopupMetrics(defaultPopupStyle, scale)
+	p.font = p.makeFont(p.metrics.style.Fonts.BodySize, p.metrics.style.Fonts.BodyWeight)
+	p.sectionFont = p.makeFont(p.metrics.style.Fonts.SectionSize, p.metrics.style.Fonts.SectionWeight)
+	p.subtitleFont = p.makeFont(p.metrics.style.Fonts.SubtitleSize, p.metrics.style.Fonts.SubtitleWeight)
 	p.createTooltip()
 	if p.font == 0 || p.sectionFont == 0 || p.subtitleFont == 0 {
+		pDestroyWindow.Call(uintptr(p.hwnd))
 		return fmt.Errorf("create control panel fonts failed")
 	}
-	mylog.Info("UI font: surface=popup ui_language=%s system_language=%s system_locale=%s face=%q reason=%s dpi=%d body_px=%d", p.fontChoice.UILanguage, p.fontChoice.SystemLanguage, p.fontChoice.SystemLocale, p.fontChoice.Face, p.fontChoice.Reason, int(p.scale*96+0.5), p.sc(14))
+	mylog.Info("UI font: surface=popup ui_language=%s system_language=%s system_locale=%s face=%q reason=%s dpi=%d body_px=%d", p.fontChoice.UILanguage, p.fontChoice.SystemLanguage, p.fontChoice.SystemLocale, p.fontChoice.Face, p.fontChoice.Reason, int(p.metrics.scale*96+0.5), p.sc(int(p.metrics.style.Fonts.BodySize)))
 	p.refreshTheme(false)
 	if err := p.build(); err != nil {
 		pDestroyWindow.Call(uintptr(p.hwnd))
 		return err
 	}
-	systray.SetTabNavigationWindow(p.hwnd, p.enterKeyboardNavigation)
+	if !p.captureHost {
+		systray.SetTabNavigationWindow(p.hwnd, p.enterKeyboardNavigation)
+	}
 	p.position(style, exStyle)
-	pSetForeground.Call(uintptr(p.hwnd))
+	if !p.captureHost {
+		pSetForeground.Call(uintptr(p.hwnd))
+	}
 	return nil
 }
 
@@ -704,14 +714,14 @@ func dpiForWindow(hwnd windows.Handle) float64 {
 }
 
 func (p *panel) makeFont(size int32, weight int32) windows.Handle {
-	font, choice := uifont.New(int32(float64(size)*p.scale+0.5), weight, p.isChinese)
+	font, choice := uifont.New(int32(float64(size)*p.metrics.scale+0.5), weight, p.isChinese)
 	if p.fontChoice.Face == "" {
 		p.fontChoice = choice
 	}
 	return font
 }
 
-func (p *panel) sc(value int) int { return int(float64(value)*p.scale + 0.5) }
+func (p *panel) sc(value int) int { return p.metrics.px(value) }
 func (p *panel) text(key string) string {
 	if p.lang == nil {
 		return key
@@ -878,6 +888,10 @@ func (p *panel) processWatchTooltip() string {
 }
 
 func (p *panel) build() error {
+	layout := p.metrics.style.Layout
+	baseW, pad, gap := layout.PanelWidth, layout.Padding, layout.Gap
+	sectionGap, labelGap := layout.SectionGap, layout.LabelGap
+	buttonH, sectionH, subtitleH := layout.ButtonHeight, layout.SectionHeight, layout.SubtitleHeight
 	section := func(text string, y int) error {
 		id := p.staticID(staticSection)
 		_, err := p.child("STATIC", text, wsChild|wsVisible|ssOwnerDraw, pad, y, baseW-2*pad, sectionH, id, 0)
@@ -901,7 +915,7 @@ func (p *panel) build() error {
 		if err != nil {
 			return err
 		}
-		p.applyComboTheme(hwnd, themeswitch.Current() == themeswitch.ModeDark)
+		p.applyComboTheme(hwnd, p.resolveTheme())
 		p.comboOptions[id] = append([]string(nil), options...)
 		for _, option := range options {
 			label, err := windows.UTF16PtrFromString(option)
@@ -917,7 +931,7 @@ func (p *panel) build() error {
 		return nil
 	}
 	choiceRow := func(x, y, totalW int, labels []string, ids []uint16) (int, error) {
-		width := (totalW - (len(ids)-1)*gap) / len(ids)
+		width := splitRow(totalW, len(ids), gap)
 		height := p.rowHeight(labels, width)
 		for i, id := range ids {
 			if err := button(labels[i], x+i*(width+gap), y, width, height, id); err != nil {
@@ -1044,7 +1058,7 @@ func (p *panel) build() error {
 		return err
 	}
 	quickW := bottomW
-	menuRowH := 34
+	menuRowH := layout.QuickMenuRowHeight
 	menuH := 8 + len(quickActionIDs())*menuRowH
 	menuY := y - menuH
 	p.staticKinds[idQuickMenu] = staticQuickMenu
@@ -1105,17 +1119,17 @@ func (p *panel) staticID(kind staticKind) uint16 {
 
 func (p *panel) rowHeight(labels []string, width int) int {
 	if p.hwnd == 0 || p.font == 0 {
-		return buttonH
+		return p.metrics.style.Layout.ButtonHeight
 	}
 	dc, _, _ := pGetDC.Call(uintptr(p.hwnd))
 	if dc == 0 {
-		return buttonH
+		return p.metrics.style.Layout.ButtonHeight
 	}
 	defer pReleaseDC.Call(uintptr(p.hwnd), dc)
 	old, _, _ := pSelectObject.Call(dc, uintptr(p.font))
 	defer pSelectObject.Call(dc, old)
 
-	rowH := buttonH
+	rowH := p.metrics.style.Layout.ButtonHeight
 	availableW := int32(p.sc(width - 16))
 	for _, label := range labels {
 		text, err := windows.UTF16PtrFromString(label)
@@ -1124,7 +1138,7 @@ func (p *panel) rowHeight(labels []string, width int) int {
 		}
 		bounds := rect{Right: availableW}
 		pDrawText.Call(dc, uintptr(unsafe.Pointer(text)), ^uintptr(0), uintptr(unsafe.Pointer(&bounds)), dtCenter|dtWordBreak|dtCalcRect)
-		textH := int(float64(bounds.Bottom-bounds.Top)/p.scale + 0.999)
+		textH := int(float64(bounds.Bottom-bounds.Top)/p.metrics.scale + 0.999)
 		if candidate := textH + 12; candidate > rowH {
 			rowH = candidate
 		}
@@ -1240,6 +1254,17 @@ func visualStateForButton(id uint16, toggleOn, choiceSelected, disabled bool) bu
 
 func (p *panel) visualState(id uint16) buttonVisualState {
 	return visualStateForButton(id, p.toggles[id], p.selected[id], p.disabled[id])
+}
+
+// controlState is the single source for owner-drawn button states. The
+// semantic state comes from the panel model; transient state comes from the
+// current Win32 draw notification and never escapes into tray business state.
+func (p *panel) controlState(id uint16, itemState uint32) buttonVisualState {
+	state := p.visualState(id)
+	state.Hovered = p.hoverID == id || itemState&odsHotlight != 0
+	state.Pressed = itemState&odsSelected != 0
+	state.Focused = p.shouldDrawFocusOutline(itemState)
+	return state
 }
 
 func focusOutlineUsesLightOnAccent(active bool) bool { return active }
@@ -1586,7 +1611,7 @@ func panelOrigin(work rect, width, height, margin int32) (int32, int32) {
 }
 
 func (p *panel) position(style, exStyle uint32) {
-	r := rect{Right: int32(p.sc(baseW)), Bottom: int32(p.sc(p.clientH))}
+	r := rect{Right: int32(p.sc(p.metrics.style.Layout.PanelWidth)), Bottom: int32(p.sc(p.clientH))}
 	pAdjustWindowRect.Call(uintptr(unsafe.Pointer(&r)), uintptr(style), 0, uintptr(exStyle))
 	width, height := r.Right-r.Left, r.Bottom-r.Top
 	monitor, _, _ := pMonitorFromWindow.Call(uintptr(p.hwnd), monitorNearest)
@@ -1598,7 +1623,7 @@ func (p *panel) position(style, exStyle uint32) {
 	}
 	x, y := panelOrigin(info.Work, width, height, int32(p.sc(16)))
 	insertAfter := ^uintptr(0)
-	if p.developerCapturePanel {
+	if p.developerCapturePanel || p.captureHost {
 		insertAfter = 0
 	}
 	pSetWindowPos.Call(uintptr(p.hwnd), insertAfter, uintptr(x), uintptr(y), uintptr(width), uintptr(height), swpShowWindow)
@@ -1647,7 +1672,7 @@ func wndProc(hwnd windows.Handle, msg uint32, wp, lp uintptr) uintptr {
 		case wmDpiChanged:
 			p.refreshFontsForDPI()
 			p.position(p.style, p.exStyle)
-			mylog.Info("UI font: surface=popup rebuilt reason=dpi-change dpi=%d face=%q client_px=%dx%d", int(p.scale*96+0.5), p.fontChoice.Face, p.sc(baseW), p.sc(p.clientH))
+			mylog.Info("UI font: surface=popup rebuilt reason=dpi-change dpi=%d face=%q client_px=%dx%d", int(p.metrics.scale*96+0.5), p.fontChoice.Face, p.sc(p.metrics.style.Layout.PanelWidth), p.sc(p.clientH))
 			return 0
 		case wmTimer:
 			if wp == quickMenuTimer {
@@ -1681,27 +1706,32 @@ func wndProc(hwnd windows.Handle, msg uint32, wp, lp uintptr) uintptr {
 
 func (p *panel) refreshFontsForDPI() {
 	newScale := dpiForWindow(p.hwnd)
-	if newScale <= 0 || newScale == p.scale {
+	if p.captureScale > 0 {
+		// Screenshot hosts deliberately keep a logical 96-DPI panel even when
+		// Windows notifies the app about the monitor's physical DPI.
+		newScale = p.captureScale
+	}
+	if newScale <= 0 || newScale == p.metrics.scale {
 		return
 	}
-	oldScale, oldChoice := p.scale, p.fontChoice
-	p.scale = newScale
+	oldMetrics, oldChoice := p.metrics, p.fontChoice
+	p.metrics = newPopupMetrics(p.metrics.style, newScale)
 	p.fontChoice = uifont.Choice{}
-	newFont := p.makeFont(14, 400)
-	newSectionFont := p.makeFont(14, 700)
-	newSubtitleFont := p.makeFont(12, 600)
+	newFont := p.makeFont(p.metrics.style.Fonts.BodySize, p.metrics.style.Fonts.BodyWeight)
+	newSectionFont := p.makeFont(p.metrics.style.Fonts.SectionSize, p.metrics.style.Fonts.SectionWeight)
+	newSubtitleFont := p.makeFont(p.metrics.style.Fonts.SubtitleSize, p.metrics.style.Fonts.SubtitleWeight)
 	if newFont == 0 || newSectionFont == 0 || newSubtitleFont == 0 {
 		for _, font := range []windows.Handle{newFont, newSectionFont, newSubtitleFont} {
 			if font != 0 {
 				pDeleteObject.Call(uintptr(font))
 			}
 		}
-		p.scale, p.fontChoice = oldScale, oldChoice
+		p.metrics, p.fontChoice = oldMetrics, oldChoice
 		return
 	}
 	oldFont, oldSection, oldSubtitle := p.font, p.sectionFont, p.subtitleFont
 	p.font, p.sectionFont, p.subtitleFont = newFont, newSectionFont, newSubtitleFont
-	p.setWindowIcons(themeswitch.Current() == themeswitch.ModeDark, true)
+	p.setWindowIcons(p.resolveTheme(), true)
 	for id, hwnd := range p.controls {
 		if bounds, ok := p.controlBounds[id]; ok {
 			pSetWindowPos.Call(uintptr(hwnd), 0, uintptr(p.sc(bounds.x)), uintptr(p.sc(bounds.y)), uintptr(p.sc(bounds.width)), uintptr(p.sc(bounds.height)), 0x0004|0x0010)
@@ -1876,31 +1906,10 @@ func (p *panel) handleActionSelection() {
 }
 
 func (p *panel) refreshTheme(invalidate bool) {
-	dark := themeswitch.Current() == themeswitch.ModeDark
+	dark := p.resolveTheme()
 	p.setWindowIcons(dark, false)
 	p.palette = uicolors.ForTheme(dark)
-	p.releaseBrushes()
-	p.backgroundBrush = makeBrush(p.palette.WindowBackground)
-	p.elevatedBrush = makeBrush(p.palette.ElevatedSurface)
-	p.surfaceBrush = makeBrush(p.palette.Surface)
-	p.hoverBrush = makeBrush(p.palette.HoverSurface)
-	p.borderBrush = makeBrush(p.palette.Border)
-	p.subtleBorderBrush = makeBrush(p.palette.SubtleBorder)
-	p.accentBrush = makeBrush(p.palette.Accent)
-	p.accentHoverBrush = makeBrush(p.palette.AccentHover)
-	p.pressedBrush = makeBrush(p.palette.AccentPressed)
-	p.selectedBrush = makeBrush(p.palette.Selected)
-	p.selectedHoverBrush = makeBrush(p.palette.SelectedHover)
-	p.disabledBrush = makeBrush(p.palette.DisabledSurface)
-	p.focusBrush = makeBrush(p.palette.Focus)
-	p.focusOnAccentBrush = makeBrush(p.palette.FocusOnAccent)
-	p.dangerBrush = makeBrush(p.palette.DangerBackground)
-	p.dangerHoverBrush = makeBrush(p.palette.DangerHover)
-	p.dangerPressedBrush = makeBrush(p.palette.DangerPressed)
-	p.dangerBorderBrush = makeBrush(p.palette.DangerBorder)
-	p.dangerHoverBorderBrush = makeBrush(p.palette.DangerHoverBorder)
-	p.dangerPressedBorderBrush = makeBrush(p.palette.DangerPressedBorder)
-	p.dangerFocusBrush = makeBrush(p.palette.DangerFocus)
+	p.rebuildBrushes(p.palette)
 	p.applyFrameTheme(dark)
 	p.applyComboTheme(p.controls[idIdleTimeout], dark)
 	p.applyTooltipTheme(dark)
@@ -1974,9 +1983,9 @@ func (p *panel) applyFrameTheme(dark bool) {
 
 func (p *panel) drawButton(item *drawItem) {
 	id := uint16(item.CtlID)
-	state := p.visualState(id)
+	state := p.controlState(id, item.ItemState)
 	if state.Role == buttonToggle {
-		p.drawToggle(item, state)
+		p.drawToggle(item)
 		return
 	}
 	if isMenuTrigger(id) {
@@ -1985,49 +1994,48 @@ func (p *panel) drawButton(item *drawItem) {
 	}
 	selected := state.Active
 	brush := p.surfaceBrush
-	borderBrush := p.borderBrush
+	borderColor := p.palette.Border
 	textColor := p.palette.PrimaryText
-	if p.hoverID == id || item.ItemState&odsHotlight != 0 {
+	if state.Hovered {
 		brush = p.hoverBrush
 	}
 	if id == idExit {
 		brush = p.dangerBrush
-		borderBrush = p.dangerBorderBrush
+		borderColor = p.palette.DangerBorder
 		textColor = p.palette.DangerText
-		if p.hoverID == id || item.ItemState&odsHotlight != 0 {
+		if state.Hovered {
 			brush = p.dangerHoverBrush
-			borderBrush = p.dangerHoverBorderBrush
+			borderColor = p.palette.DangerHoverBorder
 		}
 	}
 	if selected {
 		brush = p.selectedBrush
 		textColor = p.palette.AccentText
-		if p.hoverID == id || item.ItemState&odsHotlight != 0 {
+		if state.Hovered {
 			brush = p.selectedHoverBrush
 		}
 	}
-	if item.ItemState&odsSelected != 0 {
+	if state.Pressed {
 		brush = p.pressedBrush
 		textColor = p.palette.AccentText
 		if id == idExit {
 			brush = p.dangerPressedBrush
-			borderBrush = p.dangerPressedBorderBrush
+			borderColor = p.palette.DangerPressedBorder
 			textColor = p.palette.DangerText
 		}
 	}
 	if state.Disabled || item.ItemState&odsDisabled != 0 {
 		brush = p.disabledBrush
-		borderBrush = p.subtleBorderBrush
+		borderColor = p.palette.SubtleBorder
 		textColor = p.palette.DisabledText
 	}
-	pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&item.Rect)), uintptr(brush))
-	pFrameRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&item.Rect)), uintptr(borderBrush))
+	p.roundRect(item.HDC, item.Rect, brush, borderColor, p.sc(p.metrics.style.Control.CornerRadius))
 	// Owner-drawn buttons do not get the native focus cue automatically. Keep
 	// a visible inset outline so keyboard navigation remains discoverable in
 	// both themes without changing the selected/on color semantics.
-	if p.shouldDrawFocusOutline(item.ItemState) {
+	if state.Focused {
 		focus := item.Rect
-		inset := int32(p.sc(2))
+		inset := int32(p.sc(p.metrics.style.Control.FocusInset))
 		focus.Left += inset
 		focus.Top += inset
 		focus.Right -= inset
@@ -2050,8 +2058,8 @@ func (p *panel) drawButton(item *drawItem) {
 	defer pSelectObject.Call(uintptr(item.HDC), old)
 	text, _ := windows.UTF16PtrFromString(p.labels[id])
 	r := item.Rect
-	r.Left += int32(p.sc(8))
-	r.Right -= int32(p.sc(8))
+	r.Left += int32(p.sc(p.metrics.style.Control.ButtonTextInset))
+	r.Right -= int32(p.sc(p.metrics.style.Control.ButtonTextInset))
 	drawTextCentered(item.HDC, text, r)
 }
 
@@ -2060,28 +2068,29 @@ func (p *panel) drawButton(item *drawItem) {
 // reserved for hover.
 func (p *panel) drawMenuTrigger(item *drawItem) {
 	id := uint16(item.CtlID)
+	state := p.controlState(id, item.ItemState)
 	brush := p.elevatedBrush
 	borderColor := p.palette.SubtleBorder
 	textColor := p.palette.SecondaryText
 	hintBrush := p.subtleBorderBrush
-	if p.hoverID == id || item.ItemState&odsHotlight != 0 {
+	if state.Hovered {
 		brush = p.hoverBrush
 		borderColor = p.palette.Accent
 		textColor = p.palette.PrimaryText
 		hintBrush = p.accentBrush
 	}
-	p.roundRect(item.HDC, item.Rect, brush, borderColor, p.sc(6))
+	p.roundRect(item.HDC, item.Rect, brush, borderColor, p.sc(p.metrics.style.Control.CornerRadius))
 	hint := item.Rect
-	hintWidth := int32(p.sc(28))
+	hintWidth := int32(p.sc(p.metrics.style.Control.MenuHintWidth))
 	hint.Left += (hint.Right - hint.Left - hintWidth) / 2
 	hint.Right = hint.Left + hintWidth
-	hint.Top = hint.Bottom - int32(p.sc(5))
-	hint.Bottom = hint.Top + int32(p.sc(1))
+	hint.Top = hint.Bottom - int32(p.sc(p.metrics.style.Control.MenuHintHeight+4))
+	hint.Bottom = hint.Top + int32(p.sc(p.metrics.style.Control.MenuHintHeight))
 	pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&hint)), uintptr(hintBrush))
 
-	if p.shouldDrawFocusOutline(item.ItemState) {
+	if state.Focused {
 		focus := item.Rect
-		inset := int32(p.sc(3))
+		inset := int32(p.sc(p.metrics.style.Control.MenuFocusInset))
 		focus.Left += inset
 		focus.Top += inset
 		focus.Right -= inset
@@ -2096,8 +2105,8 @@ func (p *panel) drawMenuTrigger(item *drawItem) {
 	defer pSelectObject.Call(uintptr(item.HDC), old)
 	text, _ := windows.UTF16PtrFromString(p.labels[id])
 	bounds := item.Rect
-	bounds.Left += int32(p.sc(8))
-	bounds.Right -= int32(p.sc(8))
+	bounds.Left += int32(p.sc(p.metrics.style.Control.ButtonTextInset))
+	bounds.Right -= int32(p.sc(p.metrics.style.Control.ButtonTextInset))
 	drawTextCentered(item.HDC, text, bounds)
 }
 
@@ -2115,17 +2124,18 @@ func (p *panel) roundRect(dc windows.Handle, bounds rect, brush windows.Handle, 
 	pDeleteObject.Call(pen)
 }
 
-func (p *panel) drawToggle(item *drawItem, state buttonVisualState) {
+func (p *panel) drawToggle(item *drawItem) {
+	state := p.controlState(uint16(item.CtlID), item.ItemState)
 	pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&item.Rect)), uintptr(p.backgroundBrush))
-	boxSize := int32(p.sc(16))
+	boxSize := int32(p.sc(p.metrics.style.Control.ToggleBoxSize))
 	box := rect{
-		Left:   item.Rect.Left + int32(p.sc(2)),
+		Left:   item.Rect.Left + int32(p.sc(p.metrics.style.Control.ToggleLeftInset)),
 		Top:    item.Rect.Top + (item.Rect.Bottom-item.Rect.Top-boxSize)/2,
-		Right:  item.Rect.Left + int32(p.sc(2)) + boxSize,
+		Right:  item.Rect.Left + int32(p.sc(p.metrics.style.Control.ToggleLeftInset)) + boxSize,
 		Bottom: item.Rect.Top + (item.Rect.Bottom-item.Rect.Top-boxSize)/2 + boxSize,
 	}
 	brush, border, textColor := p.surfaceBrush, p.borderBrush, p.palette.PrimaryText
-	if p.hoverID == uint16(item.CtlID) || item.ItemState&odsHotlight != 0 {
+	if state.Hovered {
 		brush = p.hoverBrush
 	}
 	if state.Active {
@@ -2144,9 +2154,9 @@ func (p *panel) drawToggle(item *drawItem, state buttonVisualState) {
 		pSetTextColor.Call(uintptr(item.HDC), uintptr(p.palette.AccentText))
 		pDrawText.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(check)), ^uintptr(0), uintptr(unsafe.Pointer(&box)), dtCenter|dtVCenter|dtSingleLine)
 	}
-	if p.shouldDrawFocusOutline(item.ItemState) {
+	if state.Focused {
 		focus := item.Rect
-		inset := int32(p.sc(2))
+		inset := int32(p.sc(p.metrics.style.Control.FocusInset))
 		focus.Left += inset
 		focus.Top += inset
 		focus.Right -= inset
@@ -2157,8 +2167,8 @@ func (p *panel) drawToggle(item *drawItem, state buttonVisualState) {
 	}
 	text, _ := windows.UTF16PtrFromString(p.labels[uint16(item.CtlID)])
 	bounds := item.Rect
-	bounds.Left = box.Right + int32(p.sc(8))
-	bounds.Right -= int32(p.sc(4))
+	bounds.Left = box.Right + int32(p.sc(p.metrics.style.Control.ToggleTextGap))
+	bounds.Right -= int32(p.sc(p.metrics.style.Control.MenuSurfaceInset))
 	pSetTextColor.Call(uintptr(item.HDC), uintptr(textColor))
 	drawTextLeftCentered(item.HDC, text, bounds)
 }
@@ -2180,7 +2190,7 @@ func (p *panel) drawTimeoutChoice(item *drawItem) {
 	// token as buttons, but only while Tab navigation is active.
 	if p.shouldDrawComboFocusOutline(id, item.ItemState) {
 		focus := item.Rect
-		inset := int32(p.sc(2))
+		inset := int32(p.sc(p.metrics.style.Control.FocusInset))
 		focus.Left += inset
 		focus.Top += inset
 		focus.Right -= inset
@@ -2206,7 +2216,7 @@ func (p *panel) drawTimeoutChoice(item *drawItem) {
 	bounds := item.Rect
 	bounds.Left += int32(p.sc(8))
 	if item.ItemState&odsComboBoxEdit != 0 {
-		bounds.Right -= int32(p.sc(40))
+		bounds.Right -= int32(p.sc(p.metrics.style.Control.ComboSelectionRightInset))
 	} else {
 		bounds.Right -= int32(p.sc(8))
 	}
@@ -2217,7 +2227,7 @@ func (p *panel) drawStatic(item *drawItem) {
 	id := uint16(item.CtlID)
 	kind := p.staticKinds[id]
 	if kind == staticQuickMenu {
-		p.roundRect(item.HDC, item.Rect, p.elevatedBrush, p.palette.SubtleBorder, p.sc(6))
+		p.roundRect(item.HDC, item.Rect, p.elevatedBrush, p.palette.SubtleBorder, p.sc(p.metrics.style.Control.CornerRadius))
 		return
 	}
 	pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&item.Rect)), uintptr(p.backgroundBrush))
@@ -2287,38 +2297,6 @@ func (p *panel) fill(dc, brush windows.Handle) {
 	pGetClientRect.Call(uintptr(p.hwnd), uintptr(unsafe.Pointer(&r)))
 	pFillRect.Call(uintptr(dc), uintptr(unsafe.Pointer(&r)), uintptr(brush))
 }
-func (p *panel) releaseBrushes() {
-	for _, brush := range []windows.Handle{p.backgroundBrush, p.elevatedBrush, p.surfaceBrush, p.hoverBrush, p.borderBrush, p.subtleBorderBrush, p.accentBrush, p.accentHoverBrush, p.pressedBrush, p.selectedBrush, p.selectedHoverBrush, p.disabledBrush, p.focusBrush, p.focusOnAccentBrush, p.dangerBrush, p.dangerHoverBrush, p.dangerPressedBrush, p.dangerBorderBrush, p.dangerHoverBorderBrush, p.dangerFocusBrush} {
-		if brush != 0 {
-			pDeleteObject.Call(uintptr(brush))
-		}
-	}
-	p.backgroundBrush = 0
-	p.elevatedBrush = 0
-	p.surfaceBrush = 0
-	p.hoverBrush = 0
-	p.borderBrush = 0
-	p.subtleBorderBrush = 0
-	p.accentBrush = 0
-	p.accentHoverBrush = 0
-	p.pressedBrush = 0
-	p.selectedBrush = 0
-	p.selectedHoverBrush = 0
-	p.disabledBrush = 0
-	p.focusBrush = 0
-	p.focusOnAccentBrush = 0
-	p.dangerBrush = 0
-	p.dangerHoverBrush = 0
-	p.dangerPressedBrush = 0
-	p.dangerBorderBrush = 0
-	p.dangerHoverBorderBrush = 0
-	p.dangerPressedBorderBrush = 0
-	p.dangerFocusBrush = 0
-}
-func makeBrush(color uint32) windows.Handle {
-	result, _, _ := pCreateBrush.Call(uintptr(color))
-	return windows.Handle(result)
-}
 
 func panelFor(hwnd windows.Handle) *panel {
 	panelMu.Lock()
@@ -2357,26 +2335,6 @@ func clearPanel(p *panel, hwnd windows.Handle) {
 			setWindowProc(hwnd, old)
 		}
 	}
-	if p.font != 0 {
-		pDeleteObject.Call(uintptr(p.font))
-	}
-	if p.sectionFont != 0 {
-		pDeleteObject.Call(uintptr(p.sectionFont))
-	}
-	if p.subtitleFont != 0 {
-		pDeleteObject.Call(uintptr(p.subtitleFont))
-	}
-	p.releaseBrushes()
-	if p.largeIcon != 0 {
-		pDestroyIcon.Call(uintptr(p.largeIcon))
-		p.largeIcon = 0
-	}
-	if p.smallIcon != 0 {
-		pDestroyIcon.Call(uintptr(p.smallIcon))
-		p.smallIcon = 0
-	}
-	p.font = 0
-	p.sectionFont = 0
-	p.subtitleFont = 0
+	p.releaseNativeResources()
 	p.hwnd = 0
 }
