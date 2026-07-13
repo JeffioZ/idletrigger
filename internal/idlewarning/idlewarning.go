@@ -50,13 +50,11 @@ const (
 	wmEraseBkgnd     = 0x0014
 	wmSysColorChange = 0x0015
 	wmSettingChange  = 0x001A
-	wmLButtonDown    = 0x0201
-	wmLButtonUp      = 0x0202
-	wmMouseMove      = 0x0200
-	wmMouseLeave     = 0x02A3
 	wmDpiChanged     = 0x02E0
 	wmThemeChanged   = 0x031A
 	wsPopup          = 0x80000000
+	wsCaption        = 0x00C00000
+	wsSysMenu        = 0x00080000
 	wsExTool         = 0x00000080
 	wsExTopmost      = 0x00000008
 	wsExNoActivate   = 0x08000000
@@ -69,58 +67,45 @@ const (
 	dtWordBreak      = 0x00000010
 	dtCalcRect       = 0x00000400
 	transparent      = 1
-	tmeLeave         = 0x00000002
 	warningMinHeight = 92
-	// Replaces the former WS_BORDER non-client edge. Keeping this one physical
-	// pixel inside the client rect preserves the old content and hit-test area.
-	warningBorderInset = 1
 )
 
 var (
 	user32 = windows.NewLazySystemDLL("user32.dll")
 	gdi32  = windows.NewLazySystemDLL("gdi32.dll")
+	dwmapi = windows.NewLazySystemDLL("dwmapi.dll")
 
-	pCreateWindowEx         = user32.NewProc("CreateWindowExW")
-	pDestroyWindow          = user32.NewProc("DestroyWindow")
-	pDefWindowProc          = user32.NewProc("DefWindowProcW")
-	pRegisterClassEx        = user32.NewProc("RegisterClassExW")
-	pGetCursorPos           = user32.NewProc("GetCursorPos")
-	pMonitorFromWindow      = user32.NewProc("MonitorFromWindow")
-	pGetMonitorInfo         = user32.NewProc("GetMonitorInfoW")
-	pSetWindowPos           = user32.NewProc("SetWindowPos")
-	pUpdateWindow           = user32.NewProc("UpdateWindow")
-	pBeginPaint             = user32.NewProc("BeginPaint")
-	pEndPaint               = user32.NewProc("EndPaint")
-	pGetClientRect          = user32.NewProc("GetClientRect")
-	pGetDC                  = user32.NewProc("GetDC")
-	pReleaseDC              = user32.NewProc("ReleaseDC")
-	pInvalidateRect         = user32.NewProc("InvalidateRect")
-	pTrackMouseEvent        = user32.NewProc("TrackMouseEvent")
-	pFillRect               = user32.NewProc("FillRect")
-	pFrameRect              = user32.NewProc("FrameRect")
-	pDrawText               = user32.NewProc("DrawTextW")
-	pSetTextColor           = gdi32.NewProc("SetTextColor")
-	pSetBkMode              = gdi32.NewProc("SetBkMode")
-	pGetDpiForWindow        = user32.NewProc("GetDpiForWindow")
-	pDeleteObject           = gdi32.NewProc("DeleteObject")
-	pCreateBrush            = gdi32.NewProc("CreateSolidBrush")
-	pCreatePen              = gdi32.NewProc("CreatePen")
-	pCreateCompatibleDC     = gdi32.NewProc("CreateCompatibleDC")
-	pCreateCompatibleBitmap = gdi32.NewProc("CreateCompatibleBitmap")
-	pDeleteDC               = gdi32.NewProc("DeleteDC")
-	pMoveToEx               = gdi32.NewProc("MoveToEx")
-	pLineTo                 = gdi32.NewProc("LineTo")
-	pSelectObject           = gdi32.NewProc("SelectObject")
-	pSetStretchBltMode      = gdi32.NewProc("SetStretchBltMode")
-	pStretchBlt             = gdi32.NewProc("StretchBlt")
+	pCreateWindowEx        = user32.NewProc("CreateWindowExW")
+	pDestroyWindow         = user32.NewProc("DestroyWindow")
+	pDefWindowProc         = user32.NewProc("DefWindowProcW")
+	pRegisterClassEx       = user32.NewProc("RegisterClassExW")
+	pGetCursorPos          = user32.NewProc("GetCursorPos")
+	pMonitorFromWindow     = user32.NewProc("MonitorFromWindow")
+	pGetMonitorInfo        = user32.NewProc("GetMonitorInfoW")
+	pAdjustWindowRectEx    = user32.NewProc("AdjustWindowRectEx")
+	pSetWindowPos          = user32.NewProc("SetWindowPos")
+	pUpdateWindow          = user32.NewProc("UpdateWindow")
+	pBeginPaint            = user32.NewProc("BeginPaint")
+	pEndPaint              = user32.NewProc("EndPaint")
+	pGetClientRect         = user32.NewProc("GetClientRect")
+	pGetDC                 = user32.NewProc("GetDC")
+	pReleaseDC             = user32.NewProc("ReleaseDC")
+	pInvalidateRect        = user32.NewProc("InvalidateRect")
+	pFillRect              = user32.NewProc("FillRect")
+	pDrawText              = user32.NewProc("DrawTextW")
+	pSetTextColor          = gdi32.NewProc("SetTextColor")
+	pSetBkMode             = gdi32.NewProc("SetBkMode")
+	pGetDpiForWindow       = user32.NewProc("GetDpiForWindow")
+	pDeleteObject          = gdi32.NewProc("DeleteObject")
+	pCreateBrush           = gdi32.NewProc("CreateSolidBrush")
+	pSelectObject          = gdi32.NewProc("SelectObject")
+	pDwmSetWindowAttribute = dwmapi.NewProc("DwmSetWindowAttribute")
 
 	classOnce  sync.Once
 	classErr   error
 	active     windows.Handle
 	title      string
 	body       string
-	closeHot   bool
-	closeDown  bool
 	activeSeq  uint64
 	titleFont  windows.Handle
 	bodyFont   windows.Handle
@@ -133,13 +118,6 @@ var (
 
 	warningProc = windows.NewCallback(wndProc)
 )
-
-type trackMouseEvent struct {
-	Size      uint32
-	Flags     uint32
-	HwndTrack windows.Handle
-	HoverTime uint32
-}
 
 // Show schedules a warning on the tray UI thread. It never activates the
 // window, so displaying it does not itself reset the user's idle time.
@@ -209,8 +187,6 @@ func Hide() {
 		pDestroyWindow.Call(uintptr(active))
 	}
 	activeSeq = 0
-	closeHot = false
-	closeDown = false
 	for _, font := range []windows.Handle{titleFont, bodyFont} {
 		if font != 0 {
 			pDeleteObject.Call(uintptr(font))
@@ -230,7 +206,7 @@ func showNow(titleText, bodyText string, seq uint64) {
 	pGetCursorPos.Call(uintptr(unsafe.Pointer(&cursor)))
 	hwnd, _, _ := pCreateWindowEx.Call(
 		wsExTool|wsExTopmost|wsExNoActivate,
-		uintptr(unsafe.Pointer(class)), uintptr(unsafe.Pointer(caption)), wsPopup,
+		uintptr(unsafe.Pointer(class)), uintptr(unsafe.Pointer(caption)), warningWindowStyle(),
 		uintptr(cursor.X), uintptr(cursor.Y), 1, 1, 0, 0, 0, 0,
 	)
 	if hwnd == 0 {
@@ -240,6 +216,7 @@ func showNow(titleText, bodyText string, seq uint64) {
 	activeSeq = seq
 	title, body = titleText, bodyText
 	rebuildFonts(active)
+	applyFrameTheme(active, themeswitch.Current() == themeswitch.ModeDark)
 	mylog.Info("UI font: surface=idle-warning ui_language=%s system_language=%s system_locale=%s face=%q reason=%s dpi=%d title_px=%d body_px=%d", fontChoice.UILanguage, fontChoice.SystemLanguage, fontChoice.SystemLocale, fontChoice.Face, fontChoice.Reason, dpiForWindow(active), scaledFontSize(active, 15), scaledFontSize(active, 13))
 	position(active)
 }
@@ -276,11 +253,17 @@ func ensureClass() error {
 func position(hwnd windows.Handle) {
 	sc := func(v int32) int32 { return scaleForWindow(hwnd, v) }
 	width, margin := sc(348), sc(16)
-	bodyHeight := measureText(hwnd, body, sc(13), 400, width-2*margin)
-	height := sc(44) + bodyHeight + sc(16)
+	bodyWidth := width - 2*margin - sc(10)
+	bodyHeight := measureText(hwnd, body, sc(13), 400, bodyWidth)
+	// The body starts below the header with its own top and bottom inset. Keep
+	// those in the calculated client height so wrapped text is never clipped.
+	height := sc(52) + sc(12) + bodyHeight + sc(14)
 	if minimum := sc(warningMinHeight); height < minimum {
 		height = minimum
 	}
+	outer := rect{Right: width, Bottom: height}
+	pAdjustWindowRectEx.Call(uintptr(unsafe.Pointer(&outer)), warningWindowStyle(), 0, wsExTool|wsExTopmost|wsExNoActivate)
+	width, height = outer.Right-outer.Left, outer.Bottom-outer.Top
 	monitor, _, _ := pMonitorFromWindow.Call(uintptr(hwnd), monitorNearest)
 	info := monitorInfo{Size: uint32(unsafe.Sizeof(monitorInfo{}))}
 	if monitor != 0 {
@@ -290,6 +273,23 @@ func position(hwnd windows.Handle) {
 	y := info.Work.Bottom - height - margin
 	pSetWindowPos.Call(uintptr(hwnd), ^uintptr(0), uintptr(x), uintptr(y), uintptr(width), uintptr(height), swpNoActivate|swpShowWindow)
 	pUpdateWindow.Call(uintptr(hwnd))
+}
+
+func warningWindowStyle() uintptr { return wsPopup | wsCaption | wsSysMenu }
+
+func applyFrameTheme(hwnd windows.Handle, dark bool) {
+	value := uint32(0)
+	if dark {
+		value = 1
+	}
+	const (
+		dwmwaUseImmersiveDarkMode       = 20
+		dwmwaUseImmersiveDarkModeLegacy = 19
+	)
+	result, _, _ := pDwmSetWindowAttribute.Call(uintptr(hwnd), dwmwaUseImmersiveDarkMode, uintptr(unsafe.Pointer(&value)), unsafe.Sizeof(value))
+	if result != 0 {
+		pDwmSetWindowAttribute.Call(uintptr(hwnd), dwmwaUseImmersiveDarkModeLegacy, uintptr(unsafe.Pointer(&value)), unsafe.Sizeof(value))
+	}
 }
 
 func measureText(hwnd windows.Handle, text string, size, weight, maxWidth int32) int32 {
@@ -366,8 +366,7 @@ func rebuildFonts(hwnd windows.Handle) {
 func wndProc(hwnd windows.Handle, message uint32, wParam, lParam uintptr) uintptr {
 	switch message {
 	case wmSettingChange, wmSysColorChange, wmThemeChanged:
-		// paint reads the current system theme, so a repaint is enough to update
-		// this opaque, self-drawn warning without changing its interaction model.
+		applyFrameTheme(hwnd, themeswitch.Current() == themeswitch.ModeDark)
 		pInvalidateRect.Call(uintptr(hwnd), 0, 0)
 		return 0
 	case wmPaint:
@@ -377,29 +376,6 @@ func wndProc(hwnd windows.Handle, message uint32, wParam, lParam uintptr) uintpt
 		return 1
 	case wmClose:
 		dismiss()
-		return 0
-	case wmLButtonDown:
-		point := point{X: int32(int16(lParam)), Y: int32(int16(lParam >> 16))}
-		setCloseState(hwnd, pointInRect(point, closeRect(hwnd)), pointInRect(point, closeRect(hwnd)))
-		return 0
-	case wmLButtonUp:
-		point := point{X: int32(int16(lParam)), Y: int32(int16(lParam >> 16))}
-		inside := pointInRect(point, closeRect(hwnd))
-		pressed := closeDown
-		setCloseState(hwnd, inside, false)
-		if pressed && inside {
-			dismiss()
-		}
-		return 0
-	case wmMouseMove:
-		point := point{X: int32(int16(lParam)), Y: int32(int16(lParam >> 16))}
-		inside := pointInRect(point, closeRect(hwnd))
-		setCloseState(hwnd, inside, closeDown && inside)
-		track := trackMouseEvent{Size: uint32(unsafe.Sizeof(trackMouseEvent{})), Flags: tmeLeave, HwndTrack: hwnd}
-		pTrackMouseEvent.Call(uintptr(unsafe.Pointer(&track)))
-		return 0
-	case wmMouseLeave:
-		setCloseState(hwnd, false, false)
 		return 0
 	case wmDpiChanged:
 		rebuildFonts(hwnd)
@@ -415,15 +391,6 @@ func wndProc(hwnd windows.Handle, message uint32, wParam, lParam uintptr) uintpt
 	}
 	result, _, _ := pDefWindowProc.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
 	return result
-}
-
-func setCloseState(hwnd windows.Handle, hot, down bool) {
-	if closeHot == hot && closeDown == down {
-		return
-	}
-	closeHot = hot
-	closeDown = down
-	pInvalidateRect.Call(uintptr(hwnd), 0, 0)
 }
 
 func dismiss() {
@@ -450,12 +417,17 @@ func paint(hwnd windows.Handle) {
 	brush := makeBrush(palette.WindowBackground)
 	defer pDeleteObject.Call(uintptr(brush))
 	pFillRect.Call(dc, uintptr(unsafe.Pointer(&client)), uintptr(brush))
-	borderBrush := makeBrush(palette.Border)
-	pFrameRect.Call(dc, uintptr(unsafe.Pointer(&client)), uintptr(borderBrush))
-	pDeleteObject.Call(uintptr(borderBrush))
-	content := warningContentRect(client)
 	sc := func(v int32) int32 { return scaleForWindow(hwnd, v) }
 	margin := sc(16)
+	headerBottom := sc(52)
+	header := rect{Right: client.Right, Bottom: headerBottom}
+	headerBrush := makeBrush(palette.ElevatedSurface)
+	pFillRect.Call(dc, uintptr(unsafe.Pointer(&header)), uintptr(headerBrush))
+	pDeleteObject.Call(uintptr(headerBrush))
+	separator := rect{Left: 0, Top: headerBottom - sc(1), Right: client.Right, Bottom: headerBottom}
+	separatorBrush := makeBrush(palette.SubtleBorder)
+	pFillRect.Call(dc, uintptr(unsafe.Pointer(&separator)), uintptr(separatorBrush))
+	pDeleteObject.Call(uintptr(separatorBrush))
 	titleTop, titleBottom := sc(15), sc(42)
 	// Use the same compact title accent as the main panel.  A taller bar makes
 	// the smaller warning title look visually top-heavy at higher DPI scales.
@@ -464,138 +436,15 @@ func paint(hwnd windows.Handle) {
 	// its layout rectangle. Compensate for that GDI ascent so the accent aligns
 	// with the title the user actually sees, rather than only with its bounds.
 	accentTop := titleTop + (titleBottom-titleTop-accentHeight)/2 - sc(3)
-	accentRect := rect{Left: content.Left + margin, Top: content.Top + accentTop, Right: content.Left + margin + sc(3), Bottom: content.Top + accentTop + accentHeight}
+	accentRect := rect{Left: margin, Top: accentTop, Right: margin + sc(3), Bottom: accentTop + accentHeight}
 	accentBrush := makeBrush(palette.Accent)
 	pFillRect.Call(dc, uintptr(unsafe.Pointer(&accentRect)), uintptr(accentBrush))
 	pDeleteObject.Call(uintptr(accentBrush))
 	pSetBkMode.Call(dc, transparent)
-	close := closeRect(hwnd)
-	closeText := palette.CloseText
-	closeBackground := palette.WindowBackground
-	if closeHot {
-		fill := palette.CloseHover
-		if closeDown {
-			fill = palette.ClosePressed
-		}
-		closeBackground = fill
-		closeBrush := makeBrush(fill)
-		pFillRect.Call(dc, uintptr(unsafe.Pointer(&close)), uintptr(closeBrush))
-		pDeleteObject.Call(uintptr(closeBrush))
-		closeText = palette.CloseActiveText
-	}
 	pSetTextColor.Call(dc, uintptr(palette.PrimaryText))
-	drawText(dc, title, rect{Left: content.Left + margin + sc(10), Top: content.Top + titleTop, Right: close.Left - sc(6), Bottom: content.Top + titleBottom}, titleFont, dtLeft)
+	drawText(dc, title, rect{Left: margin + sc(10), Top: titleTop, Right: client.Right - margin, Bottom: titleBottom}, titleFont, dtLeft)
 	pSetTextColor.Call(dc, uintptr(palette.SecondaryText))
-	drawText(dc, body, rect{Left: content.Left + margin + sc(10), Top: content.Top + sc(47), Right: content.Right - margin, Bottom: content.Bottom - sc(14)}, bodyFont, dtLeft|dtWordBreak)
-	drawCloseGlyph(dc, close, closeText, closeBackground)
-}
-
-func closeRect(hwnd windows.Handle) rect {
-	var client rect
-	pGetClientRect.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&client)))
-	client = warningContentRect(client)
-	size := scaleForWindow(hwnd, 28)
-	margin := scaleForWindow(hwnd, 8)
-	return closeRectForClient(client, size, margin)
-}
-
-func closeRectForClient(client rect, size, margin int32) rect {
-	return rect{Left: client.Right - margin - size, Top: client.Top + margin, Right: client.Right - margin, Bottom: client.Top + margin + size}
-}
-
-func warningContentRect(client rect) rect {
-	if client.Right-client.Left <= 2*warningBorderInset || client.Bottom-client.Top <= 2*warningBorderInset {
-		return client
-	}
-	return rect{Left: client.Left + warningBorderInset, Top: client.Top + warningBorderInset, Right: client.Right - warningBorderInset, Bottom: client.Bottom - warningBorderInset}
-}
-
-func pointInRect(point point, bounds rect) bool {
-	return point.X >= bounds.Left && point.X < bounds.Right && point.Y >= bounds.Top && point.Y < bounds.Bottom
-}
-
-func drawCloseGlyph(dc uintptr, bounds rect, color, background uint32) {
-	// This is a graphic element, not text. Do not rely on the private-use
-	// U+E711 glyph from Segoe MDL2 Assets: GDI can silently substitute another
-	// font when it is absent, leaving a tofu box on customized Windows images.
-	size := bounds.Bottom - bounds.Top
-	inset, stroke := closeGlyphMetrics(size)
-	if drawCloseGlyphSupersampled(dc, bounds, color, background, inset, stroke) {
-		return
-	}
-	drawCloseGlyphGDI(dc, bounds, color, inset, stroke)
-}
-
-func drawCloseGlyphGDI(dc uintptr, bounds rect, color uint32, inset, stroke int32) {
-	pen, _, _ := pCreatePen.Call(0, uintptr(stroke), uintptr(color))
-	if pen == 0 {
-		return
-	}
-	defer pDeleteObject.Call(pen)
-	old, _, _ := pSelectObject.Call(dc, pen)
-	defer pSelectObject.Call(dc, old)
-	x1, y1 := bounds.Left+inset, bounds.Top+inset
-	x2, y2 := bounds.Right-inset-1, bounds.Bottom-inset-1
-	pMoveToEx.Call(dc, uintptr(x1), uintptr(y1), 0)
-	pLineTo.Call(dc, uintptr(x2), uintptr(y2))
-	pMoveToEx.Call(dc, uintptr(x2), uintptr(y1), 0)
-	pLineTo.Call(dc, uintptr(x1), uintptr(y2))
-}
-
-func drawCloseGlyphSupersampled(dc uintptr, bounds rect, color, background uint32, inset, stroke int32) bool {
-	const (
-		scale    = int32(4)
-		halftone = 4
-		srcCopy  = 0x00CC0020
-	)
-	width, height := bounds.Right-bounds.Left, bounds.Bottom-bounds.Top
-	if width <= 0 || height <= 0 {
-		return false
-	}
-	memDC, _, _ := pCreateCompatibleDC.Call(dc)
-	if memDC == 0 {
-		return false
-	}
-	defer pDeleteDC.Call(memDC)
-	bitmap, _, _ := pCreateCompatibleBitmap.Call(dc, uintptr(width*scale), uintptr(height*scale))
-	if bitmap == 0 {
-		return false
-	}
-	defer pDeleteObject.Call(bitmap)
-	oldBitmap, _, _ := pSelectObject.Call(memDC, bitmap)
-	defer pSelectObject.Call(memDC, oldBitmap)
-	brush := makeBrush(background)
-	if brush == 0 {
-		return false
-	}
-	defer pDeleteObject.Call(uintptr(brush))
-	highBounds := rect{Right: width * scale, Bottom: height * scale}
-	pFillRect.Call(memDC, uintptr(unsafe.Pointer(&highBounds)), uintptr(brush))
-	pen, _, _ := pCreatePen.Call(0, uintptr(stroke*scale), uintptr(color))
-	if pen == 0 {
-		return false
-	}
-	defer pDeleteObject.Call(pen)
-	oldPen, _, _ := pSelectObject.Call(memDC, pen)
-	defer pSelectObject.Call(memDC, oldPen)
-	x1, y1 := inset*scale, inset*scale
-	x2, y2 := (width-inset-1)*scale, (height-inset-1)*scale
-	pMoveToEx.Call(memDC, uintptr(x1), uintptr(y1), 0)
-	pLineTo.Call(memDC, uintptr(x2), uintptr(y2))
-	pMoveToEx.Call(memDC, uintptr(x2), uintptr(y1), 0)
-	pLineTo.Call(memDC, uintptr(x1), uintptr(y2))
-	oldMode, _, _ := pSetStretchBltMode.Call(dc, halftone)
-	defer pSetStretchBltMode.Call(dc, oldMode)
-	result, _, _ := pStretchBlt.Call(dc, uintptr(bounds.Left), uintptr(bounds.Top), uintptr(width), uintptr(height), memDC, 0, 0, uintptr(width*scale), uintptr(height*scale), srcCopy)
-	return result != 0
-}
-
-func closeGlyphMetrics(size int32) (inset, stroke int32) {
-	inset, stroke = size*9/28, size/12
-	if stroke < 1 {
-		stroke = 1
-	}
-	return inset, stroke
+	drawText(dc, body, rect{Left: margin + sc(10), Top: headerBottom + sc(12), Right: client.Right - margin, Bottom: client.Bottom - sc(14)}, bodyFont, dtLeft|dtWordBreak)
 }
 
 func drawText(dc uintptr, text string, bounds rect, font windows.Handle, format uintptr) {

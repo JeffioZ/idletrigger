@@ -51,6 +51,19 @@ func TestVisualStateForButtonRoles(t *testing.T) {
 	}
 }
 
+func TestMenuTriggersAreLimitedToHoverMenus(t *testing.T) {
+	for _, id := range []uint16{idQuickActions, idLanguage} {
+		if !isMenuTrigger(id) {
+			t.Fatalf("menu trigger %d was not recognized", id)
+		}
+	}
+	for _, id := range []uint16{idConfig, idExit, idSleep} {
+		if isMenuTrigger(id) {
+			t.Fatalf("command %d must not use the menu-trigger style", id)
+		}
+	}
+}
+
 func TestButtonRoleMappingCoversEveryPanelAction(t *testing.T) {
 	for _, id := range []uint16{idNoSleep, idProcess, idIdle, idIdleWarning, idIdleEnhanced, idTheme, idBattery, idFullscreen, idIPLocation, idHotkeys, idAutostart, idLogging} {
 		if got := roleForButton(id); got != buttonToggle {

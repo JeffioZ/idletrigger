@@ -18,30 +18,9 @@ func TestWarningMinimumHeightIsCompact(t *testing.T) {
 	}
 }
 
-func TestCloseGlyphMetricsScaleWithoutFonts(t *testing.T) {
-	inset, stroke := closeGlyphMetrics(28)
-	if inset != 9 || stroke != 2 {
-		t.Fatalf("28px glyph = inset %d stroke %d", inset, stroke)
-	}
-	_, stroke = closeGlyphMetrics(1)
-	if stroke != 1 {
-		t.Fatalf("small glyph stroke = %d", stroke)
-	}
-}
-
-func TestWarningContentRectPreservesFormerBorderInset(t *testing.T) {
-	got := warningContentRect(rect{Left: 0, Top: 0, Right: 348, Bottom: 92})
-	want := rect{Left: 1, Top: 1, Right: 347, Bottom: 91}
-	if got != want {
-		t.Fatalf("warningContentRect() = %#v, want %#v", got, want)
-	}
-}
-
-func TestCloseRectStaysInsideWarningContentAtScaledSizes(t *testing.T) {
-	content := warningContentRect(rect{Left: 0, Top: 0, Right: 522, Bottom: 138})
-	got := closeRectForClient(content, 42, 12)
-	want := rect{Left: 467, Top: 13, Right: 509, Bottom: 55}
-	if got != want {
-		t.Fatalf("closeRectForClient() = %#v, want %#v", got, want)
+func TestWarningUsesNativeCaptionAndCloseMenu(t *testing.T) {
+	want := uintptr(wsPopup | wsCaption | wsSysMenu)
+	if got := warningWindowStyle(); got != want {
+		t.Fatalf("warningWindowStyle() = %#x, want %#x", got, want)
 	}
 }

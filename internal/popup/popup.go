@@ -203,6 +203,7 @@ const (
 	odsFocus        = 0x0010
 	odsHotlight     = 0x0040
 	odsComboBoxEdit = 0x1000
+	psSolid         = 0
 	dtCenter        = 0x00000001
 	dtVCenter       = 0x00000004
 	dtLeft          = 0x00000000
@@ -306,6 +307,8 @@ var (
 	pTrackMouseEvent       = user32.NewProc("TrackMouseEvent")
 	pDeleteObject          = gdi32.NewProc("DeleteObject")
 	pCreateBrush           = gdi32.NewProc("CreateSolidBrush")
+	pCreatePen             = gdi32.NewProc("CreatePen")
+	pRoundRect             = gdi32.NewProc("RoundRect")
 	pSetTextColor          = gdi32.NewProc("SetTextColor")
 	pSetBkColor            = gdi32.NewProc("SetBkColor")
 	pSetBkMode             = gdi32.NewProc("SetBkMode")
@@ -347,7 +350,7 @@ type initCommonControlsEx struct {
 type panel struct {
 	hwnd                            windows.Handle
 	font, sectionFont, subtitleFont windows.Handle
-	backgroundBrush                 windows.Handle
+	backgroundBrush, elevatedBrush  windows.Handle
 	surfaceBrush                    windows.Handle
 	hoverBrush                      windows.Handle
 	borderBrush                     windows.Handle
@@ -963,13 +966,13 @@ func (p *panel) build() error {
 		return err
 	}
 	y += height + gap
+	fieldW := (childW - gap) / 2
 	if p.developerWarningPreview {
-		if err := button(p.text("msg_idle_warning_test"), childX, y, 132, buttonH, idTestWarning); err != nil {
+		if err := button(p.text("msg_idle_warning_test"), childX, y, fieldW, buttonH, idTestWarning); err != nil {
 			return err
 		}
 		y += buttonH + gap
 	}
-	fieldW := (childW - gap) / 2
 	if err := subtitle(p.text("menu_idle_timeout"), childX, y, fieldW); err != nil {
 		return err
 	}
@@ -1043,7 +1046,7 @@ func (p *panel) build() error {
 	quickW := bottomW
 	menuRowH := 34
 	menuH := 8 + len(quickActionIDs())*menuRowH
-	menuY := y - menuH + 1
+	menuY := y - menuH
 	p.staticKinds[idQuickMenu] = staticQuickMenu
 	if _, err := p.child("STATIC", "", wsChild|ssOwnerDraw, pad, menuY, quickW, menuH, idQuickMenu, 0); err != nil {
 		return err
@@ -1055,7 +1058,7 @@ func (p *panel) build() error {
 	}
 	languageX := pad + bottomW + gap
 	languageMenuH := 8 + len(languageIDs())*menuRowH
-	languageMenuY := y - languageMenuH + 1
+	languageMenuY := y - languageMenuH
 	p.staticKinds[idLanguageMenu] = staticQuickMenu
 	if _, err := p.child("STATIC", "", wsChild|ssOwnerDraw, languageX, languageMenuY, bottomW, languageMenuH, idLanguageMenu, 0); err != nil {
 		return err
@@ -1240,6 +1243,8 @@ func (p *panel) visualState(id uint16) buttonVisualState {
 }
 
 func focusOutlineUsesLightOnAccent(active bool) bool { return active }
+
+func isMenuTrigger(id uint16) bool { return id == idQuickActions || id == idLanguage }
 
 func actionTranslationKey(value string) string {
 	switch value {
@@ -1876,6 +1881,7 @@ func (p *panel) refreshTheme(invalidate bool) {
 	p.palette = uicolors.ForTheme(dark)
 	p.releaseBrushes()
 	p.backgroundBrush = makeBrush(p.palette.WindowBackground)
+	p.elevatedBrush = makeBrush(p.palette.ElevatedSurface)
 	p.surfaceBrush = makeBrush(p.palette.Surface)
 	p.hoverBrush = makeBrush(p.palette.HoverSurface)
 	p.borderBrush = makeBrush(p.palette.Border)
@@ -1973,6 +1979,10 @@ func (p *panel) drawButton(item *drawItem) {
 		p.drawToggle(item, state)
 		return
 	}
+	if isMenuTrigger(id) {
+		p.drawMenuTrigger(item)
+		return
+	}
 	selected := state.Active
 	brush := p.surfaceBrush
 	borderBrush := p.borderBrush
@@ -2043,6 +2053,66 @@ func (p *panel) drawButton(item *drawItem) {
 	r.Left += int32(p.sc(8))
 	r.Right -= int32(p.sc(8))
 	drawTextCentered(item.HDC, text, r)
+}
+
+// drawMenuTrigger keeps hover-only menus visually distinct from commands that
+// execute immediately: a quieter rounded card at rest, with accent treatment
+// reserved for hover.
+func (p *panel) drawMenuTrigger(item *drawItem) {
+	id := uint16(item.CtlID)
+	brush := p.elevatedBrush
+	borderColor := p.palette.SubtleBorder
+	textColor := p.palette.SecondaryText
+	hintBrush := p.subtleBorderBrush
+	if p.hoverID == id || item.ItemState&odsHotlight != 0 {
+		brush = p.hoverBrush
+		borderColor = p.palette.Accent
+		textColor = p.palette.PrimaryText
+		hintBrush = p.accentBrush
+	}
+	p.roundRect(item.HDC, item.Rect, brush, borderColor, p.sc(6))
+	hint := item.Rect
+	hintWidth := int32(p.sc(28))
+	hint.Left += (hint.Right - hint.Left - hintWidth) / 2
+	hint.Right = hint.Left + hintWidth
+	hint.Top = hint.Bottom - int32(p.sc(5))
+	hint.Bottom = hint.Top + int32(p.sc(1))
+	pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&hint)), uintptr(hintBrush))
+
+	if p.shouldDrawFocusOutline(item.ItemState) {
+		focus := item.Rect
+		inset := int32(p.sc(3))
+		focus.Left += inset
+		focus.Top += inset
+		focus.Right -= inset
+		focus.Bottom -= inset
+		if focus.Left < focus.Right && focus.Top < focus.Bottom {
+			pFrameRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&focus)), uintptr(p.focusBrush))
+		}
+	}
+	pSetTextColor.Call(uintptr(item.HDC), uintptr(textColor))
+	pSetBkMode.Call(uintptr(item.HDC), transparent)
+	old, _, _ := pSelectObject.Call(uintptr(item.HDC), uintptr(p.font))
+	defer pSelectObject.Call(uintptr(item.HDC), old)
+	text, _ := windows.UTF16PtrFromString(p.labels[id])
+	bounds := item.Rect
+	bounds.Left += int32(p.sc(8))
+	bounds.Right -= int32(p.sc(8))
+	drawTextCentered(item.HDC, text, bounds)
+}
+
+func (p *panel) roundRect(dc windows.Handle, bounds rect, brush windows.Handle, borderColor uint32, radius int) {
+	pen, _, _ := pCreatePen.Call(psSolid, 1, uintptr(borderColor))
+	if pen == 0 {
+		pFillRect.Call(uintptr(dc), uintptr(unsafe.Pointer(&bounds)), uintptr(brush))
+		return
+	}
+	oldBrush, _, _ := pSelectObject.Call(uintptr(dc), uintptr(brush))
+	oldPen, _, _ := pSelectObject.Call(uintptr(dc), pen)
+	pRoundRect.Call(uintptr(dc), uintptr(bounds.Left), uintptr(bounds.Top), uintptr(bounds.Right), uintptr(bounds.Bottom), uintptr(radius), uintptr(radius))
+	pSelectObject.Call(uintptr(dc), oldPen)
+	pSelectObject.Call(uintptr(dc), oldBrush)
+	pDeleteObject.Call(pen)
 }
 
 func (p *panel) drawToggle(item *drawItem, state buttonVisualState) {
@@ -2147,8 +2217,7 @@ func (p *panel) drawStatic(item *drawItem) {
 	id := uint16(item.CtlID)
 	kind := p.staticKinds[id]
 	if kind == staticQuickMenu {
-		pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&item.Rect)), uintptr(p.surfaceBrush))
-		pFrameRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&item.Rect)), uintptr(p.borderBrush))
+		p.roundRect(item.HDC, item.Rect, p.elevatedBrush, p.palette.SubtleBorder, p.sc(6))
 		return
 	}
 	pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&item.Rect)), uintptr(p.backgroundBrush))
@@ -2219,12 +2288,13 @@ func (p *panel) fill(dc, brush windows.Handle) {
 	pFillRect.Call(uintptr(dc), uintptr(unsafe.Pointer(&r)), uintptr(brush))
 }
 func (p *panel) releaseBrushes() {
-	for _, brush := range []windows.Handle{p.backgroundBrush, p.surfaceBrush, p.hoverBrush, p.borderBrush, p.subtleBorderBrush, p.accentBrush, p.accentHoverBrush, p.pressedBrush, p.selectedBrush, p.selectedHoverBrush, p.disabledBrush, p.focusBrush, p.focusOnAccentBrush, p.dangerBrush, p.dangerHoverBrush, p.dangerPressedBrush, p.dangerBorderBrush, p.dangerHoverBorderBrush, p.dangerPressedBorderBrush, p.dangerFocusBrush} {
+	for _, brush := range []windows.Handle{p.backgroundBrush, p.elevatedBrush, p.surfaceBrush, p.hoverBrush, p.borderBrush, p.subtleBorderBrush, p.accentBrush, p.accentHoverBrush, p.pressedBrush, p.selectedBrush, p.selectedHoverBrush, p.disabledBrush, p.focusBrush, p.focusOnAccentBrush, p.dangerBrush, p.dangerHoverBrush, p.dangerPressedBrush, p.dangerBorderBrush, p.dangerHoverBorderBrush, p.dangerFocusBrush} {
 		if brush != 0 {
 			pDeleteObject.Call(uintptr(brush))
 		}
 	}
 	p.backgroundBrush = 0
+	p.elevatedBrush = 0
 	p.surfaceBrush = 0
 	p.hoverBrush = 0
 	p.borderBrush = 0
