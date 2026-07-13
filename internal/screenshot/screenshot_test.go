@@ -67,6 +67,23 @@ func TestFixedSnapshotIsExplicit(t *testing.T) {
 	}
 }
 
+func TestFixedSnapshotUsesSunriseSchedule(t *testing.T) {
+	tests := []struct {
+		language string
+		want     string
+	}{
+		{"en", "Sunrise: 07:00 / Sunset: 19:00 · Estimated by timezone"},
+		{"zh-CN", "日出：07:00 / 日落：19:00 · 按时区推算"},
+	}
+	for _, test := range tests {
+		t.Run(test.language, func(t *testing.T) {
+			if got := fixedSnapshot(test.language, popup.ThemeLight).ThemeSchedule; got != test.want {
+				t.Fatalf("ThemeSchedule = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 func TestCropImage(t *testing.T) {
 	source := image.NewNRGBA(image.Rect(0, 0, 10, 10))
 	cropped, err := cropImage(source, image.Rect(2, 3, 8, 9))

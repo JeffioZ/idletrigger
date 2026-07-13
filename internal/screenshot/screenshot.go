@@ -209,10 +209,8 @@ func (opts options) jobs() ([]job, error) {
 
 func fixedSnapshot(language string, theme popup.Theme) popup.State {
 	chinese := language == "zh-CN"
-	schedule := "Light 07:00 / Dark 19:00"
-	if chinese {
-		schedule = "浅色 07:00 / 深色 19:00"
-	}
+	schedule := fmt.Sprintf(i18n.T(language, "theme_schedule_sunrise_format"), "07:00", "19:00")
+	schedule = fmt.Sprintf(i18n.T(language, "theme_schedule_source_format"), schedule, i18n.T(language, "theme_location_utc_offset"))
 	return popup.State{NoSleepEnabled: true, ProcessWatchEnabled: false, IdleEnabled: true, IdleWarningEnabled: true, IdleEnhancedMonitor: false, IdleTimeout: 30, IdleWarningSeconds: 30, IdleAction: "lock", ThemeSwitchEnabled: true, DarkOnBattery: true, SkipFullscreen: true, IPLocationEnabled: false, HotkeysEnabled: false, AutostartEnabled: true, LoggingEnabled: true, IsChinese: chinese, ThemeSchedule: schedule, AppVersion: "dev", Theme: theme}
 }
 
