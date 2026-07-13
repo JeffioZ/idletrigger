@@ -8,13 +8,44 @@ import (
 
 func TestTimeoutChoices(t *testing.T) {
 	choices, selected := timeoutChoices(30, true)
-	if len(choices) != 15 || choices[selected].minutes != 30 || choices[selected].label != "30 分钟" {
+	if len(choices) != 10 || choices[selected].minutes != 30 || choices[selected].label != "30 分钟" {
 		t.Fatalf("unexpected preset choices: %#v, selected=%d", choices, selected)
 	}
 
 	choices, selected = timeoutChoices(90, false)
-	if len(choices) != 16 || choices[selected].minutes != 90 || choices[selected].label != "90 minutes" {
-		t.Fatalf("custom timeout was not preserved: %#v, selected=%d", choices, selected)
+	if len(choices) != 10 || choices[selected].minutes != 30 || choices[selected].label != "30 minutes" {
+		t.Fatalf("unsupported timeout was not normalized: %#v, selected=%d", choices, selected)
+	}
+}
+
+func TestChoiceOptionOwnerAndSelectionModel(t *testing.T) {
+	p := &panel{
+		choice: choiceSurface{
+			optionIDs: map[uint16][]uint16{
+				idIdleTimeout: {idTimeoutOptionBase, idTimeoutOptionBase + 1},
+				idIdleAction:  {idActionOptionBase, idActionOptionBase + 1},
+			},
+			selected: map[uint16]int{idIdleTimeout: 1, idIdleAction: 0},
+		},
+	}
+	owner, index, ok := choiceOptionOwner(p, idTimeoutOptionBase+1)
+	if !ok || owner != idIdleTimeout || index != 1 {
+		t.Fatalf("timeout option lookup = (%d, %d, %v)", owner, index, ok)
+	}
+	if owner, _, ok := choiceOptionOwner(p, idActionOptionBase); !ok || owner != idIdleAction {
+		t.Fatalf("action option lookup failed: owner=%d ok=%v", owner, ok)
+	}
+}
+
+func TestChoiceOptionRangesDoNotOverlap(t *testing.T) {
+	timeoutIDs := make(map[uint16]bool)
+	for i := 0; i < len(timeoutMinutes); i++ {
+		timeoutIDs[idTimeoutOptionBase+uint16(i)] = true
+	}
+	for i := 0; i < 4; i++ {
+		if timeoutIDs[idActionOptionBase+uint16(i)] {
+			t.Fatalf("action option ID %d overlaps timeout range", idActionOptionBase+uint16(i))
+		}
 	}
 }
 
@@ -101,32 +132,6 @@ func TestFocusOutlineIsVisibleOnlyDuringKeyboardNavigation(t *testing.T) {
 	}
 	if p.shouldDrawFocusOutline(0) {
 		t.Fatal("an unfocused control must not show a focus outline")
-	}
-}
-
-func TestComboFocusOutlineRequiresKeyboardFocusedSelectionField(t *testing.T) {
-	combo := windows.Handle(120)
-	other := windows.Handle(121)
-	selectionField := uint32(odsComboBoxEdit)
-	tests := []struct {
-		name               string
-		keyboardNavigation bool
-		itemState          uint32
-		focused            windows.Handle
-		want               bool
-	}{
-		{name: "tab focus on selection field", keyboardNavigation: true, itemState: selectionField, focused: combo, want: true},
-		{name: "initial panel", itemState: selectionField, focused: combo, want: false},
-		{name: "mouse focus", itemState: selectionField, focused: combo, want: false},
-		{name: "another focused control", keyboardNavigation: true, itemState: selectionField, focused: other, want: false},
-		{name: "drop-down item", keyboardNavigation: true, focused: combo, want: false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := comboFocusVisible(tt.keyboardNavigation, tt.itemState, tt.focused, combo); got != tt.want {
-				t.Fatalf("comboFocusVisible() = %v, want %v", got, tt.want)
-			}
-		})
 	}
 }
 

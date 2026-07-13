@@ -29,7 +29,8 @@ type controlTokens struct {
 	ButtonTextInset, ToggleTextGap, ToggleLeftInset int
 	FocusInset, MenuFocusInset                      int
 	MenuHintWidth, MenuHintHeight, MenuSurfaceInset int
-	ComboSelectionRightInset, IconLarge, IconSmall  int
+	MenuSurfaceWidthCompensation                    int
+	IconLarge, IconSmall                            int
 }
 
 // popupStyle is a fixed visual vocabulary for IdleTrigger's control panel,
@@ -52,7 +53,8 @@ var defaultPopupStyle = popupStyle{
 	Control: controlTokens{
 		CornerRadius: 6, ToggleBoxSize: 16, ButtonTextInset: 8, ToggleTextGap: 8, ToggleLeftInset: 2,
 		FocusInset: 2, MenuFocusInset: 3, MenuHintWidth: 28, MenuHintHeight: 1, MenuSurfaceInset: 4,
-		ComboSelectionRightInset: 40, IconLarge: 32, IconSmall: 16,
+		MenuSurfaceWidthCompensation: 1,
+		IconLarge:                    32, IconSmall: 16,
 	},
 }
 

@@ -46,17 +46,18 @@ type trayState struct {
 
 	mon *monitor.Monitor
 
-	hotkeyMgr      *hotkey.Manager
-	procWatch      *processwatcher.Watcher
-	themeSched     *themeswitch.Scheduler
-	batteryStop    chan struct{}
-	batteryDone    chan struct{}
-	processNoSleep bool
-	batteryBlocked bool
-	trayThemeDark  bool
-	menuOpen       *systray.MenuItem
-	menuExit       *systray.MenuItem
-	selfConfigMod  atomic.Int64
+	hotkeyMgr       *hotkey.Manager
+	procWatch       *processwatcher.Watcher
+	themeSched      *themeswitch.Scheduler
+	batteryStop     chan struct{}
+	batteryDone     chan struct{}
+	processNoSleep  bool
+	batteryBlocked  bool
+	trayThemeDark   bool
+	menuOpen        *systray.MenuItem
+	menuExit        *systray.MenuItem
+	selfConfigMod   atomic.Int64
+	selfConfigWrite atomic.Bool
 }
 
 type stateRequest struct {
@@ -1008,6 +1009,11 @@ func (s *trayState) applyLanguage() {
 }
 
 func (s *trayState) saveConfigErr() error {
+	// The config watcher runs independently of the tray UI goroutine.  Mark the
+	// whole atomic-replace window as self-authored so it cannot race the
+	// mod-time snapshot and schedule reloadConfig (which hides the popup).
+	s.selfConfigWrite.Store(true)
+	defer s.selfConfigWrite.Store(false)
 	if err := config.Save(s.cfg); err != nil {
 		mylog.Info("Config save failed: %v", err)
 		return err
@@ -1353,6 +1359,9 @@ func (s *trayState) watchConfig() {
 		modTime := info.ModTime()
 		if modTime.After(lastMod) {
 			lastMod = modTime
+			if s.selfConfigWrite.Load() {
+				continue
+			}
 			if modTime.UnixNano() == s.selfConfigMod.Load() {
 				continue
 			}
