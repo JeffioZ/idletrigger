@@ -30,8 +30,9 @@ try {
 		$env:GOCACHE = Join-Path $temporaryDirectory 'gocache'
         go build -trimpath -ldflags '-s -w -H windowsgui -X github.com/JeffioZ/idletrigger/internal/version.Value=screenshot' -o $exePath .
         if ($LASTEXITCODE -ne 0) { throw "go build failed with exit code $LASTEXITCODE" }
-        & $exePath screenshot --all --output $outputDirectory
-        if ($LASTEXITCODE -ne 0) { throw "screenshot command failed with exit code $LASTEXITCODE" }
+        $arguments = @('screenshot', '--all', '--output', ('"' + $outputDirectory + '"'))
+        $process = Start-Process -FilePath $exePath -ArgumentList $arguments -WindowStyle Hidden -Wait -PassThru
+        if ($process.ExitCode -ne 0) { throw "screenshot command failed with exit code $($process.ExitCode)" }
     } finally { Pop-Location }
 
 	$sizes = @{}
