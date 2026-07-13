@@ -45,12 +45,20 @@ try {
 	if ($sizes['panel-en-light.png'][1] -ne $sizes['panel-en-dark.png'][1]) { throw 'English light/dark heights differ' }
 	if ($sizes['panel-zh-light.png'][1] -ne $sizes['panel-zh-dark.png'][1]) { throw 'Chinese light/dark heights differ' }
 } finally {
-    for ($attempt = 0; $attempt -lt 10 -and (Test-Path -LiteralPath $temporaryDirectory); $attempt++) {
+    # Windows may briefly retain a handle to a just-exited GUI executable.
+    # Clean synchronously so the script never leaves a detached cleanup
+    # process behind.
+    $removed = $false
+    for ($attempt = 0; $attempt -lt 50 -and (Test-Path -LiteralPath $temporaryDirectory); $attempt++) {
         try {
             Remove-Item -LiteralPath $temporaryDirectory -Recurse -Force -ErrorAction Stop
+            $removed = $true
+            break
         } catch {
-            if ($attempt -eq 9) { throw }
             Start-Sleep -Milliseconds 200
         }
+    }
+    if ((Test-Path -LiteralPath $temporaryDirectory) -and -not $removed) {
+        throw "Unable to remove temporary screenshot directory: $temporaryDirectory"
     }
 }
