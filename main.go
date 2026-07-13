@@ -19,12 +19,22 @@ import (
 	"github.com/JeffioZ/idletrigger/internal/inputdiag"
 	"github.com/JeffioZ/idletrigger/internal/ipc"
 	mylog "github.com/JeffioZ/idletrigger/internal/log"
+	"github.com/JeffioZ/idletrigger/internal/screenshot"
 	"github.com/JeffioZ/idletrigger/internal/singleinstance"
 	"github.com/JeffioZ/idletrigger/internal/tray"
 	"github.com/JeffioZ/idletrigger/internal/version"
 )
 
 func main() {
+	if screenshot.IsCommand(os.Args[1:]) {
+		enableConsoleOutput()
+		if err := screenshot.Run(os.Args[1:]); err != nil {
+			fmt.Fprintln(os.Stderr, "IdleTrigger screenshot failed:", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	dpi.Enable()
 	darkmode.Enable()
 	developerTools := devtools.Load()
