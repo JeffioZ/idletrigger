@@ -2029,6 +2029,10 @@ func (p *panel) drawButton(item *drawItem) {
 		borderColor = p.palette.SubtleBorder
 		textColor = p.palette.DisabledText
 	}
+	// RoundRect intentionally leaves its exterior corner pixels untouched.
+	// Clear the whole owner-draw item first so the panel, rather than the
+	// native BUTTON erase background, remains visible around the radius.
+	pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&item.Rect)), uintptr(p.backgroundBrush))
 	p.roundRect(item.HDC, item.Rect, brush, borderColor, p.sc(p.metrics.style.Control.CornerRadius))
 	// Owner-drawn buttons do not get the native focus cue automatically. Keep
 	// a visible inset outline so keyboard navigation remains discoverable in
@@ -2079,6 +2083,7 @@ func (p *panel) drawMenuTrigger(item *drawItem) {
 		textColor = p.palette.PrimaryText
 		hintBrush = p.accentBrush
 	}
+	pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&item.Rect)), uintptr(p.backgroundBrush))
 	p.roundRect(item.HDC, item.Rect, brush, borderColor, p.sc(p.metrics.style.Control.CornerRadius))
 	hint := item.Rect
 	hintWidth := int32(p.sc(p.metrics.style.Control.MenuHintWidth))
