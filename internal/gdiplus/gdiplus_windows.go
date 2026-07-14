@@ -348,10 +348,43 @@ func roundedRectPath(a gdiAPI, bounds roundedRect, radius int32) (uintptr, bool)
 }
 
 func startup() (uintptr, bool) {
+	if !loadRequiredAPI(
+		dll.Load,
+		pStartup.Find,
+		pShutdown.Find,
+		pCreateFromHDC.Find,
+		pDeleteGraphics.Find,
+		pSetSmoothingMode.Find,
+		pSetPixelOffsetMode.Find,
+		pCreateSolidFill.Find,
+		pDeleteBrush.Find,
+		pFillPolygonI.Find,
+		pCreatePath.Find,
+		pDeletePath.Find,
+		pStartPathFigure.Find,
+		pClosePathFigure.Find,
+		pAddPathLineI.Find,
+		pAddPathBezierI.Find,
+		pFillPath.Find,
+	) {
+		return 0, false
+	}
 	input := startupInput{Version: 1}
 	var token uintptr
 	status, _, _ := pStartup.Call(uintptr(unsafe.Pointer(&token)), uintptr(unsafe.Pointer(&input)), 0)
 	return token, status == 0 && token != 0
+}
+
+func loadRequiredAPI(load func() error, finders ...func() error) bool {
+	if err := load(); err != nil {
+		return false
+	}
+	for _, find := range finders {
+		if err := find(); err != nil {
+			return false
+		}
+	}
+	return true
 }
 
 func shutdown(token uintptr) { pShutdown.Call(token) }

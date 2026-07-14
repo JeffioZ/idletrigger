@@ -3,6 +3,7 @@
 package gdiplus
 
 import (
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -80,6 +81,47 @@ func TestStartupFailureIsNotRetried(t *testing.T) {
 	}
 	if starts != 1 {
 		t.Fatalf("starts=%d, want 1", starts)
+	}
+}
+
+func TestLoadRequiredAPIRejectsLoadAndProcFailures(t *testing.T) {
+	wantErr := errors.New("unavailable")
+	finderCalled := false
+	if loadRequiredAPI(func() error { return wantErr }, func() error {
+		finderCalled = true
+		return nil
+	}) {
+		t.Fatal("DLL load failure unexpectedly succeeded")
+	}
+	if finderCalled {
+		t.Fatal("procedure lookup ran after DLL load failure")
+	}
+
+	calls := 0
+	if loadRequiredAPI(
+		func() error { return nil },
+		func() error { calls++; return nil },
+		func() error { calls++; return wantErr },
+		func() error { calls++; return nil },
+	) {
+		t.Fatal("procedure lookup failure unexpectedly succeeded")
+	}
+	if calls != 2 {
+		t.Fatalf("procedure lookup calls=%d, want 2", calls)
+	}
+}
+
+func TestLoadRequiredAPIAcceptsCompleteAPI(t *testing.T) {
+	calls := 0
+	if !loadRequiredAPI(
+		func() error { calls++; return nil },
+		func() error { calls++; return nil },
+		func() error { calls++; return nil },
+	) {
+		t.Fatal("complete API was rejected")
+	}
+	if calls != 3 {
+		t.Fatalf("calls=%d, want 3", calls)
 	}
 }
 
