@@ -1,0 +1,318 @@
+package controlpanel
+
+import (
+	"fmt"
+	mylog "github.com/JeffioZ/idletrigger/internal/logging"
+	"github.com/JeffioZ/idletrigger/internal/ui/font"
+	"github.com/JeffioZ/idletrigger/internal/ui/trayicon"
+	"golang.org/x/sys/windows"
+	"runtime"
+	"syscall"
+	"unsafe"
+)
+
+func Show(state State, onAction OnAction, langFn LangFunc) error {
+	panelMu.Lock()
+	if active != nil {
+		hwnd := active.hwnd
+		panelMu.Unlock()
+		pDestroyWindow.Call(uintptr(hwnd))
+		return nil
+	}
+	panelMu.Unlock()
+	return createPanel(state, onAction, langFn)
+}
+
+// Refresh rebuilds an already visible panel instead of treating it as a
+// toggle. Native controls store captions at creation time, so callers use
+// this after a language change to update every caption immediately.
+func Refresh(state State, onAction OnAction, langFn LangFunc) error {
+	panelMu.Lock()
+	old := active
+	panelMu.Unlock()
+	if old != nil && old.hwnd != 0 {
+		pDestroyWindow.Call(uintptr(old.hwnd))
+	}
+	return createPanel(state, onAction, langFn)
+}
+
+func createPanel(state State, onAction OnAction, langFn LangFunc) error {
+	_, err := createPanelForHost(state, onAction, langFn, 0, false)
+	return err
+}
+
+// Capture creates a real panel without initializing the app. The capture
+// callback owns only its temporary resources; popup always destroys the HWND
+// and its fonts, brushes, and icons before returning.
+func Capture(state State, langFn LangFunc, scale float64, capture func(windows.Handle) error) error {
+	// Win32 window creation, synchronous control messages, and destruction must
+	// stay on the same OS thread throughout a headless capture.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	p, err := createPanelForHost(state, nil, langFn, scale, true)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if p.hwnd != 0 {
+			pDestroyWindow.Call(uintptr(p.hwnd))
+		}
+	}()
+	pUpdateWindow.Call(uintptr(p.hwnd))
+	return capture(p.hwnd)
+}
+
+func createPanelForHost(state State, onAction OnAction, langFn LangFunc, captureScale float64, captureHost bool) (*panel, error) {
+	p := &panel{
+		onAction:                onAction,
+		lang:                    langFn,
+		theme:                   state.Theme,
+		metrics:                 newPanelMetrics(defaultPanelStyle, 1),
+		themeSchedule:           state.ThemeSchedule,
+		ipLocationLabel:         state.IPLocationLabel,
+		appVersion:              state.AppVersion,
+		idlePaused:              state.IdlePaused,
+		idleTimeout:             state.IdleTimeout,
+		idleWarningSeconds:      state.IdleWarningSeconds,
+		idleAction:              state.IdleAction,
+		isChinese:               state.IsChinese,
+		owner:                   state.Owner,
+		processWatchList:        append([]string(nil), state.ProcessWatchList...),
+		processWatchActive:      state.ProcessWatchActive,
+		developerCapturePanel:   state.DeveloperCapturePanel,
+		developerWarningPreview: state.DeveloperWarningPreview,
+		controls:                make(map[uint16]windows.Handle),
+		labels:                  make(map[uint16]string),
+		staticKinds:             make(map[uint16]staticKind),
+		nextStaticID:            700,
+		tooltips:                make(map[uint16][]uint16),
+		toggles: map[uint16]bool{
+			idNoSleep: state.NoSleepEnabled, idProcess: state.ProcessWatchEnabled,
+			idIdle: state.IdleEnabled && !state.IdlePaused, idIdleWarning: state.IdleWarningEnabled,
+			idIdleEnhanced: state.IdleEnhancedMonitor,
+			idTheme:        state.ThemeSwitchEnabled,
+			idBattery:      state.DarkOnBattery,
+			idFullscreen:   state.SkipFullscreen,
+			idIPLocation:   state.IPLocationEnabled,
+			idHotkeys:      state.HotkeysEnabled,
+			idAutostart:    state.AutostartEnabled, idLogging: state.LoggingEnabled,
+		},
+		selected:      make(map[uint16]bool),
+		disabled:      make(map[uint16]bool),
+		oldButtonProc: make(map[windows.Handle]uintptr),
+		controlBounds: make(map[uint16]logicalBounds),
+		choice: choiceSurface{
+			options:        make(map[uint16][]string),
+			selected:       make(map[uint16]int),
+			optionIDs:      make(map[uint16][]uint16),
+			optionControls: make(map[uint16]windows.Handle),
+			scroll:         make(map[uint16]int),
+			visible:        make(map[uint16]int),
+		},
+		captureScale: captureScale,
+		captureHost:  captureHost,
+	}
+	if state.IsChinese {
+		p.setChoice(languageIDs(), idLangZH)
+	} else {
+		p.setChoice(languageIDs(), idLangEN)
+	}
+	panelMu.Lock()
+	active = p
+	panelMu.Unlock()
+
+	if err := ensureClass(); err != nil {
+		clearPanel(p, 0)
+		return nil, err
+	}
+	if err := p.create(); err != nil {
+		clearPanel(p, 0)
+		return nil, err
+	}
+	return p, nil
+}
+
+// Hide destroys the currently visible panel and releases its native resources.
+func Hide() {
+	panelMu.Lock()
+	p := active
+	panelMu.Unlock()
+	if p != nil && p.hwnd != 0 {
+		pDestroyWindow.Call(uintptr(p.hwnd))
+	}
+}
+
+// UpdateThemeSchedule refreshes the already visible Day/Night schedule line.
+// It is intentionally layout-preserving; callers should still recreate the
+// panel when a future change needs to add or remove controls.
+func UpdateThemeSchedule(text, ipLocationLabel string) {
+	panelMu.Lock()
+	p := active
+	if p == nil || p.themeScheduleID == 0 {
+		panelMu.Unlock()
+		return
+	}
+	id := p.themeScheduleID
+	hwnd := p.controls[id]
+	p.labels[id] = text
+	p.ipLocationLabel = ipLocationLabel
+	panelMu.Unlock()
+
+	if hwnd != 0 {
+		pInvalidateRect.Call(uintptr(hwnd), 0, 1)
+	}
+	p.refreshTooltip(idIPLocation)
+}
+
+// RefreshTheme refreshes the visible panel after the system theme changes.
+// It must be called from the thread that owns the application's Win32 message
+// loop.
+func RefreshTheme() {
+	panelMu.Lock()
+	p := active
+	panelMu.Unlock()
+	if p != nil {
+		p.refreshTheme(true)
+	}
+}
+
+func Destroy() {
+	Hide()
+}
+
+func ensureClass() error {
+	classOnce.Do(func() {
+		name, err := windows.UTF16PtrFromString(panelClass)
+		if err != nil {
+			classErr = err
+			return
+		}
+		module, _, _ := pGetModuleHandle.Call(0)
+		fallbackIcon := classFallbackIcon(module)
+		wc := wndClassExW{
+			Size:      uint32(unsafe.Sizeof(wndClassExW{})),
+			WndProc:   windows.NewCallback(wndProc),
+			Instance:  windows.Handle(module),
+			Icon:      fallbackIcon,
+			ClassName: name,
+			IconSm:    fallbackIcon,
+		}
+		if cursor, _, _ := pLoadCursor.Call(0, 32512); cursor != 0 {
+			wc.Cursor = windows.Handle(cursor)
+		}
+		if result, _, callErr := pRegisterClassEx.Call(uintptr(unsafe.Pointer(&wc))); result == 0 && callErr != syscall.Errno(1410) {
+			classErr = fmt.Errorf("register popup class: %w", callErr)
+		}
+	})
+	return classErr
+}
+
+func (p *panel) create() error {
+	titleText := "IdleTrigger"
+	if p.appVersion != "" && p.appVersion != "dev" {
+		titleText += " v" + p.appVersion
+	}
+	title, _ := windows.UTF16PtrFromString(titleText)
+	name, _ := windows.UTF16PtrFromString(panelClass)
+	var cursor struct{ X, Y int32 }
+	pGetCursorPos.Call(uintptr(unsafe.Pointer(&cursor)))
+	style := uint32(wsPopup | wsCaption | wsSysMenu | wsClipChildren)
+	exStyle := uint32(wsExTopmost | wsExComposited)
+	owner := uintptr(p.owner)
+	if p.developerCapturePanel || p.captureHost {
+		// Capture mode uses a normal app window shape so screenshot tools can
+		// detect the whole panel instead of treating it as a transient tray popup.
+		style = uint32(wsOverlappedWindow | wsClipChildren)
+		exStyle = uint32(wsExAppWindow | wsExComposited)
+		owner = 0
+	}
+	hwnd, _, callErr := pCreateWindowEx.Call(uintptr(exStyle), uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(title)), uintptr(style), uintptr(cursor.X), uintptr(cursor.Y), 1, 1, owner, 0, 0, 0)
+	if hwnd == 0 {
+		return fmt.Errorf("create control panel: %w", callErr)
+	}
+	p.hwnd = windows.Handle(hwnd)
+	p.style, p.exStyle = style, exStyle
+	scale := dpiForWindow(p.hwnd)
+	if p.captureScale > 0 {
+		scale = p.captureScale
+	}
+	p.metrics = newPanelMetrics(defaultPanelStyle, scale)
+	p.font = p.makeFont(p.metrics.style.Fonts.BodySize, p.metrics.style.Fonts.BodyWeight)
+	p.sectionFont = p.makeFont(p.metrics.style.Fonts.SectionSize, p.metrics.style.Fonts.SectionWeight)
+	p.subtitleFont = p.makeFont(p.metrics.style.Fonts.SubtitleSize, p.metrics.style.Fonts.SubtitleWeight)
+	// Choice rows use the body size and family with a stronger weight only. Do
+	// not reuse sectionFont: its type role may evolve independently.
+	p.choiceSelectedFont = p.makeFont(p.metrics.style.Fonts.BodySize, p.metrics.style.Fonts.SectionWeight)
+	p.createTooltip()
+	if p.font == 0 || p.sectionFont == 0 || p.subtitleFont == 0 || p.choiceSelectedFont == 0 {
+		pDestroyWindow.Call(uintptr(p.hwnd))
+		return fmt.Errorf("create control panel fonts failed")
+	}
+	mylog.Info("UI font: surface=popup ui_language=%s system_language=%s system_locale=%s face=%q reason=%s dpi=%d body_px=%d", p.fontChoice.UILanguage, p.fontChoice.SystemLanguage, p.fontChoice.SystemLocale, p.fontChoice.Face, p.fontChoice.Reason, int(p.metrics.scale*96+0.5), p.sc(int(p.metrics.style.Fonts.BodySize)))
+	p.refreshTheme(false)
+	if err := p.build(); err != nil {
+		pDestroyWindow.Call(uintptr(p.hwnd))
+		return err
+	}
+	if !p.captureHost {
+		trayicon.SetTabNavigationWindow(p.hwnd, p.enterKeyboardNavigation)
+	}
+	p.position(style, exStyle)
+	if !p.captureHost {
+		pSetForeground.Call(uintptr(p.hwnd))
+	}
+	return nil
+}
+
+func dpiForWindow(hwnd windows.Handle) float64 {
+	dpi, _, _ := pGetDpiForWindow.Call(uintptr(hwnd))
+	if dpi == 0 {
+		dpi, _, _ = pGetDpiForSystem.Call()
+	}
+	if dpi == 0 {
+		return 1
+	}
+	return float64(dpi) / 96
+}
+
+func (p *panel) makeFont(size int32, weight int32) windows.Handle {
+	font, choice := font.New(int32(float64(size)*p.metrics.scale+0.5), weight, p.isChinese)
+	if p.fontChoice.Face == "" {
+		p.fontChoice = choice
+	}
+	return font
+}
+
+func (p *panel) sc(value int) int { return p.metrics.px(value) }
+func (p *panel) text(key string) string {
+	if p.lang == nil {
+		return key
+	}
+	return p.lang(key)
+}
+
+func (p *panel) child(className, text string, style uint32, x, y, width, height int, id uint16, font windows.Handle) (windows.Handle, error) {
+	class, err := windows.UTF16PtrFromString(className)
+	if err != nil {
+		return 0, err
+	}
+	caption, err := windows.UTF16PtrFromString(text)
+	if err != nil {
+		return 0, err
+	}
+	hwnd, _, callErr := pCreateWindowEx.Call(0, uintptr(unsafe.Pointer(class)), uintptr(unsafe.Pointer(caption)), uintptr(style), uintptr(p.sc(x)), uintptr(p.sc(y)), uintptr(p.sc(width)), uintptr(p.sc(height)), uintptr(p.hwnd), uintptr(id), 0, 0)
+	if hwnd == 0 {
+		return 0, fmt.Errorf("create %s control: %w", className, callErr)
+	}
+	if font != 0 {
+		pSendMessage.Call(hwnd, wmSetFont, uintptr(font), 1)
+	}
+	if id != 0 {
+		p.controls[id] = windows.Handle(hwnd)
+		p.controlBounds[id] = logicalBounds{x, y, width, height}
+		p.labels[id] = text
+		p.addTooltip(id, windows.Handle(hwnd))
+	}
+	return windows.Handle(hwnd), nil
+}

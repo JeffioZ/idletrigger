@@ -7,8 +7,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/JeffioZ/idletrigger/internal/feature/idle"
 	"github.com/JeffioZ/idletrigger/internal/i18n"
-	"github.com/JeffioZ/idletrigger/internal/monitor"
 )
 
 func runDeveloperCommand(lang, command string) bool {
@@ -38,7 +38,7 @@ func cmdDiagnostics(lang string) {
 		}
 	}
 	for {
-		snap, err := monitor.Snapshot()
+		snap, err := idle.Snapshot()
 		if err != nil {
 			printError(lang, fmt.Sprintf(diagnosticsErrorFormat(lang), err))
 			os.Exit(1)

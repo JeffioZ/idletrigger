@@ -6,13 +6,13 @@ import (
 	"os"
 	"strings"
 
-	"github.com/JeffioZ/idletrigger/internal/actions"
-	"github.com/JeffioZ/idletrigger/internal/autostart"
+	"github.com/JeffioZ/idletrigger/internal/feature/idle"
+	"github.com/JeffioZ/idletrigger/internal/feature/keepawake"
 	"github.com/JeffioZ/idletrigger/internal/i18n"
-	"github.com/JeffioZ/idletrigger/internal/ipc"
-	"github.com/JeffioZ/idletrigger/internal/monitor"
-	"github.com/JeffioZ/idletrigger/internal/nosleep"
-	"github.com/JeffioZ/idletrigger/internal/power"
+	"github.com/JeffioZ/idletrigger/internal/platform/windows/autostart"
+	"github.com/JeffioZ/idletrigger/internal/platform/windows/ipc"
+	"github.com/JeffioZ/idletrigger/internal/platform/windows/powerstate"
+	"github.com/JeffioZ/idletrigger/internal/platform/windows/systemaction"
 )
 
 // Run dispatches the first CLI argument.
@@ -25,34 +25,34 @@ func Run(lang string) {
 	cmd := os.Args[1]
 	switch cmd {
 	case "sleep":
-		caps := power.GetCapabilities()
+		caps := powerstate.GetCapabilities()
 		if !caps.SleepAvailable {
 			printError(lang, i18n.T(lang, "cli_error_sleep_unavailable"))
 			os.Exit(1)
 		}
 		fmt.Println(i18n.T(lang, "msg_sleeping"))
-		exitOnErr(lang, actions.Sleep())
+		exitOnErr(lang, systemaction.Sleep())
 
 	case "hibernate":
-		caps := power.GetCapabilities()
+		caps := powerstate.GetCapabilities()
 		if !caps.HibernateAvailable {
 			printError(lang, i18n.T(lang, "cli_error_hibernate_unavailable"))
 			os.Exit(1)
 		}
 		fmt.Println(i18n.T(lang, "msg_hibernating"))
-		exitOnErr(lang, actions.Hibernate())
+		exitOnErr(lang, systemaction.Hibernate())
 
 	case "shutdown":
 		fmt.Println(i18n.T(lang, "msg_shutting_down"))
-		exitOnErr(lang, actions.Shutdown())
+		exitOnErr(lang, systemaction.Shutdown())
 
 	case "restart":
 		fmt.Println(i18n.T(lang, "msg_restarting"))
-		exitOnErr(lang, actions.Restart())
+		exitOnErr(lang, systemaction.Restart())
 
 	case "lock":
 		fmt.Println(i18n.T(lang, "msg_locking"))
-		exitOnErr(lang, actions.Lock())
+		exitOnErr(lang, systemaction.Lock())
 
 	case "nosleep":
 		cmdNoSleep(lang)
@@ -183,9 +183,9 @@ func printIPCResponse(lang, resp string) {
 }
 
 func printNoSleepStatus(lang string) {
-	if nosleep.IsEnabled() {
+	if keepawake.IsEnabled() {
 		value := i18n.T(lang, "status_enabled")
-		if nosleep.IsKeepingScreenOn() {
+		if keepawake.IsKeepingScreenOn() {
 			value = i18n.T(lang, "status_enabled_keep_screen")
 		}
 		fmt.Println(statusLine(lang, "status_nosleep", value))
@@ -195,7 +195,7 @@ func printNoSleepStatus(lang string) {
 }
 
 func printPowerStatus(lang string) {
-	ps := power.GetStatus()
+	ps := powerstate.GetStatus()
 	value := i18n.T(lang, "status_unknown")
 	if ps.Valid && ps.ACLine {
 		value = i18n.T(lang, "status_ac_power")
@@ -207,7 +207,7 @@ func printPowerStatus(lang string) {
 
 func printIdleStatus(lang string) {
 	value := i18n.T(lang, "status_unknown")
-	if d, err := monitor.IdleDuration(); err == nil {
+	if d, err := idle.IdleDuration(); err == nil {
 		value = i18n.FormatDuration(lang, d)
 	}
 	fmt.Println(statusLine(lang, "status_idle_time", value))

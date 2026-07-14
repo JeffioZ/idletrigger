@@ -1,0 +1,162 @@
+package controlpanel
+
+import (
+	"fmt"
+	"strings"
+	"unsafe"
+
+	"golang.org/x/sys/windows"
+)
+
+func (p *panel) createTooltip() {
+	icc := initCommonControlsEx{Size: uint32(unsafe.Sizeof(initCommonControlsEx{})), ICC: 0x000000FF}
+	pInitCommonControlsEx.Call(uintptr(unsafe.Pointer(&icc)))
+	class, err := windows.UTF16PtrFromString("tooltips_class32")
+	if err != nil {
+		return
+	}
+	hwnd, _, callErr := pCreateWindowEx.Call(0, uintptr(unsafe.Pointer(class)), 0, uintptr(wsPopup|ttsAlwaysTip|ttsNoPrefix), 0, 0, 0, 0, uintptr(p.hwnd), 0, 0, 0)
+	if hwnd == 0 {
+		_ = callErr
+		return
+	}
+	p.tooltip = windows.Handle(hwnd)
+	pSendMessage.Call(hwnd, ttmSetMaxTipWidth, 0, uintptr(p.sc(360)))
+	// Keep the native tooltip from flashing back immediately when the pointer
+	// moves a few pixels across an owner-drawn control.
+}
+
+func (p *panel) addTooltip(id uint16, hwnd windows.Handle) {
+	if p.tooltip == 0 || hwnd == 0 {
+		return
+	}
+	text := p.tooltipText(id)
+	if text == "" {
+		return
+	}
+	p.tooltips[id] = windows.StringToUTF16(text)
+	ti := toolInfo{
+		Size:  uint32(unsafe.Sizeof(toolInfo{})),
+		Flags: ttfIDIsHwnd | ttfSubclass,
+		Hwnd:  p.hwnd,
+		ID:    uintptr(hwnd),
+		Text:  &p.tooltips[id][0],
+	}
+	pSendMessage.Call(uintptr(p.tooltip), ttmAddTool, 0, uintptr(unsafe.Pointer(&ti)))
+}
+
+func (p *panel) refreshTooltip(id uint16) {
+	if p.tooltip == 0 || p.controls[id] == 0 {
+		return
+	}
+	text := p.tooltipText(id)
+	if text == "" {
+		return
+	}
+	p.tooltips[id] = windows.StringToUTF16(text)
+	ti := toolInfo{
+		Size:  uint32(unsafe.Sizeof(toolInfo{})),
+		Flags: ttfIDIsHwnd,
+		Hwnd:  p.hwnd,
+		ID:    uintptr(p.controls[id]),
+		Text:  &p.tooltips[id][0],
+	}
+	pSendMessage.Call(uintptr(p.tooltip), ttmUpdateTipText, 0, uintptr(unsafe.Pointer(&ti)))
+}
+
+func (p *panel) tooltipText(id uint16) string {
+	key := ""
+	switch id {
+	case idQuickActions:
+		key = "tip_quick_actions"
+	case idLock:
+		key = "tip_lock"
+	case idSleep:
+		key = "tip_sleep"
+	case idHibernate:
+		key = "tip_hibernate"
+	case idShutdown:
+		key = "tip_shutdown"
+	case idRestart:
+		key = "tip_restart"
+	case idNoSleep:
+		key = "tip_nosleep"
+	case idProcess:
+		return p.withStateTooltip(id, p.processWatchTooltip())
+	case idIdle:
+		key = "tip_idle"
+	case idIdleWarning:
+		key = "tip_idle_warning"
+	case idIdleEnhanced:
+		key = "tip_idle_enhanced"
+	case idIdleTimeout:
+		key = "tip_idle_timeout"
+	case idIdleAction:
+		key = "tip_idle_action"
+	case idTheme:
+		key = "tip_theme"
+	case idFullscreen:
+		key = "tip_fullscreen"
+	case idBattery:
+		key = "tip_battery_theme"
+	case idIPLocation:
+		body := p.text("tip_ip_location")
+		if p.ipLocationLabel != "" {
+			body = fmt.Sprintf(p.text("tip_ip_location_current"), p.ipLocationLabel, body)
+		}
+		return p.withStateTooltip(id, body)
+	case idThemeSwitch:
+		key = "tip_theme_switch"
+	case idThemeRepair:
+		key = "tip_theme_repair"
+	case idHotkeys:
+		key = "tip_hotkeys"
+	case idAutostart:
+		key = "tip_autostart"
+	case idLogging:
+		key = "tip_logging"
+	case idLanguage:
+		key = "tip_language"
+	case idConfig:
+		key = "tip_config"
+	case idProjectHome:
+		key = "tip_project_home"
+	case idExit:
+		key = "tip_exit"
+	}
+	if key == "" {
+		return ""
+	}
+	return p.withStateTooltip(id, p.text(key))
+}
+
+func (p *panel) withStateTooltip(id uint16, body string) string {
+	state := p.visualState(id)
+	switch state.Role {
+	case buttonToggle:
+		key := "tip_state_disabled"
+		if state.Active {
+			key = "tip_state_enabled"
+		}
+		return fmt.Sprintf(p.text("tip_toggle_state"), p.text(key), body)
+	case buttonChoice:
+		key := "tip_state_not_selected"
+		if state.Active {
+			key = "tip_state_selected"
+		}
+		return fmt.Sprintf(p.text("tip_choice_state"), p.text(key), body)
+	default:
+		return body
+	}
+}
+
+func (p *panel) processWatchTooltip() string {
+	if len(p.processWatchList) == 0 {
+		return p.text("tip_process_watch_empty")
+	}
+	status := p.text("tip_process_watch_waiting")
+	if p.processWatchActive {
+		status = p.text("tip_process_watch_active")
+	}
+	return fmt.Sprintf(p.text("tip_process_watch_configured"), status, strings.Join(p.processWatchList, ", "))
+}
