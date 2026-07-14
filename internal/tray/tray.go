@@ -31,6 +31,8 @@ import (
 	"github.com/JeffioZ/idletrigger/internal/version"
 )
 
+const projectHomeURL = "https://github.com/JeffioZ/idletrigger"
+
 type Callbacks struct {
 	OnConfigChanged  func(config.Config)
 	ShowPopupOnStart bool
@@ -1274,6 +1276,10 @@ func (s *trayState) handlePopupAction(action popup.Action, value int) {
 		if err := exec.Command("notepad.exe", path).Start(); err != nil {
 			mylog.Info("Config editor launch failed: %v", err)
 		}
+	case popup.ActProjectHome:
+		if err := exec.Command("rundll32.exe", "url.dll,FileProtocolHandler", projectHomeURL).Start(); err != nil {
+			mylog.Info("Project home launch failed: %v", err)
+		}
 	case popup.ActExit:
 		popup.Destroy()
 		systray.Quit()
@@ -1325,6 +1331,7 @@ func (s *trayState) runThemeOperation(actionKey string, fn func() error, onSucce
 				onSuccess()
 			}
 			s.refreshTrayThemeIcon()
+			systray.Post(popup.RefreshTheme)
 		})
 	}()
 }

@@ -134,7 +134,7 @@ func TestButtonRoleMappingCoversEveryPanelAction(t *testing.T) {
 			t.Fatalf("toggle id %d has role %d", id, got)
 		}
 	}
-	for _, id := range []uint16{idQuickActions, idLock, idSleep, idHibernate, idShutdown, idRestart, idThemeSwitch, idThemeRepair, idConfig, idExit, idTestWarning} {
+	for _, id := range []uint16{idQuickActions, idLock, idSleep, idHibernate, idShutdown, idRestart, idThemeSwitch, idThemeRepair, idConfig, idProjectHome, idExit, idTestWarning} {
 		if got := roleForButton(id); got != buttonCommand {
 			t.Fatalf("command id %d has role %d", id, got)
 		}
@@ -196,14 +196,19 @@ func TestWindowIconThemeAndReloadDecisions(t *testing.T) {
 	}
 }
 
-func TestLanguageActionKeepsPanelOpenForRefresh(t *testing.T) {
-	if actionClosesPanel(ActLanguage) {
-		t.Fatal("language switching should keep the panel available for an immediate refresh")
+func TestRefreshActionsKeepPanelOpen(t *testing.T) {
+	for _, action := range []Action{ActLanguage, ActSwitchTheme, ActRepairTheme} {
+		if actionClosesPanel(action) {
+			t.Fatalf("action %d should keep the panel available for an immediate refresh", action)
+		}
 	}
-	for _, action := range []Action{ActSleep, ActRestart, ActSwitchTheme, ActRepairTheme, ActConfig, ActExit} {
+	for _, action := range []Action{ActSleep, ActRestart, ActConfig, ActExit} {
 		if !actionClosesPanel(action) {
 			t.Fatalf("action %d should close the panel", action)
 		}
+	}
+	if actionClosesPanel(ActProjectHome) {
+		t.Fatal("project home should keep the panel open")
 	}
 }
 

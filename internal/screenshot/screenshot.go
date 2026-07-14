@@ -6,8 +6,10 @@ import (
 	"bytes"
 	"fmt"
 	"image"
+	"image/color"
 	"image/png"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,6 +27,24 @@ var pngSignature = []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a}
 // Keep README images independent of the workstation or CI runner DPI while
 // retaining the current 150% capture quality.
 const readmeCaptureScale = 1.5
+
+const (
+	screenshotFrameInset    = 18
+	screenshotCornerRadius  = 14
+	screenshotShadowOffset  = 2
+	screenshotCornerSamples = 4
+)
+
+type screenshotShadow struct {
+	offset, blur, alpha int
+}
+
+var screenshotShadows = [...]screenshotShadow{
+	// A tight contact shadow gives the panel a resting point; the wider layer
+	// supplies depth without leaving a visible dark halo.
+	{offset: 1, blur: 3, alpha: 9},
+	{offset: screenshotShadowOffset, blur: 9, alpha: 8},
+}
 
 type options struct {
 	all      bool
@@ -110,7 +130,7 @@ func Run(args []string) error {
 					return fmt.Errorf("inconsistent %s client capture size %dx%d; expected %dx%d", job.language, size.X, size.Y, previous.X, previous.Y)
 				}
 				capturedSizes[job.language] = size
-				if err := writePNG(job.path, client); err != nil {
+				if err := writePNG(job.path, framePanelScreenshot(client, job.theme)); err != nil {
 					return err
 				}
 				return nil
@@ -123,6 +143,137 @@ func Run(args []string) error {
 	}
 	return run()
 }
+
+// framePanelScreenshot gives README captures a transparent rounded frame and
+// a deliberately quiet shadow. This presentation step applies only to image
+// output; it never affects the live tray panel's shape or rendering.
+func framePanelScreenshot(panel *image.NRGBA, theme popup.Theme) *image.NRGBA {
+	width, height := panel.Bounds().Dx(), panel.Bounds().Dy()
+	frame := image.NewNRGBA(image.Rect(0, 0, width+2*screenshotFrameInset, height+2*screenshotFrameInset))
+
+	for y := 0; y < frame.Bounds().Dy(); y++ {
+		for x := 0; x < frame.Bounds().Dx(); x++ {
+			for _, shadow := range screenshotShadows {
+				distance := roundedRectDistance(x-screenshotFrameInset, y-screenshotFrameInset-shadow.offset, width, height, screenshotCornerRadius)
+				if distance < 0 {
+					distance = 0
+				}
+				alpha := int(math.Round(float64(shadow.alpha) * math.Exp(-(distance*distance)/(2*float64(shadow.blur*shadow.blur)))))
+				if alpha > 0 {
+					frame.SetNRGBA(x, y, overNRGBA(frame.NRGBAAt(x, y), colorNRGBA(0, 0, 0, uint8(alpha))))
+				}
+			}
+		}
+	}
+	// The one-pixel, theme-aware outline does the separation work on similarly
+	// colored documentation backgrounds. It lets the shadows stay restrained.
+	outline := screenshotOutline(theme)
+	for y := 0; y < height+2; y++ {
+		for x := 0; x < width+2; x++ {
+			coverage := roundedRectCoverage(x, y, width+2, height+2, screenshotCornerRadius+1)
+			if coverage == 0 {
+				continue
+			}
+			outlinePixel := outline
+			outlinePixel.A = uint8(math.Round(float64(outlinePixel.A) * coverage))
+			frameX, frameY := x+screenshotFrameInset-1, y+screenshotFrameInset-1
+			frame.SetNRGBA(frameX, frameY, overNRGBA(frame.NRGBAAt(frameX, frameY), outlinePixel))
+		}
+	}
+
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			coverage := roundedRectCoverage(x, y, width, height, screenshotCornerRadius)
+			if coverage == 0 {
+				continue
+			}
+			pixel := panel.NRGBAAt(panel.Bounds().Min.X+x, panel.Bounds().Min.Y+y)
+			pixel.A = uint8(math.Round(float64(pixel.A) * coverage))
+			frameX, frameY := x+screenshotFrameInset, y+screenshotFrameInset
+			frame.SetNRGBA(frameX, frameY, overNRGBA(frame.NRGBAAt(frameX, frameY), pixel))
+		}
+	}
+	return frame
+}
+
+func screenshotOutline(theme popup.Theme) color.NRGBA {
+	if theme == popup.ThemeDark {
+		return colorNRGBA(143, 153, 165, 64)
+	}
+	return colorNRGBA(125, 133, 144, 48)
+}
+
+// overNRGBA applies source-over compositing for straight-alpha NRGBA pixels.
+// Partial rounded-edge pixels must blend with the frame beneath them instead
+// of replacing it, otherwise the curve reads as a cut-out above the shadow.
+func overNRGBA(dst, src color.NRGBA) color.NRGBA {
+	sa, da := float64(src.A)/255, float64(dst.A)/255
+	oa := sa + da*(1-sa)
+	if oa == 0 {
+		return color.NRGBA{}
+	}
+	return color.NRGBA{
+		R: uint8(math.Round((float64(src.R)*sa + float64(dst.R)*da*(1-sa)) / oa)),
+		G: uint8(math.Round((float64(src.G)*sa + float64(dst.G)*da*(1-sa)) / oa)),
+		B: uint8(math.Round((float64(src.B)*sa + float64(dst.B)*da*(1-sa)) / oa)),
+		A: uint8(math.Round(oa * 255)),
+	}
+}
+
+// roundedRectCoverage uses a tiny fixed supersample grid so the transparent
+// outer curve remains smooth even after GitHub scales a screenshot down.
+func roundedRectCoverage(x, y, width, height, radius int) float64 {
+	covered := 0
+	for sampleY := 0; sampleY < screenshotCornerSamples; sampleY++ {
+		for sampleX := 0; sampleX < screenshotCornerSamples; sampleX++ {
+			px := float64(x) + (float64(sampleX)+0.5)/screenshotCornerSamples
+			py := float64(y) + (float64(sampleY)+0.5)/screenshotCornerSamples
+			if insideRoundedRectPoint(px, py, width, height, radius) {
+				covered++
+			}
+		}
+	}
+	return float64(covered) / float64(screenshotCornerSamples*screenshotCornerSamples)
+}
+
+func insideRoundedRectPoint(px, py float64, width, height, radius int) bool {
+	if width <= 0 || height <= 0 {
+		return false
+	}
+	if px < 0 || py < 0 || px > float64(width) || py > float64(height) {
+		return false
+	}
+	r := float64(radius)
+	if limit := float64(width) / 2; r > limit {
+		r = limit
+	}
+	if limit := float64(height) / 2; r > limit {
+		r = limit
+	}
+	cx := math.Max(r, math.Min(float64(width)-r, px))
+	cy := math.Max(r, math.Min(float64(height)-r, py))
+	dx, dy := px-cx, py-cy
+	return dx*dx+dy*dy <= r*r
+}
+
+func roundedRectDistance(x, y, width, height, radius int) float64 {
+	px, py := float64(x)+0.5, float64(y)+0.5
+	if insideRoundedRectPoint(px, py, width, height, radius) {
+		return -1
+	}
+	r := float64(radius)
+	if limit := float64(width) / 2; r > limit {
+		r = limit
+	}
+	if limit := float64(height) / 2; r > limit {
+		r = limit
+	}
+	cx := math.Max(r, math.Min(float64(width)-r, px))
+	cy := math.Max(r, math.Min(float64(height)-r, py))
+	return math.Hypot(px-cx, py-cy) - r
+}
+
+func colorNRGBA(r, g, b, a uint8) color.NRGBA { return color.NRGBA{R: r, G: g, B: b, A: a} }
 
 func parse(args []string) (options, error) {
 	if !IsCommand(args) {

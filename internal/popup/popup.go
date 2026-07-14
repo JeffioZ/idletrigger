@@ -95,6 +95,7 @@ const (
 	ActLoggingToggle
 	ActLanguage
 	ActConfig
+	ActProjectHome
 	ActExit
 )
 
@@ -132,6 +133,7 @@ const (
 	wmLButtonUp       = 0x0202
 	wmMouseWheel      = 0x020A
 	wmMouseLeave      = 0x02A3
+	wmSetCursor       = 0x0020
 	wmParentNotify    = 0x0210
 	wmEraseBkgnd      = 0x0014
 	wmSysColorChange  = 0x0015
@@ -257,6 +259,7 @@ const (
 	idLangEN            = 152
 	idLangZH            = 153
 	idConfig            = 500
+	idProjectHome       = 501
 	idExit              = 502
 	idTestWarning       = 600
 	idChoiceSurface     = 630
@@ -296,6 +299,8 @@ var (
 	pGetDpiForWindow       = user32.NewProc("GetDpiForWindow")
 	pGetDpiForSystem       = user32.NewProc("GetDpiForSystem")
 	pSetForeground         = user32.NewProc("SetForegroundWindow")
+	pLoadCursor            = user32.NewProc("LoadCursorW")
+	pSetCursor             = user32.NewProc("SetCursor")
 	pUpdateWindow          = user32.NewProc("UpdateWindow")
 	pSetFocus              = user32.NewProc("SetFocus")
 	pShowWindow            = user32.NewProc("ShowWindow")
@@ -572,6 +577,18 @@ func UpdateThemeSchedule(text, ipLocationLabel string) {
 		pInvalidateRect.Call(uintptr(hwnd), 0, 1)
 	}
 	p.refreshTooltip(idIPLocation)
+}
+
+// RefreshTheme refreshes the visible panel after the system theme changes.
+// It must be called from the thread that owns the application's Win32 message
+// loop.
+func RefreshTheme() {
+	panelMu.Lock()
+	p := active
+	panelMu.Unlock()
+	if p != nil {
+		p.refreshTheme(true)
+	}
 }
 
 func Destroy() {
@@ -892,6 +909,8 @@ func (p *panel) tooltipText(id uint16) string {
 		key = "tip_language"
 	case idConfig:
 		key = "tip_config"
+	case idProjectHome:
+		key = "tip_project_home"
 	case idExit:
 		key = "tip_exit"
 	}
@@ -1097,11 +1116,21 @@ func (p *panel) build() error {
 	bottomRow1 := []string{p.text("menu_system_controls"), p.text("menu_language_settings")}
 	bottomRow2 := []string{p.text("menu_open_config"), p.text("menu_exit_panel")}
 	bottomH := p.rowHeight(append(bottomRow1, bottomRow2...), bottomW)
-	p.clientH = y + bottomH*2 + gap + pad
+	// Project Home is deliberately a compact text link, not a third command
+	// button. Its hit target follows the text instead of spanning the panel,
+	// so adjacent whitespace remains neutral.
+	projectHomeH := 24
+	projectHomeY := y + bottomH*2 + gap
+	projectHomeW := p.textLinkWidth(p.text("menu_project_home"))
+	projectHomeX := pad + (baseW-2*pad-projectHomeW)/2
+	p.clientH = projectHomeY + projectHomeH + gap
 	if _, err = choiceRow(pad, y, baseW-2*pad, bottomRow1, []uint16{idQuickActions, idLanguage}); err != nil {
 		return err
 	}
 	if _, err = choiceRow(pad, y+bottomH+gap, baseW-2*pad, bottomRow2, []uint16{idConfig, idExit}); err != nil {
+		return err
+	}
+	if err := button(p.text("menu_project_home"), projectHomeX, projectHomeY, projectHomeW, projectHomeH, idProjectHome); err != nil {
 		return err
 	}
 	quickW := bottomW
@@ -1202,6 +1231,39 @@ func (p *panel) rowHeight(labels []string, width int) int {
 		}
 	}
 	return rowH
+}
+
+// textLinkWidth keeps the native link's pointer/focus target exactly aligned
+// with its localized label, so surrounding whitespace remains noninteractive.
+func (p *panel) textLinkWidth(label string) int {
+	if p.hwnd == 0 || p.font == 0 {
+		return 160
+	}
+	dc, _, _ := pGetDC.Call(uintptr(p.hwnd))
+	if dc == 0 {
+		return 160
+	}
+	defer pReleaseDC.Call(uintptr(p.hwnd), dc)
+	old, _, _ := pSelectObject.Call(dc, uintptr(p.font))
+	defer pSelectObject.Call(dc, old)
+	text, err := windows.UTF16PtrFromString(label)
+	if err != nil {
+		return 160
+	}
+	bounds := rect{}
+	pDrawText.Call(dc, uintptr(unsafe.Pointer(text)), ^uintptr(0), uintptr(unsafe.Pointer(&bounds)), dtSingleLine|dtCalcRect)
+	width := int(float64(bounds.Right-bounds.Left)/p.metrics.scale + 0.999)
+	return width
+}
+
+// projectHomeTextVerticalOffset compensates for the visibly asymmetric font
+// metrics in this compact link row. Microsoft YaHei UI needs one more logical
+// pixel than the English font chain to appear centered with the hover underline.
+func (p *panel) projectHomeTextVerticalOffset() int {
+	if p.isChinese {
+		return p.sc(3)
+	}
+	return p.sc(2)
 }
 
 type timeoutChoice struct {
@@ -1336,7 +1398,7 @@ func (p *panel) controlState(id uint16, itemState uint32) buttonVisualState {
 	// Native BUTTON hotlight can outlive WM_MOUSELEAVE on owner-drawn menu and
 	// choice triggers. Those controls use the panel's tracked hover state
 	// exclusively; their open appearance is handled separately by triggerOpen.
-	if isMenuTrigger(id) || id == idIdleTimeout || id == idIdleAction {
+	if isMenuTrigger(id) || id == idIdleTimeout || id == idIdleAction || id == idProjectHome {
 		state.Hovered = p.hoverID == id
 	}
 	state.Pressed = itemState&odsSelected != 0
@@ -1564,9 +1626,18 @@ func buttonWndProc(hwnd windows.Handle, msg uint32, wp, lp uintptr) uintptr {
 	var old uintptr
 	if p != nil {
 		old = p.oldButtonProc[hwnd]
+		id := p.controlID(hwnd)
 		switch msg {
 		case wmMouseMove:
-			p.setHover(hwnd)
+			onProjectHomeText := id == idProjectHome && p.projectHomeTextContains(hwnd, point{X: int32(int16(lp)), Y: int32(int16(lp >> 16))})
+			if id == idProjectHome {
+				p.setProjectHomeCursor(onProjectHomeText)
+			}
+			if id != idProjectHome || onProjectHomeText {
+				p.setHover(hwnd)
+			} else {
+				p.clearHover(hwnd)
+			}
 		case wmMouseWheel:
 			if owner, _, ok := choiceOptionOwner(p, p.controlID(hwnd)); ok {
 				delta := 1
@@ -1578,6 +1649,14 @@ func buttonWndProc(hwnd windows.Handle, msg uint32, wp, lp uintptr) uintptr {
 			}
 		case wmMouseLeave:
 			p.clearHover(hwnd)
+			if id == idProjectHome {
+				p.setProjectHomeCursor(false)
+			}
+		case wmSetCursor:
+			if id == idProjectHome {
+				p.setProjectHomeCursor(p.projectHomePointerOnText(hwnd))
+				return 1
+			}
 		case wmKillFocus:
 			if _, _, ok := choiceOptionOwner(p, p.controlID(hwnd)); ok {
 				focus, _, _ := pGetFocus.Call()
@@ -1586,7 +1665,9 @@ func buttonWndProc(hwnd windows.Handle, msg uint32, wp, lp uintptr) uintptr {
 				}
 			}
 		case wmLButtonDown:
-			id := p.controlID(hwnd)
+			if id == idProjectHome && !p.projectHomeTextContains(hwnd, point{X: int32(int16(lp)), Y: int32(int16(lp >> 16))}) {
+				return 0
+			}
 			if id == idQuickActions || id == idLanguage {
 				// These menu triggers intentionally open on hover only. Keep Space
 				// available through WM_COMMAND for keyboard navigation.
@@ -1602,7 +1683,9 @@ func buttonWndProc(hwnd windows.Handle, msg uint32, wp, lp uintptr) uintptr {
 			}
 			p.leaveKeyboardNavigation()
 		case wmLButtonUp:
-			id := p.controlID(hwnd)
+			if id == idProjectHome && !p.projectHomeTextContains(hwnd, point{X: int32(int16(lp)), Y: int32(int16(lp >> 16))}) {
+				return 0
+			}
 			if id == idQuickActions || id == idLanguage || id == idIdleTimeout || id == idIdleAction {
 				return 0
 			}
@@ -2112,6 +2195,61 @@ func (p *panel) controlID(hwnd windows.Handle) uint16 {
 	return 0
 }
 
+// projectHomeTextContains overrides the BUTTON control's rectangular hit
+// testing with the label's measured bounds. The underlying HWND remains a
+// button for tab/keyboard accessibility, while its blank area stays inert.
+func (p *panel) projectHomeTextContains(hwnd windows.Handle, cursor point) bool {
+	bounds, ok := p.projectHomeTextBounds(hwnd)
+	return ok && cursor.X >= bounds.Left && cursor.X < bounds.Right && cursor.Y >= bounds.Top && cursor.Y < bounds.Bottom
+}
+
+func (p *panel) projectHomePointerOnText(hwnd windows.Handle) bool {
+	var cursor point
+	pGetCursorPos.Call(uintptr(unsafe.Pointer(&cursor)))
+	pScreenToClient.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&cursor)))
+	return p.projectHomeTextContains(hwnd, cursor)
+}
+
+func (p *panel) setProjectHomeCursor(onText bool) {
+	const (
+		idcArrow = 32512
+		idcHand  = 32649
+	)
+	cursorID := uintptr(idcArrow)
+	if onText {
+		cursorID = idcHand
+	}
+	if cursor, _, _ := pLoadCursor.Call(0, cursorID); cursor != 0 {
+		pSetCursor.Call(cursor)
+	}
+}
+
+func (p *panel) projectHomeTextBounds(hwnd windows.Handle) (rect, bool) {
+	if hwnd == 0 || p.font == 0 {
+		return rect{}, false
+	}
+	text, err := windows.UTF16PtrFromString(p.labels[idProjectHome])
+	if err != nil {
+		return rect{}, false
+	}
+	dc, _, _ := pGetDC.Call(uintptr(hwnd))
+	if dc == 0 {
+		return rect{}, false
+	}
+	defer pReleaseDC.Call(uintptr(hwnd), dc)
+	old, _, _ := pSelectObject.Call(dc, uintptr(p.font))
+	defer pSelectObject.Call(dc, old)
+	var client, measured rect
+	pGetClientRect.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&client)))
+	pDrawText.Call(dc, uintptr(unsafe.Pointer(text)), ^uintptr(0), uintptr(unsafe.Pointer(&measured)), dtSingleLine|dtCalcRect)
+	width, height := measured.Right-measured.Left, measured.Bottom-measured.Top
+	measured.Left = (client.Right - client.Left - width) / 2
+	measured.Right = measured.Left + width
+	measured.Top = (client.Bottom-client.Top-height)/2 + int32(p.projectHomeTextVerticalOffset())
+	measured.Bottom = measured.Top + height
+	return measured, width > 0 && height > 0
+}
+
 func panelOrigin(work rect, width, height, margin int32) (int32, int32) {
 	x := work.Right - width - margin
 	y := work.Bottom - height - margin
@@ -2388,6 +2526,8 @@ func (p *panel) handleCommand(id uint16) {
 		return
 	case idConfig:
 		action = ActConfig
+	case idProjectHome:
+		action = ActProjectHome
 	case idExit:
 		action = ActExit
 	default:
@@ -2402,7 +2542,7 @@ func (p *panel) handleCommand(id uint16) {
 }
 
 func actionClosesPanel(action Action) bool {
-	return action <= ActRestart || action == ActConfig || action == ActExit || action == ActSwitchTheme || action == ActRepairTheme
+	return action <= ActRestart || action == ActConfig || action == ActExit
 }
 
 func (p *panel) refreshTheme(invalidate bool) {
@@ -2576,6 +2716,10 @@ func (p *panel) drawButton(item *drawItem) {
 		p.drawMenuTrigger(item)
 		return
 	}
+	if id == idProjectHome {
+		p.drawProjectHomeLink(item, state)
+		return
+	}
 	selected := state.Active
 	danger := id == idExit || isDangerQuickAction(id)
 	brush, borderColor, textColor := p.surfaceBrush, p.palette.Border, p.palette.PrimaryText
@@ -2633,6 +2777,57 @@ func (p *panel) drawButton(item *drawItem) {
 			focusColor = p.palette.FocusOnAccent
 		}
 		p.roundRectFocusRing(item.HDC, item.Rect, focusColor)
+	}
+}
+
+// drawProjectHomeLink is a text-only link. The control keeps a compact full
+// width hit area, while the visual stays subordinate to the command buttons.
+func (p *panel) drawProjectHomeLink(item *drawItem, state buttonVisualState) {
+	textColor := p.palette.Accent
+	if state.Hovered {
+		textColor = p.palette.AccentHover
+	}
+	if state.Pressed {
+		textColor = p.palette.AccentPressed
+	}
+	if state.Disabled || item.ItemState&odsDisabled != 0 {
+		textColor = p.palette.DisabledText
+	}
+	pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&item.Rect)), uintptr(p.backgroundBrush))
+	text, err := windows.UTF16PtrFromString(p.labels[idProjectHome])
+	if err != nil {
+		return
+	}
+	pSetTextColor.Call(uintptr(item.HDC), uintptr(textColor))
+	pSetBkMode.Call(uintptr(item.HDC), transparent)
+	old, _, _ := pSelectObject.Call(uintptr(item.HDC), uintptr(p.font))
+	defer pSelectObject.Call(uintptr(item.HDC), old)
+	textBounds := item.Rect
+	pDrawText.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(text)), ^uintptr(0), uintptr(unsafe.Pointer(&textBounds)), dtSingleLine|dtCalcRect)
+	textW, textH := textBounds.Right-textBounds.Left, textBounds.Bottom-textBounds.Top
+	textBounds.Left = item.Rect.Left + (item.Rect.Right-item.Rect.Left-textW)/2
+	textBounds.Right = textBounds.Left + textW
+	textBounds.Top = item.Rect.Top + (item.Rect.Bottom-item.Rect.Top-textH)/2 + int32(p.projectHomeTextVerticalOffset())
+	textBounds.Bottom = textBounds.Top + textH
+	pDrawText.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(text)), ^uintptr(0), uintptr(unsafe.Pointer(&textBounds)), dtLeft|dtSingleLine)
+	if !state.Disabled && item.ItemState&odsDisabled == 0 && (state.Hovered || state.Pressed) {
+		pen, _, _ := pCreatePen.Call(psSolid, 1, uintptr(textColor))
+		if pen != 0 {
+			previous, _, _ := pSelectObject.Call(uintptr(item.HDC), pen)
+			underlineY := textBounds.Bottom
+			pMoveToEx.Call(uintptr(item.HDC), uintptr(textBounds.Left), uintptr(underlineY), 0)
+			pLineTo.Call(uintptr(item.HDC), uintptr(textBounds.Right), uintptr(underlineY))
+			pSelectObject.Call(uintptr(item.HDC), previous)
+			pDeleteObject.Call(pen)
+		}
+	}
+	if state.Focused {
+		focusBounds := textBounds
+		focusBounds.Left -= int32(p.sc(3))
+		focusBounds.Right += int32(p.sc(3))
+		focusBounds.Top -= int32(p.sc(2))
+		focusBounds.Bottom += int32(p.sc(2))
+		p.roundRectFocusRing(item.HDC, focusBounds, p.palette.Focus)
 	}
 }
 

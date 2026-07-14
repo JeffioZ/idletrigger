@@ -3,6 +3,7 @@ package screenshot
 import (
 	"errors"
 	"image"
+	"image/color"
 	"io"
 	"os"
 	"path/filepath"
@@ -95,6 +96,45 @@ func TestCropImage(t *testing.T) {
 	}
 	if _, err := cropImage(source, image.Rect(-1, 0, 4, 4)); err == nil {
 		t.Fatal("expected bounds error")
+	}
+}
+
+func TestFramePanelScreenshotAddsRoundedCornersAndShadow(t *testing.T) {
+	panel := image.NewNRGBA(image.Rect(0, 0, 40, 30))
+	for y := 0; y < 30; y++ {
+		for x := 0; x < 40; x++ {
+			panel.SetNRGBA(x, y, color.NRGBA{R: 40, G: 80, B: 120, A: 255})
+		}
+	}
+	framed := framePanelScreenshot(panel, popup.ThemeLight)
+	if got, want := framed.Bounds().Size(), image.Pt(40+2*screenshotFrameInset, 30+2*screenshotFrameInset); got != want {
+		t.Fatalf("size = %v, want %v", got, want)
+	}
+	if got := framed.NRGBAAt(0, 0); got.A != 0 {
+		t.Fatalf("outer corner = %#v, want transparent", got)
+	}
+	if got, want := framed.NRGBAAt(screenshotFrameInset+20, screenshotFrameInset+15), panel.NRGBAAt(20, 15); got != want {
+		t.Fatalf("panel center = %#v, want %#v", got, want)
+	}
+	if got := framed.NRGBAAt(screenshotFrameInset+1, screenshotFrameInset+8); got.A == 0 || got.A == 255 {
+		t.Fatalf("rounded edge = %#v, want antialiased alpha", got)
+	}
+	if got := framed.NRGBAAt(screenshotFrameInset+20, screenshotFrameInset+30+screenshotShadowOffset+2); got.A == 0 {
+		t.Fatal("expected visible shadow below the panel")
+	}
+}
+
+func TestFramePanelScreenshotUsesThemeAwareOutline(t *testing.T) {
+	panel := image.NewNRGBA(image.Rect(0, 0, 40, 30))
+	light := framePanelScreenshot(panel, popup.ThemeLight)
+	dark := framePanelScreenshot(panel, popup.ThemeDark)
+	point := image.Pt(screenshotFrameInset-1, screenshotFrameInset+15)
+	lightPixel, darkPixel := light.NRGBAAt(point.X, point.Y), dark.NRGBAAt(point.X, point.Y)
+	if lightPixel.A == 0 || darkPixel.A == 0 {
+		t.Fatalf("outline pixels = %#v, %#v; want visible", lightPixel, darkPixel)
+	}
+	if lightPixel == darkPixel {
+		t.Fatalf("theme outline is identical: %#v", lightPixel)
 	}
 }
 
