@@ -31,12 +31,12 @@ jobs:
           if ($unfmt) { Write-Error "gofmt: $unfmt"; exit 1 }
           go test -count=1 ./...
           go vet ./...
-          ./scripts/check-build-boundaries.ps1
+          ./tools/check-build-boundaries.ps1
 
       - name: Generate .syso
         run: |
           $version = "${{ github.ref_name }}".TrimStart("v")
-          go run ./scripts/gen_resource.go -version $version
+          go run ./tools/resourcegen.go -version $version
 
       - name: Build
         run: |
@@ -44,9 +44,9 @@ jobs:
           $version = "${{ github.ref_name }}".TrimStart("v")
           $ldflags = "-s -w -H windowsgui -X github.com/JeffioZ/idletrigger/internal/version.Value=$version"
           $env:GOARCH = "386"
-          go build -trimpath -ldflags "$ldflags" -o dist/IdleTrigger-x86.exe .
+          go build -trimpath -ldflags "$ldflags" -o dist/IdleTrigger-x86.exe ./cmd/idletrigger
           $env:GOARCH = "amd64"
-          go build -trimpath -ldflags "$ldflags" -o dist/IdleTrigger-x64.exe .
+          go build -trimpath -ldflags "$ldflags" -o dist/IdleTrigger-x64.exe ./cmd/idletrigger
 
       - name: Checksums
         run: |

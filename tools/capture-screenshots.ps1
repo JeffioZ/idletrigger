@@ -27,24 +27,24 @@ try {
     try {
         $env:CGO_ENABLED = '0'
         $env:GOARCH = 'amd64'
-		$env:GOCACHE = Join-Path $temporaryDirectory 'gocache'
-        go build -tags devtools -trimpath -ldflags '-s -w -H windowsgui -X github.com/JeffioZ/idletrigger/internal/version.Value=screenshot' -o $exePath .
+        $env:GOCACHE = Join-Path $temporaryDirectory 'gocache'
+        go build -tags devtools -trimpath -ldflags '-s -w -H windowsgui -X github.com/JeffioZ/idletrigger/internal/version.Value=screenshot' -o $exePath ./cmd/idletrigger
         if ($LASTEXITCODE -ne 0) { throw "go build failed with exit code $LASTEXITCODE" }
         $arguments = @('screenshot', '--all', '--output', ('"' + $outputDirectory + '"'))
         $process = Start-Process -FilePath $exePath -ArgumentList $arguments -WindowStyle Hidden -Wait -PassThru
         if ($process.ExitCode -ne 0) { throw "screenshot command failed with exit code $($process.ExitCode)" }
     } finally { Pop-Location }
 
-	$sizes = @{}
+    $sizes = @{}
     foreach ($name in $files) {
         $path = Join-Path $outputDirectory $name
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing screenshot: $path" }
         $size = Get-PngSize $path
-		$sizes[$name] = $size
+        $sizes[$name] = $size
         Write-Output "$name $($size[0])x$($size[1])"
     }
-	if ($sizes['panel-en-light.png'][1] -ne $sizes['panel-en-dark.png'][1]) { throw 'English light/dark heights differ' }
-	if ($sizes['panel-zh-light.png'][1] -ne $sizes['panel-zh-dark.png'][1]) { throw 'Chinese light/dark heights differ' }
+    if ($sizes['panel-en-light.png'][1] -ne $sizes['panel-en-dark.png'][1]) { throw 'English light/dark heights differ' }
+    if ($sizes['panel-zh-light.png'][1] -ne $sizes['panel-zh-dark.png'][1]) { throw 'Chinese light/dark heights differ' }
 } finally {
     # Windows may briefly retain a handle to a just-exited GUI executable.
     # Clean synchronously so the script never leaves a detached cleanup

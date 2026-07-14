@@ -4,7 +4,7 @@ param()
 $ErrorActionPreference = 'Stop'
 
 function Get-GoDependencies([string[]]$BuildArguments) {
-    $dependencies = @(& go list @BuildArguments -deps -f '{{.ImportPath}}' .)
+    $dependencies = @(& go list @BuildArguments -deps -f '{{.ImportPath}}' ./cmd/idletrigger)
     if ($LASTEXITCODE -ne 0) {
         throw "go list failed with exit code $LASTEXITCODE"
     }
@@ -13,8 +13,8 @@ function Get-GoDependencies([string[]]$BuildArguments) {
 
 $releaseDependencies = @(Get-GoDependencies @())
 $forbiddenReleaseDependencies = @(
-    'github.com/JeffioZ/idletrigger/internal/inputdiag',
-    'github.com/JeffioZ/idletrigger/internal/screenshot',
+    'github.com/JeffioZ/idletrigger/internal/devtools/inputtrace',
+    'github.com/JeffioZ/idletrigger/internal/devtools/screenshot',
     'image/png',
     'compress/flate',
     'compress/zlib',
@@ -29,8 +29,8 @@ foreach ($dependency in $forbiddenReleaseDependencies) {
 
 $devtoolsDependencies = @(Get-GoDependencies @('-tags', 'devtools'))
 $requiredDevtoolsDependencies = @(
-    'github.com/JeffioZ/idletrigger/internal/inputdiag',
-    'github.com/JeffioZ/idletrigger/internal/screenshot',
+    'github.com/JeffioZ/idletrigger/internal/devtools/inputtrace',
+    'github.com/JeffioZ/idletrigger/internal/devtools/screenshot',
     'image/png'
 )
 foreach ($dependency in $requiredDevtoolsDependencies) {

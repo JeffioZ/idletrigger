@@ -41,13 +41,16 @@ jobs:
       - name: go test (devtools)
         run: go test -count=1 -tags devtools ./...
 
+      - name: go test (tools)
+        run: go test -count=1 -tags tools ./...
+
       - name: Build supported Windows architectures
         run: |
           $env:CGO_ENABLED = "0"
           $ldflags = "-s -w -H windowsgui -X github.com/JeffioZ/idletrigger/internal/version.Value=ci"
           foreach ($arch in @("386", "amd64")) {
             $env:GOARCH = $arch
-            go build -trimpath -ldflags $ldflags -o (Join-Path $env:RUNNER_TEMP "IdleTrigger-$arch.exe") .
+            go build -trimpath -ldflags $ldflags -o (Join-Path $env:RUNNER_TEMP "IdleTrigger-$arch.exe") ./cmd/idletrigger
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
 
@@ -58,7 +61,7 @@ jobs:
         run: go vet -tags devtools ./...
 
       - name: Verify build dependency boundaries
-        run: ./scripts/check-build-boundaries.ps1
+        run: ./tools/check-build-boundaries.ps1
 
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
