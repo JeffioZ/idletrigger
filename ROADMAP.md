@@ -120,5 +120,9 @@
 - [ ] 用 `ReadDirectoryChangesW` 替换配置自动重载的 `os.Stat` 轮询；只有实际轮询成本或外部编辑生效延迟成为问题时再做。
 - [ ] CLI `status --json`：面向脚本和监控，不是普通用户主路径；有明确自动化消费者后再实现。
 - [ ] 统一 quick/language/choice 浮层 metrics、清理 choice 临时像素补偿，或评估预创建 option HWND：仅在可见 UI 缺陷或可测量性能问题出现时处理。
+- [ ] 空闲预警倒计时主动取消：当前序号校验已保证隐藏后的旧倒计时不会更新错误窗口；仅在长预警时间、频繁取消场景出现可测量的 goroutine 或 UI 消息积压时补充取消生命周期。
+- [ ] Process Watch 回调 generation 防护：当前 watcher 停止会等待后台轮询退出；仅在复现旧回调晚到并覆盖新状态后增加代际标识，不为理论竞态增加同步复杂度。
+- [ ] 继续拆分 `popup.build`、`popup.handleCommand`、`tray.handlePopupAction` 等顺序型大函数：只在相关功能再次修改、审查成本明显上升时按职责小步拆分，不为复杂度指标制造跨层抽象。
+- [ ] 针对性启用 `errcheck`：先为 Win32 `Proc.Call`、幂等清理和刻意忽略返回值建立明确排除，再逐步覆盖普通错误路径；不直接全仓开启产生大量无效告警。
 - [ ] 独立 Windows 7 legacy 构建：仅在真实用户需求出现时评估。
 - [ ] CI race detector：仅测试增强，短期不投入。
