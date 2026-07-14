@@ -173,6 +173,64 @@ func TestActionAvailability(t *testing.T) {
 	}
 }
 
+func TestIPLocationLookupEligibility(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.ThemeMode = "sunrise"
+	cfg.ThemeIPLocationEnabled = true
+	if !ipLocationLookupEnabled(cfg) {
+		t.Fatal("IP lookup should be enabled for sunrise mode without coordinates")
+	}
+	cfg.ThemeLatitude = 31.2
+	if ipLocationLookupEnabled(cfg) {
+		t.Fatal("manual coordinates should disable IP lookup")
+	}
+	cfg.ThemeLatitude = 0
+	cfg.ThemeMode = "fixed"
+	if ipLocationLookupEnabled(cfg) {
+		t.Fatal("fixed mode should disable IP lookup")
+	}
+	cfg.ThemeMode = "sunrise"
+	cfg.ThemeIPLocationEnabled = false
+	if ipLocationLookupEnabled(cfg) {
+		t.Fatal("disabled option should disable IP lookup")
+	}
+}
+
+func TestIPLocationRetryIsLimitedToOncePerCycle(t *testing.T) {
+	state := &trayState{ipLocationGeneration: 7}
+	state.handleIPLocationFailure(7)
+	if state.ipLocationRetry == nil {
+		t.Fatal("first failure did not schedule a retry")
+	}
+	state.cancelIPLocationRetry()
+	state.ipLocationRetried = true
+	state.handleIPLocationFailure(7)
+	if state.ipLocationRetry != nil {
+		t.Fatal("second failure scheduled another retry")
+	}
+	state.ipLocationRetried = false
+	state.handleIPLocationFailure(6)
+	if state.ipLocationRetry != nil {
+		t.Fatal("stale lookup generation scheduled a retry")
+	}
+}
+
+func TestIPLocationConfigSyncDoesNotResetActiveCycle(t *testing.T) {
+	state := &trayState{cfg: config.DefaultConfig(), ipLocationGeneration: 3, ipLocationRetried: true}
+	state.cfg.ThemeMode = "sunrise"
+	state.cfg.ThemeIPLocationEnabled = true
+	state.syncIPLocationCycle(true)
+	if state.ipLocationGeneration != 3 || !state.ipLocationRetried {
+		t.Fatalf("unchanged eligible config reset cycle: generation=%d retried=%v", state.ipLocationGeneration, state.ipLocationRetried)
+	}
+
+	state.cfg.ThemeIPLocationEnabled = false
+	state.syncIPLocationCycle(true)
+	if state.ipLocationGeneration != 4 || state.ipLocationRetried {
+		t.Fatalf("disabled config did not stop cycle: generation=%d retried=%v", state.ipLocationGeneration, state.ipLocationRetried)
+	}
+}
+
 func TestStatusLineUsesLocalizedPunctuation(t *testing.T) {
 	state := trayState{lang: "zh-CN"}
 	if got := state.statusLine("status_power", "交流电源"); got != "电源：交流电源" {

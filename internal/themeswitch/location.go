@@ -36,10 +36,12 @@ type LocationInfo struct {
 }
 
 const (
-	ipLocationHost            = "ipwho.is"
-	ipLocationPath            = "/?fields=success,message,latitude,longitude,city,region,country"
-	ipLocationRequestTimeout  = 4 * time.Second
-	ipLocationRetryInterval   = 30 * time.Minute
+	ipLocationHost           = "ipwho.is"
+	ipLocationPath           = "/?fields=success,message,latitude,longitude,city,region,country"
+	ipLocationRequestTimeout = 4 * time.Second
+	// IPLocationRetryInterval is shared by the lookup cache and the tray's
+	// single delayed retry so both enforce the same cooldown.
+	IPLocationRetryInterval   = 30 * time.Minute
 	ipLocationSuccessCacheTTL = 24 * time.Hour
 )
 
@@ -50,6 +52,7 @@ var (
 	procWinHttpOpenRequest     = winhttp.NewProc("WinHttpOpenRequest")
 	procWinHttpSendRequest     = winhttp.NewProc("WinHttpSendRequest")
 	procWinHttpReceiveResponse = winhttp.NewProc("WinHttpReceiveResponse")
+	procWinHttpQueryHeaders    = winhttp.NewProc("WinHttpQueryHeaders")
 	procWinHttpQueryData       = winhttp.NewProc("WinHttpQueryDataAvailable")
 	procWinHttpReadData        = winhttp.NewProc("WinHttpReadData")
 	procWinHttpSetTimeouts     = winhttp.NewProc("WinHttpSetTimeouts")
@@ -71,7 +74,7 @@ func cachedIPLocation(now time.Time) (LocationInfo, bool) {
 		ipCache.Unlock()
 		return info, true
 	}
-	if !ipCache.ok && !ipCache.lastAttempt.IsZero() && now.Sub(ipCache.lastAttempt) < ipLocationRetryInterval {
+	if !ipCache.ok && !ipCache.lastAttempt.IsZero() && now.Sub(ipCache.lastAttempt) < IPLocationRetryInterval {
 		ipCache.Unlock()
 		return LocationInfo{}, false
 	}
@@ -168,6 +171,25 @@ func winHTTPGet(host, path string, timeout time.Duration) (string, error) {
 	if ok, _, err := procWinHttpReceiveResponse.Call(request, 0); ok == 0 {
 		return "", fmt.Errorf("WinHttpReceiveResponse: %w", err)
 	}
+	const (
+		queryStatusCode = 19
+		queryFlagNumber = 0x20000000
+	)
+	var statusCode uint32
+	statusCodeSize := uint32(unsafe.Sizeof(statusCode))
+	if ok, _, err := procWinHttpQueryHeaders.Call(
+		request,
+		queryStatusCode|queryFlagNumber,
+		0,
+		uintptr(unsafe.Pointer(&statusCode)),
+		uintptr(unsafe.Pointer(&statusCodeSize)),
+		0,
+	); ok == 0 {
+		return "", fmt.Errorf("WinHttpQueryHeaders(status): %w", err)
+	}
+	if err := validateHTTPStatus(statusCode); err != nil {
+		return "", err
+	}
 
 	var out strings.Builder
 	for {
@@ -189,6 +211,13 @@ func winHTTPGet(host, path string, timeout time.Duration) (string, error) {
 		out.WriteString(string(buf[:read]))
 	}
 	return out.String(), nil
+}
+
+func validateHTTPStatus(statusCode uint32) error {
+	if statusCode < 200 || statusCode >= 300 {
+		return fmt.Errorf("HTTP status %d", statusCode)
+	}
+	return nil
 }
 
 func parseIPLocation(r io.Reader) (LocationInfo, error) {

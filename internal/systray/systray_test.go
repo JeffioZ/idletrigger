@@ -77,3 +77,36 @@ func TestTakeLoadedIconsForReleaseTransfersHandlesOnce(t *testing.T) {
 		t.Fatalf("second release = %#v, want no handles", second)
 	}
 }
+
+func TestWaitForUITaskStopsDuringShutdown(t *testing.T) {
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	close(stopped)
+	if waitForUITask(done, stopped) {
+		t.Fatal("shutdown should cancel a pending synchronous UI task")
+	}
+
+	close(done)
+	if !waitForUITask(done, make(chan struct{})) {
+		t.Fatal("completed UI task should report success")
+	}
+}
+
+func TestBeginUIShutdownIsIdempotent(t *testing.T) {
+	stopped := make(chan struct{})
+	tray := &winTray{
+		window:    123,
+		uiTasks:   []func(){func() {}},
+		uiStopped: stopped,
+	}
+	tray.beginUIShutdown()
+	tray.beginUIShutdown()
+	if tray.window != 0 || !tray.uiClosing || tray.uiTasks != nil {
+		t.Fatalf("shutdown state: window=%v closing=%v tasks=%d", tray.window, tray.uiClosing, len(tray.uiTasks))
+	}
+	select {
+	case <-stopped:
+	default:
+		t.Fatal("shutdown did not notify synchronous UI waiters")
+	}
+}

@@ -148,6 +148,19 @@ func TestParseIPLocationRejectsFailedResponse(t *testing.T) {
 	}
 }
 
+func TestValidateHTTPStatus(t *testing.T) {
+	for _, status := range []uint32{200, 204, 299} {
+		if err := validateHTTPStatus(status); err != nil {
+			t.Errorf("status %d rejected: %v", status, err)
+		}
+	}
+	for _, status := range []uint32{0, 199, 300, 429, 500} {
+		if err := validateHTTPStatus(status); err == nil {
+			t.Errorf("status %d accepted", status)
+		}
+	}
+}
+
 func TestManualOverrideEndsAtNextScheduledTransition(t *testing.T) {
 	loc := time.FixedZone("CST", 8*60*60)
 	s := NewScheduler("fixed", "07:00", "19:00", 0, 0, false, false)

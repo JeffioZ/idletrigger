@@ -103,7 +103,7 @@ func isThemeChangeMessage(message uint32) bool {
 }
 
 func notifyThemeChange() {
-	callback := OnThemeChange
+	_, _, callback := callbacks()
 	if callback == nil || !themeChangePending.CompareAndSwap(false, true) {
 		return
 	}
@@ -305,8 +305,11 @@ type winTray struct {
 	muNID sync.RWMutex
 	wcex  *wndClassEx
 
-	uiTasks   []func()
-	muUITasks sync.Mutex
+	uiTasks      []func()
+	uiStopped    chan struct{}
+	uiClosing    bool
+	muUITasks    sync.Mutex
+	shutdownOnce sync.Once
 
 	wmSystrayMessage,
 	wmTaskbarCreated uint32
@@ -441,7 +444,7 @@ func Post(fn func()) bool {
 		return false
 	}
 	wt.muUITasks.Lock()
-	if wt.window == 0 {
+	if wt.window == 0 || wt.uiClosing {
 		wt.muUITasks.Unlock()
 		return false
 	}
@@ -465,8 +468,23 @@ func PostAndWait(fn func()) bool {
 	}) {
 		return false
 	}
-	<-done
-	return true
+	wt.muUITasks.Lock()
+	stopped := wt.uiStopped
+	wt.muUITasks.Unlock()
+	return waitForUITask(done, stopped)
+}
+
+func waitForUITask(done, stopped <-chan struct{}) bool {
+	if stopped == nil {
+		<-done
+		return true
+	}
+	select {
+	case <-done:
+		return true
+	case <-stopped:
+		return false
+	}
 }
 
 // WindowHandle returns the hidden native window that owns the notification
@@ -495,6 +513,29 @@ func (t *winTray) drainUITasks() {
 	}
 }
 
+func (t *winTray) beginUIShutdown() {
+	t.muUITasks.Lock()
+	if t.uiClosing {
+		t.muUITasks.Unlock()
+		return
+	}
+	t.uiClosing = true
+	t.window = 0
+	t.uiTasks = nil
+	if t.uiStopped != nil {
+		close(t.uiStopped)
+	}
+	t.muUITasks.Unlock()
+}
+
+func (t *winTray) shutdown() {
+	t.shutdownOnce.Do(func() {
+		t.beginUIShutdown()
+		t.removeNotificationIcon()
+		systrayExit()
+	})
+}
+
 // WindowProc callback function that processes messages sent to a window.
 // https://msdn.microsoft.com/en-us/library/windows/desktop/ms633573(v=vs.85).aspx
 func (t *winTray) wndProc(hWnd windows.Handle, message uint32, wParam, lParam uintptr) (lResult uintptr) {
@@ -519,24 +560,26 @@ func (t *winTray) wndProc(hWnd windows.Handle, message uint32, wParam, lParam ui
 			systrayMenuItemSelected(uint32(wParam))
 		}
 	case WM_POWERBROADCAST:
-		if OnPowerChange != nil {
-			go OnPowerChange()
+		_, callback, _ := callbacks()
+		if callback != nil {
+			go callback()
 		}
 	case WM_CLOSE:
 		pDestroyWindow.Call(uintptr(t.window))
 		t.wcex.unregister()
 	case WM_DESTROY:
-		// same as WM_ENDSESSION, but throws 0 exit code after all
-		defer pPostQuitMessage.Call(uintptr(int32(0)))
-		fallthrough
+		t.shutdown()
+		pPostQuitMessage.Call(uintptr(int32(0)))
 	case WM_ENDSESSION:
-		t.removeNotificationIcon()
-		systrayExit()
+		if wParam != 0 {
+			t.shutdown()
+		}
 	case t.wmSystrayMessage:
 		switch lParam {
 		case WM_LBUTTONUP:
-			if OnLeftClick != nil {
-				OnLeftClick()
+			callback, _, _ := callbacks()
+			if callback != nil {
+				callback()
 			} else {
 				t.showMenu()
 			}
@@ -597,6 +640,12 @@ func (t *winTray) initInstance() error {
 	)
 
 	t.wmSystrayMessage = WM_USER + 1
+	t.muUITasks.Lock()
+	t.uiTasks = nil
+	t.uiStopped = make(chan struct{})
+	t.uiClosing = false
+	t.muUITasks.Unlock()
+	t.shutdownOnce = sync.Once{}
 	t.visibleItems = make(map[uint32][]uint32)
 	t.menus = make(map[uint32]windows.Handle)
 	t.menuOf = make(map[uint32]windows.Handle)

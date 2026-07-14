@@ -293,6 +293,7 @@ type Scheduler struct {
 	doneCh         chan struct{}
 	running        bool
 	mu             sync.Mutex
+	checkMu        sync.Mutex
 	manualUntil    atomic.Int64
 	logMu          sync.Mutex
 	lastSwitchErr  string
@@ -392,6 +393,8 @@ func (s *Scheduler) HoldManualOverride(now time.Time) {
 }
 
 func (s *Scheduler) check(now time.Time) {
+	s.checkMu.Lock()
+	defer s.checkMu.Unlock()
 	// If dark-on-battery is enabled and running on battery, force dark.
 	if s.darkOnBattery && onBattery() {
 		if Current() != ModeDark && (!s.skipFullscreen || !IsFullscreen()) {

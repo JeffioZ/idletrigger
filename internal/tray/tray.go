@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -72,18 +73,22 @@ type trayState struct {
 
 	mon *monitor.Monitor
 
-	hotkeyMgr       *hotkey.Manager
-	procWatch       *processwatcher.Watcher
-	themeSched      *themeswitch.Scheduler
-	batteryStop     chan struct{}
-	batteryDone     chan struct{}
-	processNoSleep  bool
-	batteryBlocked  bool
-	trayThemeDark   bool
-	menuOpen        *systray.MenuItem
-	menuExit        *systray.MenuItem
-	selfConfigMod   atomic.Int64
-	selfConfigWrite atomic.Bool
+	hotkeyMgr            *hotkey.Manager
+	procWatch            *processwatcher.Watcher
+	themeSched           *themeswitch.Scheduler
+	batteryStop          chan struct{}
+	batteryDone          chan struct{}
+	ipLocationRetry      *time.Timer
+	ipLocationGeneration uint64
+	ipLocationRetried    bool
+	processNoSleep       bool
+	batteryBlocked       bool
+	trayThemeDark        bool
+	menuOpen             *systray.MenuItem
+	menuExit             *systray.MenuItem
+	selfConfigMod        atomic.Int64
+	selfConfigWrite      atomic.Bool
+	exiting              atomic.Bool
 }
 
 type stateRequest struct {
@@ -104,8 +109,23 @@ func Run(cfg config.Config, cbs Callbacks) {
 		devtools:  cbs.DeveloperTools,
 		stateCh:   make(chan stateRequest, 64),
 	}
+	stateReady := make(chan struct{})
+	var stateReadyOnce sync.Once
+	go func() {
+		<-stateReady
+		s.stateLoop()
+	}()
+	var lifecycleMu sync.Mutex
+	shuttingDown := false
 
 	onReady := func() {
+		lifecycleMu.Lock()
+		defer lifecycleMu.Unlock()
+		if shuttingDown {
+			stateReadyOnce.Do(func() { close(stateReady) })
+			return
+		}
+		defer stateReadyOnce.Do(func() { close(stateReady) })
 		s.menuOpen = systray.AddMenuItem(i18n.T(s.lang, "menu_open_panel"), "")
 		s.menuExit = systray.AddMenuItem(i18n.T(s.lang, "menu_exit"), "")
 		go func() {
@@ -115,8 +135,10 @@ func Run(cfg config.Config, cbs Callbacks) {
 		}()
 		go func() {
 			for range s.menuExit.ClickedCh {
-				popup.Destroy()
-				systray.Quit()
+				systray.Post(func() {
+					popup.Destroy()
+					systray.Quit()
+				})
 			}
 		}()
 
@@ -149,9 +171,8 @@ func Run(cfg config.Config, cbs Callbacks) {
 		if s.cfg.ThemeSwitchEnabled {
 			s.startThemeScheduler()
 		}
-		s.refreshIPLocationInBackground()
+		s.startIPLocationCycle()
 
-		go s.stateLoop()
 		go func() {
 			if err := ipc.Server(s.handleIPC); err != nil {
 				mylog.Info("IPC server stopped: %v", err)
@@ -163,17 +184,23 @@ func Run(cfg config.Config, cbs Callbacks) {
 			systray.Post(s.showPopup)
 		}
 
-		systray.OnLeftClick = func() { s.showPopup() }
-		systray.OnPowerChange = func() {
+		systray.SetOnLeftClick(func() { s.showPopup() })
+		systray.SetOnPowerChange(func() {
 			s.post(func() { s.refreshBatteryPolicy() })
-		}
-		systray.OnThemeChange = func() {
+		})
+		systray.SetOnThemeChange(func() {
 			s.post(s.refreshTrayThemeIcon)
-		}
+		})
 	}
 
 	onExit := func() {
+		s.exiting.Store(true)
+		lifecycleMu.Lock()
+		defer lifecycleMu.Unlock()
+		shuttingDown = true
+		stateReadyOnce.Do(func() { close(stateReady) })
 		s.call(func() string {
+			s.stopIPLocationCycle()
 			s.stopMonitor()
 			s.stopHotkeys()
 			s.stopProcessWatcher()
@@ -432,8 +459,14 @@ func (s *trayState) startMonitor() {
 		// Execute directly from the monitor goroutine. Waiting for the tray
 		// state queue would make an overdue power action depend on UI work.
 		func() {
+			if s.exiting.Load() {
+				return
+			}
 			// The warning must be gone before a power action takes effect.
 			systray.PostAndWait(idlewarning.Hide)
+			if s.exiting.Load() {
+				return
+			}
 			idleFor, idleErr := monitor.IdleDuration()
 			if idleErr != nil {
 				mylog.Info("Idle monitor trigger reached: effective_idle=%s action=%s raw_idle_after_trigger_error=%v",
@@ -442,9 +475,11 @@ func (s *trayState) startMonitor() {
 				mylog.Info("Idle monitor trigger reached: effective_idle=%s action=%s raw_idle_after_trigger=%s",
 					lastEffectiveIdle.Round(time.Second), action, idleFor.Round(time.Second))
 			}
-			if err := s.executeAction(action); err != nil {
+			if err := executeActionWithLanguage(action, lang); err != nil {
 				mylog.Info("Idle monitor action failed: action=%s error=%v", action, err)
-				s.post(func() { s.showError(actionTranslationKey(action), err) })
+				if !s.exiting.Load() {
+					s.post(func() { s.showError(actionTranslationKey(action), err) })
+				}
 				return
 			}
 			mylog.Info("Idle monitor action accepted: action=%s", action)
@@ -882,6 +917,7 @@ func (s *trayState) handleIPCState(cmd string) string {
 }
 
 func (s *trayState) reloadConfig() error {
+	wasIPLocationEligible := ipLocationLookupEnabled(s.cfg)
 	newCfg, err := config.Load()
 	if err != nil {
 		return err
@@ -916,7 +952,7 @@ func (s *trayState) reloadConfig() error {
 	if s.cfg.ThemeSwitchEnabled {
 		s.startThemeScheduler()
 	}
-	s.refreshIPLocationInBackground()
+	s.syncIPLocationCycle(wasIPLocationEligible)
 	s.reconcileRuntime()
 	s.updateIcon()
 	s.rememberConfigModTime()
@@ -996,12 +1032,16 @@ func (s *trayState) monitorStatusText() string {
 // ---- helpers ----------------------------------------------------------
 
 func (s *trayState) executeAction(a config.Action) error {
+	return executeActionWithLanguage(a, s.lang)
+}
+
+func executeActionWithLanguage(a config.Action, lang string) error {
 	if !actionAvailable(a, power.GetCapabilities()) {
 		switch a {
 		case config.ActionSleep:
-			return errors.New(i18n.T(s.lang, "cli_error_sleep_unavailable"))
+			return errors.New(i18n.T(lang, "cli_error_sleep_unavailable"))
 		case config.ActionHibernate:
-			return errors.New(i18n.T(s.lang, "cli_error_hibernate_unavailable"))
+			return errors.New(i18n.T(lang, "cli_error_hibernate_unavailable"))
 		}
 	}
 	switch a {
@@ -1120,6 +1160,13 @@ func (s *trayState) refreshPopup() {
 }
 
 func (s *trayState) openPopup(refresh bool) {
+	// Snapshot state off the Win32 message thread. This keeps the UI loop free
+	// while the serialized state queue is busy stopping a monitor or applying a
+	// config reload, and avoids a UI -> state -> worker -> UI wait cycle.
+	go s.preparePopup(refresh)
+}
+
+func (s *trayState) preparePopup(refresh bool) {
 	result := make(chan popupSnapshot, 1)
 	s.stateCh <- stateRequest{fn: func() string {
 		result <- popupSnapshot{
@@ -1159,15 +1206,17 @@ func (s *trayState) openPopup(refresh bool) {
 		s.post(func() { s.handlePopupAction(action, value) })
 	}
 	langFn := func(key string) string { return i18n.T(snapshot.lang, key) }
-	var err error
-	if refresh {
-		err = popup.Refresh(snapshot.state, onAction, langFn)
-	} else {
-		err = popup.Show(snapshot.state, onAction, langFn)
-	}
-	if err != nil {
-		mylog.Info("Popup open failed: %v", err)
-	}
+	systray.Post(func() {
+		var err error
+		if refresh {
+			err = popup.Refresh(snapshot.state, onAction, langFn)
+		} else {
+			err = popup.Show(snapshot.state, onAction, langFn)
+		}
+		if err != nil {
+			mylog.Info("Popup open failed: %v", err)
+		}
+	})
 }
 
 func (s *trayState) handlePopupAction(action popup.Action, value int) {
@@ -1249,7 +1298,11 @@ func (s *trayState) handlePopupAction(action popup.Action, value int) {
 	case popup.ActIPLocationToggle:
 		s.cfg.ThemeIPLocationEnabled = !s.cfg.ThemeIPLocationEnabled
 		s.restartThemeScheduler()
-		s.refreshIPLocationInBackground()
+		if s.cfg.ThemeIPLocationEnabled {
+			s.startIPLocationCycle()
+		} else {
+			s.stopIPLocationCycle()
+		}
 		s.updateIcon()
 		s.refreshPopupThemeSchedule()
 		s.saveConfig()
@@ -1319,8 +1372,10 @@ func (s *trayState) handlePopupAction(action popup.Action, value int) {
 			mylog.Info("Project home launch failed: %v", err)
 		}
 	case popup.ActExit:
-		popup.Destroy()
-		systray.Quit()
+		systray.Post(func() {
+			popup.Destroy()
+			systray.Quit()
+		})
 	}
 }
 
@@ -1338,24 +1393,85 @@ func (s *trayState) refreshPopupThemeSchedule() {
 	})
 }
 
-func (s *trayState) refreshIPLocationInBackground() {
-	if !s.cfg.ThemeIPLocationEnabled || s.cfg.ThemeMode != "sunrise" || s.cfg.ThemeLatitude != 0 || s.cfg.ThemeLongitude != 0 {
+func (s *trayState) startIPLocationCycle() {
+	s.cancelIPLocationRetry()
+	s.ipLocationGeneration++
+	s.ipLocationRetried = false
+	if !ipLocationLookupEnabled(s.cfg) {
 		return
 	}
+	s.queryIPLocationInBackground(s.ipLocationGeneration)
+}
+
+func (s *trayState) stopIPLocationCycle() {
+	s.cancelIPLocationRetry()
+	s.ipLocationGeneration++
+	s.ipLocationRetried = false
+}
+
+func (s *trayState) syncIPLocationCycle(wasEligible bool) {
+	isEligible := ipLocationLookupEnabled(s.cfg)
+	if !isEligible {
+		s.stopIPLocationCycle()
+		return
+	}
+	if !wasEligible {
+		s.startIPLocationCycle()
+	}
+}
+
+func (s *trayState) queryIPLocationInBackground(generation uint64) {
 	go func() {
 		loc := themeswitch.AutoLocationInfo(true, true)
-		if loc.Source != themeswitch.LocationSourceIP {
-			return
-		}
 		s.post(func() {
-			if !s.cfg.ThemeIPLocationEnabled || s.cfg.ThemeMode != "sunrise" || s.cfg.ThemeLatitude != 0 || s.cfg.ThemeLongitude != 0 {
+			if generation != s.ipLocationGeneration || !ipLocationLookupEnabled(s.cfg) {
 				return
 			}
+			if loc.Source != themeswitch.LocationSourceIP {
+				s.handleIPLocationFailure(generation)
+				return
+			}
+			s.cancelIPLocationRetry()
 			s.restartThemeScheduler()
 			s.refreshPopupThemeSchedule()
 			s.updateIcon()
 		})
 	}()
+}
+
+func ipLocationLookupEnabled(cfg config.Config) bool {
+	return cfg.ThemeIPLocationEnabled && cfg.ThemeMode == "sunrise" && cfg.ThemeLatitude == 0 && cfg.ThemeLongitude == 0
+}
+
+func (s *trayState) handleIPLocationFailure(generation uint64) {
+	if generation != s.ipLocationGeneration || s.ipLocationRetried {
+		return
+	}
+	s.scheduleIPLocationRetry(generation)
+}
+
+func (s *trayState) scheduleIPLocationRetry(generation uint64) {
+	s.cancelIPLocationRetry()
+	var timer *time.Timer
+	timer = time.AfterFunc(themeswitch.IPLocationRetryInterval, func() {
+		s.post(func() {
+			if s.ipLocationRetry != timer || generation != s.ipLocationGeneration {
+				return
+			}
+			s.ipLocationRetry = nil
+			s.ipLocationRetried = true
+			s.queryIPLocationInBackground(generation)
+		})
+	})
+	s.ipLocationRetry = timer
+}
+
+func (s *trayState) cancelIPLocationRetry() {
+	if s.ipLocationRetry == nil {
+		return
+	}
+	s.ipLocationRetry.Stop()
+	s.ipLocationRetry = nil
 }
 
 func (s *trayState) runThemeOperation(actionKey string, fn func() error, onSuccess func()) {

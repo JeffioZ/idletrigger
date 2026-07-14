@@ -17,6 +17,10 @@ var (
 	menuItemsLock sync.RWMutex
 	errorHandler  = func(string, ...interface{}) {}
 	errorLock     sync.RWMutex
+	callbackLock  sync.RWMutex
+	onLeftClick   func()
+	onPowerChange func()
+	onThemeChange func()
 
 	currentID = uint32(0)
 	quitOnce  sync.Once
@@ -251,12 +255,29 @@ func systrayMenuItemSelected(id uint32) {
 	}
 }
 
-// OnLeftClick is called when the user left-clicks the tray icon.
-var OnLeftClick func()
+// SetOnLeftClick sets the callback used when the user left-clicks the tray icon.
+func SetOnLeftClick(fn func()) {
+	callbackLock.Lock()
+	onLeftClick = fn
+	callbackLock.Unlock()
+}
 
-// OnPowerChange is called when Windows broadcasts a power-state change.
-var OnPowerChange func()
+// SetOnPowerChange sets the callback used for Windows power-state changes.
+func SetOnPowerChange(fn func()) {
+	callbackLock.Lock()
+	onPowerChange = fn
+	callbackLock.Unlock()
+}
 
-// OnThemeChange is called once for a burst of Windows theme/color broadcasts.
-// It lets the application refresh theme-dependent shell surfaces immediately.
-var OnThemeChange func()
+// SetOnThemeChange sets the callback used for a burst of theme/color changes.
+func SetOnThemeChange(fn func()) {
+	callbackLock.Lock()
+	onThemeChange = fn
+	callbackLock.Unlock()
+}
+
+func callbacks() (leftClick, powerChange, themeChange func()) {
+	callbackLock.RLock()
+	defer callbackLock.RUnlock()
+	return onLeftClick, onPowerChange, onThemeChange
+}
