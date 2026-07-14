@@ -129,12 +129,14 @@ const (
 
 	wmDestroy         = 0x0002
 	wmClose           = 0x0010
+	wmActivate        = 0x0006
 	wmMouseMove       = 0x0200
 	wmLButtonDown     = 0x0201
 	wmLButtonUp       = 0x0202
 	wmMouseWheel      = 0x020A
 	wmMouseLeave      = 0x02A3
 	wmSetCursor       = 0x0020
+	wmNcLButtonDown   = 0x00A1
 	wmParentNotify    = 0x0210
 	wmEraseBkgnd      = 0x0014
 	wmSysColorChange  = 0x0015
@@ -146,7 +148,6 @@ const (
 	wmCtlColorListBox = 0x0134
 	wmThemeChanged    = 0x031A
 	wmDpiChanged      = 0x02E0
-	wmTimer           = 0x0113
 	wmKeyDown         = 0x0100
 	wmSysKeyDown      = 0x0104
 	wmKillFocus       = 0x0008
@@ -154,6 +155,7 @@ const (
 	wmSetFont         = 0x0030
 	wmSetIcon         = 0x0080
 	bnClicked         = 0
+	waInactive        = 0
 
 	wsOverlapped       = 0x00000000
 	wsPopup            = 0x80000000
@@ -179,26 +181,23 @@ const (
 	wsExComposited = 0x02000000
 	wsExAppWindow  = 0x00040000
 
-	swpNoSize         = 0x0001
-	swpNoMove         = 0x0002
-	swpNoZOrder       = 0x0004
-	swpNoActivate     = 0x0010
-	swpShowWindow     = 0x0040
-	swHide            = 0
-	swShow            = 5
-	monitorNearest    = 2
-	gwlpWndProc       = ^uintptr(3)
-	quickMenuTimer    = 1
-	languageMenuTimer = 2
-	choiceMenuTimer   = 3
-	vkUp              = 0x26
-	vkDown            = 0x28
-	vkHome            = 0x24
-	vkEnd             = 0x23
-	vkReturn          = 0x0D
-	vkSpace           = 0x20
-	vkF4              = 0x73
-	vkEscape          = 0x1B
+	swpNoSize      = 0x0001
+	swpNoMove      = 0x0002
+	swpNoZOrder    = 0x0004
+	swpNoActivate  = 0x0010
+	swpShowWindow  = 0x0040
+	swHide         = 0
+	swShow         = 5
+	monitorNearest = 2
+	gwlpWndProc    = ^uintptr(3)
+	vkUp           = 0x26
+	vkDown         = 0x28
+	vkHome         = 0x24
+	vkEnd          = 0x23
+	vkReturn       = 0x0D
+	vkSpace        = 0x20
+	vkF4           = 0x73
+	vkEscape       = 0x1B
 
 	odsSelected  = 0x0001
 	odsDisabled  = 0x0004
@@ -306,8 +305,6 @@ var (
 	pSetFocus              = user32.NewProc("SetFocus")
 	pShowWindow            = user32.NewProc("ShowWindow")
 	pEnableWindow          = user32.NewProc("EnableWindow")
-	pSetTimer              = user32.NewProc("SetTimer")
-	pKillTimer             = user32.NewProc("KillTimer")
 	pFillRect              = user32.NewProc("FillRect")
 	pFrameRect             = user32.NewProc("FrameRect")
 	pDrawText              = user32.NewProc("DrawTextW")
@@ -613,6 +610,9 @@ func ensureClass() error {
 			Icon:      fallbackIcon,
 			ClassName: name,
 			IconSm:    fallbackIcon,
+		}
+		if cursor, _, _ := pLoadCursor.Call(0, 32512); cursor != 0 {
+			wc.Cursor = windows.Handle(cursor)
 		}
 		if result, _, callErr := pRegisterClassEx.Call(uintptr(unsafe.Pointer(&wc))); result == 0 && callErr != syscall.Errno(1410) {
 			classErr = fmt.Errorf("register popup class: %w", callErr)
@@ -1451,13 +1451,10 @@ func (p *panel) invalidate(id uint16) {
 
 func (p *panel) openQuickMenu(focusFirst bool) {
 	if p.choice.openID != 0 {
-		return
+		p.closeChoice(false)
 	}
 	if p.quickMenuOpen {
-		pKillTimer.Call(uintptr(p.hwnd), quickMenuTimer)
-		if focusFirst {
-			pSetFocus.Call(uintptr(p.controls[quickActionIDs()[0]]))
-		}
+		p.closeQuickMenu()
 		return
 	}
 	p.quickMenuOpen = true
@@ -1469,12 +1466,6 @@ func (p *panel) openQuickMenu(focusFirst bool) {
 	}
 	if focusFirst {
 		pSetFocus.Call(uintptr(p.controls[quickActionIDs()[0]]))
-	}
-}
-
-func (p *panel) scheduleQuickMenuClose() {
-	if p.quickMenuOpen {
-		pSetTimer.Call(uintptr(p.hwnd), quickMenuTimer, 220, 0)
 	}
 }
 
@@ -1492,13 +1483,9 @@ func (p *panel) closeQuickMenu() {
 	if !p.quickMenuOpen {
 		return
 	}
-	pKillTimer.Call(uintptr(p.hwnd), quickMenuTimer)
 	p.quickMenuOpen = false
 	ids := append([]uint16{idQuickMenu}, quickActionIDs()...)
 	p.clearTrackedHover(append([]uint16{idQuickActions}, quickActionIDs()...))
-	// The close timer may run after the pointer has already left every child
-	// HWND. Always repaint the trigger after clearing open state so no stale
-	// hover/open pixels survive an owner-draw notification gap.
 	p.invalidate(idQuickActions)
 	for _, id := range ids {
 		if hwnd := p.controls[id]; hwnd != 0 {
@@ -1509,13 +1496,10 @@ func (p *panel) closeQuickMenu() {
 
 func (p *panel) openLanguageMenu(focusFirst bool) {
 	if p.choice.openID != 0 {
-		return
+		p.closeChoice(false)
 	}
 	if p.languageMenuOpen {
-		pKillTimer.Call(uintptr(p.hwnd), languageMenuTimer)
-		if focusFirst {
-			p.focusUnselectedLanguage()
-		}
+		p.closeLanguageMenu()
 		return
 	}
 	p.closeQuickMenu()
@@ -1538,17 +1522,10 @@ func (p *panel) focusUnselectedLanguage() {
 	pSetFocus.Call(uintptr(p.controls[id]))
 }
 
-func (p *panel) scheduleLanguageMenuClose() {
-	if p.languageMenuOpen {
-		pSetTimer.Call(uintptr(p.hwnd), languageMenuTimer, 220, 0)
-	}
-}
-
 func (p *panel) closeLanguageMenu() {
 	if !p.languageMenuOpen {
 		return
 	}
-	pKillTimer.Call(uintptr(p.hwnd), languageMenuTimer)
 	p.languageMenuOpen = false
 	ids := append([]uint16{idLanguageMenu}, languageIDs()...)
 	p.clearTrackedHover(append([]uint16{idLanguage}, languageIDs()...))
@@ -1558,6 +1535,30 @@ func (p *panel) closeLanguageMenu() {
 			pShowWindow.Call(uintptr(hwnd), swHide)
 		}
 	}
+}
+
+// closeOpenMenus handles an in-panel click outside the currently open menu.
+func (p *panel) closeOpenMenus() {
+	p.closeQuickMenu()
+	p.closeLanguageMenu()
+	p.closeChoice(false)
+}
+
+func (p *panel) menuClickKeepsOpen(id uint16) bool {
+	if p.quickMenuOpen && (id == idQuickActions || id == idQuickMenu || containsQuickAction(id)) {
+		return true
+	}
+	if p.languageMenuOpen && (id == idLanguage || id == idLanguageMenu || containsLanguageOption(id)) {
+		return true
+	}
+	if p.choice.openID == 0 {
+		return false
+	}
+	if id == p.choice.openID || id == idChoiceSurface {
+		return true
+	}
+	owner, _, ok := choiceOptionOwner(p, id)
+	return ok && owner == p.choice.openID
 }
 
 func (p *panel) setDisabled(id uint16, value bool) {
@@ -1662,23 +1663,9 @@ func buttonWndProc(hwnd windows.Handle, msg uint32, wp, lp uintptr) uintptr {
 				}
 			}
 		case wmLButtonDown:
-			if id == idQuickActions || id == idLanguage {
-				// These menu triggers intentionally open on hover only. Keep Space
-				// available through WM_COMMAND for keyboard navigation.
-				p.leaveKeyboardNavigation()
-				return 0
-			}
-			if id == idIdleTimeout || id == idIdleAction {
-				// Choice controls follow the existing hover-only menu semantics;
-				// mouse clicks must not leave a pressed/focused blue frame behind.
-				p.leaveKeyboardNavigation()
-				p.requestChoice(id, false)
-				return 0
-			}
 			p.leaveKeyboardNavigation()
-		case wmLButtonUp:
-			if id == idQuickActions || id == idLanguage || id == idIdleTimeout || id == idIdleAction {
-				return 0
+			if !p.menuClickKeepsOpen(id) {
+				p.closeOpenMenus()
 			}
 		case wmKeyDown:
 			id := p.controlID(hwnd)
@@ -1840,39 +1827,12 @@ func (p *panel) scrollChoice(owner uint16, delta int) {
 	p.positionChoiceLayer(owner, len(ids))
 }
 
-func (p *panel) choicePointerInside() bool {
-	var cursor point
-	pGetCursorPos.Call(uintptr(unsafe.Pointer(&cursor)))
-	inside := func(hwnd windows.Handle) bool {
-		if hwnd == 0 {
-			return false
-		}
-		var bounds rect
-		pGetWindowRect.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&bounds)))
-		return cursor.X >= bounds.Left && cursor.X < bounds.Right && cursor.Y >= bounds.Top && cursor.Y < bounds.Bottom
-	}
-	if inside(p.controls[p.choice.openID]) || inside(p.controls[idChoiceSurface]) {
-		return true
-	}
-	ids := p.choice.optionIDs[p.choice.openID]
-	start, count := p.choice.scroll[p.choice.openID], p.choice.visible[p.choice.openID]
-	if start < 0 {
-		start = 0
-	}
-	if count > len(ids)-start {
-		count = len(ids) - start
-	}
-	for _, optionID := range ids[start : start+count] {
-		if inside(p.choice.optionControls[optionID]) {
-			return true
-		}
-	}
-	return false
-}
-
 func (p *panel) choiceFocusContains(hwnd windows.Handle) bool {
 	if hwnd == 0 || hwnd == p.hwnd {
 		return hwnd != 0
+	}
+	if p.choice.openID != 0 && hwnd == p.controls[p.choice.openID] {
+		return true
 	}
 	for _, option := range p.choice.optionControls {
 		if option == hwnd {
@@ -1909,6 +1869,8 @@ func (p *panel) openChoice(id uint16) {
 		return
 	}
 	if p.choice.openID == id {
+		p.choice.focusOnOpen = false
+		p.closeChoice(false)
 		return
 	}
 	if p.choice.openID != 0 {
@@ -2115,18 +2077,6 @@ func (p *panel) applyActionChoice(index int) {
 
 func (p *panel) setHover(hwnd windows.Handle) {
 	id := p.controlID(hwnd)
-	if _, _, ok := choiceOptionOwner(p, id); ok {
-		pKillTimer.Call(uintptr(p.hwnd), choiceMenuTimer)
-	}
-	if p.choice.openID == 0 && (id == idQuickActions || containsQuickAction(id)) {
-		p.openQuickMenu(false)
-	}
-	if p.choice.openID == 0 && (id == idLanguage || containsLanguageOption(id)) {
-		p.openLanguageMenu(false)
-	}
-	if id == idIdleTimeout || id == idIdleAction {
-		p.requestChoice(id, false)
-	}
 	if id == 0 {
 		return
 	}
@@ -2147,22 +2097,6 @@ func (p *panel) clearHover(hwnd windows.Handle) {
 	if id != 0 && p.hoverID == id {
 		p.hoverID = 0
 		p.invalidate(id)
-	}
-	if id == idQuickActions || containsQuickAction(id) {
-		p.scheduleQuickMenuClose()
-	}
-	if id == idLanguage || containsLanguageOption(id) {
-		p.scheduleLanguageMenuClose()
-	}
-	if id == idIdleTimeout || id == idIdleAction {
-		if p.choice.openID != 0 {
-			pSetTimer.Call(uintptr(p.hwnd), choiceMenuTimer, 220, 0)
-		}
-	} else if _, _, ok := choiceOptionOwner(p, id); ok && p.choice.openID != 0 {
-		// Leaving an option into the surface border or outside the menu should
-		// close it just like leaving the trigger; entering another option cancels
-		// this timer in setHover.
-		pSetTimer.Call(uintptr(p.hwnd), choiceMenuTimer, 220, 0)
 	}
 }
 
@@ -2238,8 +2172,15 @@ func wndProc(hwnd windows.Handle, msg uint32, wp, lp uintptr) uintptr {
 		case wmClose:
 			Hide()
 			return 0
+		case wmActivate:
+			if uint16(wp) == waInactive {
+				p.closeOpenMenus()
+			}
+		case wmNcLButtonDown:
+			p.closeOpenMenus()
 		case wmLButtonDown:
 			p.leaveKeyboardNavigation()
+			p.closeOpenMenus()
 		case wmParentNotify:
 			if uint16(wp) == wmLButtonDown {
 				p.leaveKeyboardNavigation()
@@ -2277,29 +2218,11 @@ func wndProc(hwnd windows.Handle, msg uint32, wp, lp uintptr) uintptr {
 			p.position(p.style, p.exStyle)
 			mylog.Info("UI font: surface=popup rebuilt reason=dpi-change dpi=%d face=%q client_px=%dx%d", int(p.metrics.scale*96+0.5), p.fontChoice.Face, p.sc(p.metrics.style.Layout.PanelWidth), p.sc(p.clientH))
 			return 0
-		case wmTimer:
-			if wp == quickMenuTimer {
-				p.closeQuickMenu()
-				return 0
-			}
-			if wp == languageMenuTimer {
-				p.closeLanguageMenu()
-				return 0
-			}
-			if wp == choiceMenuTimer {
-				pKillTimer.Call(uintptr(p.hwnd), choiceMenuTimer)
-				if p.choice.openID != 0 && p.choicePointerInside() {
-					pSetTimer.Call(uintptr(p.hwnd), choiceMenuTimer, 220, 0)
-					return 0
-				}
-				p.closeChoice(false)
-				return 0
-			}
 		case wmCommand:
 			id, notification := uint16(wp), uint16(wp>>16)
 			if notification == bnClicked {
 				if id == idIdleTimeout || id == idIdleAction {
-					p.choice.focusOnOpen = true
+					p.choice.focusOnOpen = p.keyboardNavigation
 					p.openChoice(id)
 					return 0
 				}
@@ -2378,10 +2301,10 @@ func (p *panel) handleCommand(id uint16) {
 	value := 0
 	switch id {
 	case idQuickActions:
-		p.openQuickMenu(true)
+		p.openQuickMenu(p.keyboardNavigation)
 		return
 	case idLanguage:
-		p.openLanguageMenu(true)
+		p.openLanguageMenu(p.keyboardNavigation)
 		return
 	case idLangEN:
 		if p.selected[idLangEN] {
@@ -2913,25 +2836,28 @@ func (p *panel) drawChoiceButton(item *drawItem, state buttonVisualState) {
 	}
 }
 
-// drawMenuTrigger keeps hover-only menus visually distinct from commands that
+// drawMenuTrigger keeps click-open menus visually distinct from commands that
 // execute immediately: a quieter rounded card at rest, with accent treatment
 // reserved for hover.
 func (p *panel) drawMenuTrigger(item *drawItem) {
 	id := uint16(item.CtlID)
 	state := p.controlState(id, item.ItemState)
 	open := p.triggerOpen(id)
-	brush := p.elevatedBrush
+	brush := p.surfaceBrush
 	borderColor := p.palette.SubtleBorder
 	textColor := p.palette.SecondaryText
+	arrowColor := p.palette.SecondaryText
 	if state.Hovered {
 		brush = p.hoverBrush
 		borderColor = p.palette.Accent
 		textColor = p.palette.PrimaryText
+		arrowColor = p.palette.Accent
 	}
 	if open {
 		brush = p.hoverBrush
 		borderColor = p.palette.Accent
 		textColor = p.palette.PrimaryText
+		arrowColor = p.palette.Accent
 	}
 	if state.Pressed {
 		brush = p.pressedBrush
@@ -2939,9 +2865,18 @@ func (p *panel) drawMenuTrigger(item *drawItem) {
 			borderColor = p.palette.AccentPressed
 		}
 		textColor = p.palette.AccentText
+		arrowColor = p.palette.AccentText
 	}
 	pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&item.Rect)), uintptr(p.backgroundBrush))
 	p.roundRect(item.HDC, item.Rect, brush, borderColor, p.sc(p.metrics.style.Control.CornerRadius))
+	// Fixed menus rise above their triggers, unlike the regular choice menus.
+	arrowResult := p.drawDisclosureArrow(item.HDC, item.Rect, !open, arrowColor)
+	if arrowResult != gdiplus.DrawCompleted {
+		if arrowResult == gdiplus.DrawMayBeDirty {
+			p.roundRect(item.HDC, item.Rect, brush, borderColor, p.sc(p.metrics.style.Control.CornerRadius))
+		}
+		p.drawDisclosureArrowGDI(item.HDC, item.Rect, !open, arrowColor)
+	}
 
 	pSetTextColor.Call(uintptr(item.HDC), uintptr(textColor))
 	pSetBkMode.Call(uintptr(item.HDC), transparent)

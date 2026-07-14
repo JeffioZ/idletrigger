@@ -118,7 +118,7 @@ func TestControlStateRetainsInteractiveFlags(t *testing.T) {
 	}
 }
 
-func TestMenuTriggersAreLimitedToHoverMenus(t *testing.T) {
+func TestMenuTriggersAreLimitedToClickMenus(t *testing.T) {
 	for _, id := range []uint16{idQuickActions, idLanguage} {
 		if !isMenuTrigger(id) {
 			t.Fatalf("menu trigger %d was not recognized", id)
@@ -376,5 +376,54 @@ func TestChoiceOpenOnlyEntersFocusVisibleForKeyboard(t *testing.T) {
 	}
 	if got := keyboard.choice.scroll[idIdleTimeout]; got != 3 {
 		t.Fatalf("keyboard choice scroll = %d, want selected option 3", got)
+	}
+}
+
+func TestChoiceFocusContainsItsOpenTrigger(t *testing.T) {
+	trigger := windows.Handle(17)
+	p := &panel{
+		controls: map[uint16]windows.Handle{idIdleTimeout: trigger},
+		choice: choiceSurface{
+			openID: idIdleTimeout,
+		},
+	}
+	if !p.choiceFocusContains(trigger) {
+		t.Fatal("the open choice trigger must retain focus while its menu is visible")
+	}
+}
+
+func TestPanelBackgroundClickClosesEveryOpenMenu(t *testing.T) {
+	p := &panel{
+		quickMenuOpen:    true,
+		languageMenuOpen: true,
+		choice: choiceSurface{
+			openID: idIdleTimeout,
+		},
+	}
+	p.closeOpenMenus()
+	if p.quickMenuOpen || p.languageMenuOpen || p.choice.openID != 0 {
+		t.Fatalf("background click left menus open: quick=%v language=%v choice=%d", p.quickMenuOpen, p.languageMenuOpen, p.choice.openID)
+	}
+}
+
+func TestMenuClickKeepsOnlyTheOpenSurfaceInteractive(t *testing.T) {
+	p := &panel{quickMenuOpen: true}
+	for _, id := range []uint16{idQuickActions, idQuickMenu, idSleep} {
+		if !p.menuClickKeepsOpen(id) {
+			t.Fatalf("quick menu click %d should keep the menu open", id)
+		}
+	}
+	if p.menuClickKeepsOpen(idLanguage) {
+		t.Fatal("another trigger must close the current menu before switching")
+	}
+
+	p = &panel{choice: choiceSurface{openID: idIdleTimeout, optionIDs: map[uint16][]uint16{idIdleTimeout: {idTimeoutOptionBase}}}}
+	for _, id := range []uint16{idIdleTimeout, idChoiceSurface, idTimeoutOptionBase} {
+		if !p.menuClickKeepsOpen(id) {
+			t.Fatalf("choice click %d should keep the menu open", id)
+		}
+	}
+	if p.menuClickKeepsOpen(idIdleAction) {
+		t.Fatal("another choice trigger must close the open choice before switching")
 	}
 }
