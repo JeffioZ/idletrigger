@@ -171,6 +171,154 @@ func TestFinalDrawFailureIsMarkedMayBeDirty(t *testing.T) {
 	}
 }
 
+func TestRoundedRectUsesWindingPathsAndOnePixelInset(t *testing.T) {
+	m := newLifecycle(func() (uintptr, bool) { return 7, true }, func(uintptr) {})
+	if !m.start() {
+		t.Fatal("Start failed")
+	}
+	var modes []int
+	var lines [][4]int32
+	fillCalls := 0
+	next := uintptr(10)
+	a := roundedRectTestAPI(&next, func(graphics, brush, path uintptr) bool {
+		fillCalls++
+		return true
+	})
+	a.createPath = func(mode int) (uintptr, bool) {
+		modes = append(modes, mode)
+		next++
+		return next, true
+	}
+	a.addPathLine = func(_ uintptr, x1, y1, x2, y2 int32) bool {
+		lines = append(lines, [4]int32{x1, y1, x2, y2})
+		return true
+	}
+	if got := fillRoundedRectWith(m, a, 1, roundedRect{left: 10, top: 8, right: 70, bottom: 42}, 3, 0x00ffffff, 0x00d0d0d0); got != DrawCompleted {
+		t.Fatalf("result=%d, want DrawCompleted", got)
+	}
+	if len(modes) != 2 || modes[0] != FillModeWinding || modes[1] != FillModeWinding {
+		t.Fatalf("path fill modes=%v, want winding", modes)
+	}
+	if fillCalls != 2 {
+		t.Fatalf("fill calls=%d, want 2", fillCalls)
+	}
+	if len(lines) < 5 {
+		t.Fatalf("line count=%d, want at least outer and inner top lines", len(lines))
+	}
+	if lines[0] != [4]int32{13, 8, 67, 8} || lines[4] != [4]int32{13, 9, 67, 9} {
+		t.Fatalf("outer/inner top lines=%v/%v, want one-pixel inset", lines[0], lines[4])
+	}
+}
+
+func TestRoundedRectSetupFailureDoesNotDraw(t *testing.T) {
+	m := newLifecycle(func() (uintptr, bool) { return 7, true }, func(uintptr) {})
+	if !m.start() {
+		t.Fatal("Start failed")
+	}
+	next := uintptr(10)
+	drawn := false
+	a := roundedRectTestAPI(&next, func(uintptr, uintptr, uintptr) bool { drawn = true; return true })
+	a.createPath = func(int) (uintptr, bool) { return 0, false }
+	if got := fillRoundedRectWith(m, a, 1, roundedRect{left: 10, top: 8, right: 70, bottom: 42}, 3, 0, 0); got != DrawNotStarted {
+		t.Fatalf("result=%d, want DrawNotStarted", got)
+	}
+	if drawn {
+		t.Fatal("setup failure reached FillPath")
+	}
+}
+
+func TestRoundedRectFinalFailureIsMarkedMayBeDirty(t *testing.T) {
+	m := newLifecycle(func() (uintptr, bool) { return 7, true }, func(uintptr) {})
+	if !m.start() {
+		t.Fatal("Start failed")
+	}
+	next := uintptr(10)
+	calls := 0
+	a := roundedRectTestAPI(&next, func(uintptr, uintptr, uintptr) bool {
+		calls++
+		return calls != 2
+	})
+	if got := fillRoundedRectWith(m, a, 1, roundedRect{left: 10, top: 8, right: 70, bottom: 42}, 3, 0, 0); got != DrawMayBeDirty {
+		t.Fatalf("result=%d, want DrawMayBeDirty", got)
+	}
+}
+
+func TestRoundedRectRejectsEmptyAndTooSmallBounds(t *testing.T) {
+	m := newLifecycle(func() (uintptr, bool) { return 7, true }, func(uintptr) {})
+	if !m.start() {
+		t.Fatal("Start failed")
+	}
+	next := uintptr(10)
+	drawn := false
+	a := roundedRectTestAPI(&next, func(uintptr, uintptr, uintptr) bool { drawn = true; return true })
+	for _, bounds := range []roundedRect{
+		{left: 5, top: 5, right: 5, bottom: 10},
+		{left: 5, top: 5, right: 4, bottom: 10},
+		{left: 5, top: 5, right: 7, bottom: 10},
+		{left: 5, top: 5, right: 10, bottom: 7},
+	} {
+		if got := fillRoundedRectWith(m, a, 1, bounds, 1, 0, 0); got != DrawNotStarted {
+			t.Fatalf("bounds=%#v result=%d, want DrawNotStarted", bounds, got)
+		}
+	}
+	if drawn {
+		t.Fatal("invalid bounds reached FillPath")
+	}
+}
+
+func TestRoundedRectRadiusIsClampedAndInset(t *testing.T) {
+	m := newLifecycle(func() (uintptr, bool) { return 7, true }, func(uintptr) {})
+	if !m.start() {
+		t.Fatal("Start failed")
+	}
+	next := uintptr(10)
+	beziers := 0
+	a := roundedRectTestAPI(&next, func(uintptr, uintptr, uintptr) bool { return true })
+	a.addPathBezier = func(_ uintptr, x1, y1, x2, y2, x3, y3, x4, y4 int32) bool {
+		beziers++
+		for _, value := range []int32{x1, y1, x2, y2, x3, y3, x4, y4} {
+			if value < 0 || value > 10 {
+				t.Fatalf("clamped Bezier coordinate=%d outside outer bounds", value)
+			}
+		}
+		return true
+	}
+	if got := fillRoundedRectWith(m, a, 1, roundedRect{left: 0, top: 0, right: 10, bottom: 6}, 99, 0, 0); got != DrawCompleted {
+		t.Fatalf("large radius result=%d, want DrawCompleted", got)
+	}
+	if beziers != 8 { // four outer corners and four inner corners
+		t.Fatalf("Bezier count=%d, want 8", beziers)
+	}
+	beziers = 0
+	if got := fillRoundedRectWith(m, a, 1, roundedRect{left: 0, top: 0, right: 3, bottom: 3}, 0, 0, 0); got != DrawCompleted {
+		t.Fatalf("minimum valid bounds result=%d, want DrawCompleted", got)
+	}
+	if beziers != 0 {
+		t.Fatalf("zero radius used %d Bezier curves", beziers)
+	}
+}
+
+func roundedRectTestAPI(next *uintptr, fill func(uintptr, uintptr, uintptr) bool) gdiAPI {
+	return gdiAPI{
+		createFromHDC:      func(windows.Handle) (uintptr, bool) { return 9, true },
+		deleteGraphics:     func(uintptr) {},
+		setSmoothingMode:   func(uintptr) bool { return true },
+		setPixelOffsetMode: func(uintptr) bool { return true },
+		createSolidFill: func(uint32) (uintptr, bool) {
+			*next++
+			return *next, true
+		},
+		deleteBrush:     func(uintptr) {},
+		createPath:      func(int) (uintptr, bool) { *next++; return *next, true },
+		deletePath:      func(uintptr) {},
+		startPathFigure: func(uintptr) bool { return true },
+		closePathFigure: func(uintptr) bool { return true },
+		addPathLine:     func(uintptr, int32, int32, int32, int32) bool { return true },
+		addPathBezier:   func(uintptr, int32, int32, int32, int32, int32, int32, int32, int32) bool { return true },
+		fillPath:        fill,
+	}
+}
+
 func TestARGBConvertsWin32ColorRef(t *testing.T) {
 	if got, want := argb(0x00563412), uint32(0xff123456); got != want {
 		t.Fatalf("argb() = %#x, want %#x", got, want)

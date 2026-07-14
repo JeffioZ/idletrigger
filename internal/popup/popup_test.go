@@ -82,6 +82,20 @@ func TestVisualStateForButtonRoles(t *testing.T) {
 	}
 }
 
+func TestControlStateRetainsInteractiveFlags(t *testing.T) {
+	p := &panel{
+		toggles:            map[uint16]bool{idNoSleep: true},
+		selected:           map[uint16]bool{},
+		disabled:           map[uint16]bool{idNoSleep: true},
+		hoverID:            idNoSleep,
+		keyboardNavigation: true,
+	}
+	state := p.controlState(idNoSleep, odsSelected|odsFocus)
+	if !state.Active || !state.Hovered || !state.Pressed || !state.Disabled || !state.Focused {
+		t.Fatalf("control state lost an existing interaction flag: %#v", state)
+	}
+}
+
 func TestMenuTriggersAreLimitedToHoverMenus(t *testing.T) {
 	for _, id := range []uint16{idQuickActions, idLanguage} {
 		if !isMenuTrigger(id) {

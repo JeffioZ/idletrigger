@@ -2991,7 +2991,23 @@ func (p *panel) drawMenuTrigger(item *drawItem) {
 	}
 }
 
-func (p *panel) roundRect(dc windows.Handle, bounds rect, brush windows.Handle, borderColor uint32, radius int) {
+func (p *panel) roundRect(dc windows.Handle, bounds rect, brush windows.Handle, borderColor uint32, cornerDiameter int) {
+	if fillColor, ok := p.cardFillColor(brush); ok {
+		result := gdiplus.FillRoundedRect(dc, bounds.Left, bounds.Top, bounds.Right, bounds.Bottom, int32(cornerDiameter/2), fillColor, borderColor)
+		if result == gdiplus.DrawCompleted {
+			return
+		}
+		if result == gdiplus.DrawMayBeDirty {
+			// A failed final GDI+ fill can have changed any card pixel, including
+			// anti-aliased corner coverage. Rebuild the complete GDI card instead
+			// of drawing only its outline over possibly dirty pixels.
+			pFillRect.Call(uintptr(dc), uintptr(unsafe.Pointer(&bounds)), uintptr(p.backgroundBrush))
+		}
+	}
+	p.roundRectGDI(dc, bounds, brush, borderColor, cornerDiameter)
+}
+
+func (p *panel) roundRectGDI(dc windows.Handle, bounds rect, brush windows.Handle, borderColor uint32, cornerDiameter int) {
 	pen, _, _ := pCreatePen.Call(psSolid, 1, uintptr(borderColor))
 	if pen == 0 {
 		pFillRect.Call(uintptr(dc), uintptr(unsafe.Pointer(&bounds)), uintptr(brush))
@@ -2999,10 +3015,40 @@ func (p *panel) roundRect(dc windows.Handle, bounds rect, brush windows.Handle, 
 	}
 	oldBrush, _, _ := pSelectObject.Call(uintptr(dc), uintptr(brush))
 	oldPen, _, _ := pSelectObject.Call(uintptr(dc), pen)
-	pRoundRect.Call(uintptr(dc), uintptr(bounds.Left), uintptr(bounds.Top), uintptr(bounds.Right), uintptr(bounds.Bottom), uintptr(radius), uintptr(radius))
+	pRoundRect.Call(uintptr(dc), uintptr(bounds.Left), uintptr(bounds.Top), uintptr(bounds.Right), uintptr(bounds.Bottom), uintptr(cornerDiameter), uintptr(cornerDiameter))
 	pSelectObject.Call(uintptr(dc), oldPen)
 	pSelectObject.Call(uintptr(dc), oldBrush)
 	pDeleteObject.Call(pen)
+}
+
+func (p *panel) cardFillColor(brush windows.Handle) (uint32, bool) {
+	if brush == 0 {
+		return 0, false
+	}
+	switch brush {
+	case p.elevatedBrush:
+		return p.palette.ElevatedSurface, true
+	case p.surfaceBrush:
+		return p.palette.Surface, true
+	case p.hoverBrush:
+		return p.palette.HoverSurface, true
+	case p.pressedBrush:
+		return p.palette.AccentPressed, true
+	case p.selectedBrush:
+		return p.palette.Selected, true
+	case p.selectedHoverBrush:
+		return p.palette.SelectedHover, true
+	case p.disabledBrush:
+		return p.palette.DisabledSurface, true
+	case p.dangerBrush:
+		return p.palette.DangerBackground, true
+	case p.dangerHoverBrush:
+		return p.palette.DangerHover, true
+	case p.dangerPressedBrush:
+		return p.palette.DangerPressed, true
+	default:
+		return 0, false
+	}
 }
 
 func (p *panel) drawToggle(item *drawItem) {
