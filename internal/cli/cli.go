@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/JeffioZ/idletrigger/internal/actions"
 	"github.com/JeffioZ/idletrigger/internal/autostart"
@@ -19,7 +18,7 @@ import (
 // Run dispatches the first CLI argument.
 func Run(lang string) {
 	if len(os.Args) < 2 {
-		fmt.Println(i18n.T(lang, "cli_usage"))
+		fmt.Println(usage(lang))
 		return
 	}
 
@@ -67,9 +66,6 @@ func Run(lang string) {
 	case "status":
 		cmdStatus(lang)
 
-	case "diagnostics":
-		cmdDiagnostics(lang)
-
 	case "config:reload":
 		if resp, ok := ipc.Send("config:reload"); ok {
 			printIPCResponse(lang, resp)
@@ -82,40 +78,19 @@ func Run(lang string) {
 		fmt.Println(i18n.T(lang, "version"))
 
 	case "help", "--help", "-h":
-		fmt.Println(i18n.T(lang, "cli_usage"))
+		fmt.Println(usage(lang))
 
 	default:
+		if runDeveloperCommand(lang, cmd) {
+			return
+		}
 		fmt.Println(i18n.T(lang, "cli_unknown"))
-		fmt.Println(i18n.T(lang, "cli_usage"))
+		fmt.Println(usage(lang))
 		os.Exit(1)
 	}
 }
 
-func cmdDiagnostics(lang string) {
-	if len(os.Args) < 3 || os.Args[2] != "idle" {
-		fmt.Fprintln(os.Stderr, i18n.T(lang, "cli_usage_diagnostics"))
-		os.Exit(1)
-	}
-	watch := false
-	for _, arg := range os.Args[3:] {
-		if arg == "--watch" || arg == "-w" {
-			watch = true
-		}
-	}
-	for {
-		snap, err := monitor.Snapshot()
-		if err != nil {
-			printError(lang, fmt.Sprintf(i18n.T(lang, "cli_error_idle_diagnostics"), err))
-			os.Exit(1)
-		}
-		fmt.Printf("idle_diagnostics tick_now=%d tick32=%d last_input=%d raw_delta_ms=%d idle=%s\n",
-			snap.NowTick64, snap.NowTick32, snap.LastInputTick, snap.RawDeltaMS, snap.Idle.Round(time.Millisecond))
-		if !watch {
-			return
-		}
-		time.Sleep(time.Second)
-	}
-}
+func usage(lang string) string { return i18n.T(lang, "cli_usage") + developerUsage(lang) }
 
 func cmdNoSleep(lang string) {
 	if len(os.Args) < 3 {

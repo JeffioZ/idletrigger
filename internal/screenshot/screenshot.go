@@ -1,3 +1,5 @@
+//go:build devtools
+
 // Package screenshot hosts deterministic, side-effect-free captures of the
 // real popup window. It never starts the tray or reads application config.
 package screenshot

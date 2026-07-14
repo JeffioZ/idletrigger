@@ -93,6 +93,27 @@ go run ./scripts/gen_resource.go -version $version
 
 Commit `app.ico`, both tray ICO files, `assets/manifest.xml`, and the generators together. Do not commit `.syso` files; the release workflow regenerates them from the tag version.
 
+## Regenerate README Screenshots
+
+Screenshot generation is a maintenance-only capability and is compiled only
+with the `devtools` build tag. The helper builds a temporary devtools EXE,
+regenerates all four checked-in images, validates their PNG dimensions, and
+removes the temporary build directory:
+
+```powershell
+.\scripts\capture-screenshots.ps1
+```
+
+To validate the process without replacing the checked-in images, provide a
+temporary output directory:
+
+```powershell
+.\scripts\capture-screenshots.ps1 -OutputDirectory (Join-Path $env:TEMP "IdleTrigger-screenshots")
+```
+
+The normal release EXE deliberately does not contain the `screenshot` command
+or its PNG/compression dependencies.
+
 ## Offline Build
 
 Vendor dependencies while online, then copy the repository including `vendor/` to the offline machine:
@@ -113,18 +134,21 @@ go test ./...
 go run ./scripts/gen_resource.go -version dev
 $env:CGO_ENABLED = "0"
 $env:GOARCH = "amd64"
-go build -trimpath -ldflags="-H windowsgui" -o dist/IdleTrigger-x64-dev.exe .
-.\dist\IdleTrigger-x64-dev.exe
+go build -tags devtools -trimpath -ldflags="-H windowsgui" -o dist/IdleTrigger-x64-devtools.exe .
+.\dist\IdleTrigger-x64-devtools.exe
 
 # In a second terminal after the tray app starts:
-cmd /c .\dist\IdleTrigger-x64-dev.exe nosleep on
-cmd /c .\dist\IdleTrigger-x64-dev.exe nosleep status
-cmd /c .\dist\IdleTrigger-x64-dev.exe monitor on
+cmd /c .\dist\IdleTrigger-x64-devtools.exe nosleep on
+cmd /c .\dist\IdleTrigger-x64-devtools.exe nosleep status
+cmd /c .\dist\IdleTrigger-x64-devtools.exe monitor on
+cmd /c .\dist\IdleTrigger-x64-devtools.exe diagnostics idle
 ```
 
 The dev build uses the Windows GUI subsystem so tray startup does not flash a
 console window. For CLI output checks, run commands through `cmd /c` or redirect
 stdout/stderr with `Start-Process`; direct PowerShell invocation of GUI-subsystem
 EXEs can return before output is attached.
+Maintenance capabilities such as `diagnostics`, screenshots, and local test
+environment variables exist only in devtools builds.
 
 Code signing is an optional release step. Do not pack debug builds with UPX: it complicates diagnostics and can increase antivirus scrutiny.

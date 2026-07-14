@@ -91,6 +91,23 @@ go run ./scripts/gen_resource.go -version $version
 
 请将 `app.ico`、两个托盘 ICO、`assets/manifest.xml` 和生成器一并提交。不要提交 `.syso` 文件；发布工作流会按 tag 版本自动重新生成。
 
+## 重新生成 README 截图
+
+截图生成属于维护能力，只在使用 `devtools` 构建标签时编译。辅助脚本会临时构建
+devtools EXE、重新生成四张受版本管理的图片、校验 PNG 尺寸，并删除临时构建目录：
+
+```powershell
+.\scripts\capture-screenshots.ps1
+```
+
+如只想验证截图流程而不覆盖仓库图片，可指定临时输出目录：
+
+```powershell
+.\scripts\capture-screenshots.ps1 -OutputDirectory (Join-Path $env:TEMP "IdleTrigger-screenshots")
+```
+
+正式 EXE 明确不包含 `screenshot` 命令及其 PNG/压缩依赖。
+
 ## 离线构建
 
 先在联网环境 vendor 依赖，再将包含 `vendor/` 的仓库复制到离线机器：
@@ -111,17 +128,19 @@ go test ./...
 go run ./scripts/gen_resource.go -version dev
 $env:CGO_ENABLED = "0"
 $env:GOARCH = "amd64"
-go build -trimpath -ldflags="-H windowsgui" -o dist/IdleTrigger-x64-dev.exe .
-.\dist\IdleTrigger-x64-dev.exe
+go build -tags devtools -trimpath -ldflags="-H windowsgui" -o dist/IdleTrigger-x64-devtools.exe .
+.\dist\IdleTrigger-x64-devtools.exe
 
 # 托盘程序启动后，在第二个终端中执行：
-cmd /c .\dist\IdleTrigger-x64-dev.exe nosleep on
-cmd /c .\dist\IdleTrigger-x64-dev.exe nosleep status
-cmd /c .\dist\IdleTrigger-x64-dev.exe monitor on
+cmd /c .\dist\IdleTrigger-x64-devtools.exe nosleep on
+cmd /c .\dist\IdleTrigger-x64-devtools.exe nosleep status
+cmd /c .\dist\IdleTrigger-x64-devtools.exe monitor on
+cmd /c .\dist\IdleTrigger-x64-devtools.exe diagnostics idle
 ```
 
 开发构建使用 Windows GUI 子系统，避免启动托盘程序时闪出控制台窗口。验证 CLI
 输出时，请通过 `cmd /c` 执行，或用 `Start-Process` 重定向 stdout/stderr；
 PowerShell 直接运行 GUI 子系统 EXE 时，可能在输出完成绑定前就返回。
+`diagnostics`、截图和本机测试环境变量等维护能力只存在于 devtools 构建。
 
 代码签名是可选发布步骤。调试构建不要使用 UPX 加壳，以免增加诊断和杀毒软件分析成本。

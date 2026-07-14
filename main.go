@@ -17,18 +17,16 @@ import (
 	"github.com/JeffioZ/idletrigger/internal/dpi"
 	"github.com/JeffioZ/idletrigger/internal/gdiplus"
 	"github.com/JeffioZ/idletrigger/internal/i18n"
-	"github.com/JeffioZ/idletrigger/internal/inputdiag"
 	"github.com/JeffioZ/idletrigger/internal/ipc"
 	mylog "github.com/JeffioZ/idletrigger/internal/log"
-	"github.com/JeffioZ/idletrigger/internal/screenshot"
 	"github.com/JeffioZ/idletrigger/internal/singleinstance"
 	"github.com/JeffioZ/idletrigger/internal/tray"
 	"github.com/JeffioZ/idletrigger/internal/version"
 )
 
 func main() {
-	if screenshot.IsCommand(os.Args[1:]) {
-		if runScreenshot(os.Args[1:]) != 0 {
+	if exitCode, handled := runDevtoolsCommand(os.Args[1:]); handled {
+		if exitCode != 0 {
 			os.Exit(1)
 		}
 		return
@@ -103,7 +101,7 @@ func main() {
 	for _, notice := range developerTools.Notices {
 		mylog.Info("%s", notice)
 	}
-	if stopInputDiagnostics := inputdiag.Start(developerTools.InputTrace); stopInputDiagnostics != nil {
+	if stopInputDiagnostics := startInputDiagnostics(developerTools); stopInputDiagnostics != nil {
 		defer stopInputDiagnostics()
 	}
 	if configLoadErr != nil {
@@ -114,22 +112,6 @@ func main() {
 		time.Sleep(time.Duration(startupDelay) * time.Second)
 	}
 	tray.Run(cfg, tray.Callbacks{ShowPopupOnStart: !startMinimized, DeveloperTools: developerTools})
-}
-
-func runScreenshot(args []string) int {
-	return runScreenshotWith(args, gdiplus.Start, gdiplus.Shutdown, screenshot.Run, enableConsoleOutput)
-}
-
-func runScreenshotWith(args []string, start func() bool, shutdown func(), run func([]string) error, enableConsole func()) int {
-	start() // failure preserves the popup's GDI fallback paths.
-	enableConsole()
-	err := run(args)
-	shutdown()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "IdleTrigger screenshot failed:", err)
-		return 1
-	}
-	return 0
 }
 
 func enableConsoleOutput() {

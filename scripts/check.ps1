@@ -37,7 +37,10 @@ if ($unformatted.Count -ne 0) {
 
 Invoke-NativeCheck "git diff --check" { git diff --check }
 Invoke-NativeCheck "go test -count=1 ./..." { go test -count=1 ./... }
+Invoke-NativeCheck "go test -count=1 -tags devtools ./..." { go test -count=1 -tags devtools ./... }
 Invoke-NativeCheck "go vet ./..." { go vet ./... }
+Invoke-NativeCheck "go vet -tags devtools ./..." { go vet -tags devtools ./... }
+Invoke-NativeCheck "build dependency boundaries" { & (Join-Path $PSScriptRoot 'check-build-boundaries.ps1') }
 
 $golangci = Get-Command golangci-lint -ErrorAction SilentlyContinue
 $golangciSkipped = $null -eq $golangci

@@ -38,11 +38,27 @@ jobs:
       - name: go test
         run: go test -count=1 ./...
 
+      - name: go test (devtools)
+        run: go test -count=1 -tags devtools ./...
+
+      - name: Build supported Windows architectures
+        run: |
+          $env:CGO_ENABLED = "0"
+          $ldflags = "-s -w -H windowsgui -X github.com/JeffioZ/idletrigger/internal/version.Value=ci"
+          foreach ($arch in @("386", "amd64")) {
+            $env:GOARCH = $arch
+            go build -trimpath -ldflags $ldflags -o (Join-Path $env:RUNNER_TEMP "IdleTrigger-$arch.exe") .
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
       - name: go vet
         run: go vet ./...
 
-      - name: Verify README screenshot generation
-        run: ./scripts/capture-screenshots.ps1 -OutputDirectory (Join-Path $env:RUNNER_TEMP "idletrigger-screenshots")
+      - name: go vet (devtools)
+        run: go vet -tags devtools ./...
+
+      - name: Verify build dependency boundaries
+        run: ./scripts/check-build-boundaries.ps1
 
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...

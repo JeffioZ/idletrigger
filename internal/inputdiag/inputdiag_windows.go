@@ -1,3 +1,5 @@
+//go:build windows && devtools
+
 package inputdiag
 
 import (

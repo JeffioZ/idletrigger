@@ -31,6 +31,7 @@ jobs:
           if ($unfmt) { Write-Error "gofmt: $unfmt"; exit 1 }
           go test -count=1 ./...
           go vet ./...
+          ./scripts/check-build-boundaries.ps1
 
       - name: Generate .syso
         run: |
