@@ -3,6 +3,7 @@ package popup
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -464,6 +465,11 @@ func createPanel(state State, onAction OnAction, langFn LangFunc) error {
 // callback owns only its temporary resources; popup always destroys the HWND
 // and its fonts, brushes, and icons before returning.
 func Capture(state State, langFn LangFunc, scale float64, capture func(windows.Handle) error) error {
+	// Win32 window creation, synchronous control messages, and destruction must
+	// stay on the same OS thread throughout a headless capture.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
 	p, err := createPanelForHost(state, nil, langFn, scale, true)
 	if err != nil {
 		return err
