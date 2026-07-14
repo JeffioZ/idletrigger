@@ -15,6 +15,7 @@ import (
 	"github.com/JeffioZ/idletrigger/internal/darkmode"
 	"github.com/JeffioZ/idletrigger/internal/devtools"
 	"github.com/JeffioZ/idletrigger/internal/dpi"
+	"github.com/JeffioZ/idletrigger/internal/gdiplus"
 	"github.com/JeffioZ/idletrigger/internal/i18n"
 	"github.com/JeffioZ/idletrigger/internal/inputdiag"
 	"github.com/JeffioZ/idletrigger/internal/ipc"
@@ -27,9 +28,7 @@ import (
 
 func main() {
 	if screenshot.IsCommand(os.Args[1:]) {
-		enableConsoleOutput()
-		if err := screenshot.Run(os.Args[1:]); err != nil {
-			fmt.Fprintln(os.Stderr, "IdleTrigger screenshot failed:", err)
+		if runScreenshot(os.Args[1:]) != 0 {
 			os.Exit(1)
 		}
 		return
@@ -87,6 +86,8 @@ func main() {
 		cli.Run(cfg.Language)
 		return
 	}
+	gdiplus.Start() // failure preserves the popup's GDI fallback paths.
+	defer gdiplus.Shutdown()
 
 	// GUI mode
 	exePath, _ := os.Executable()
@@ -113,6 +114,22 @@ func main() {
 		time.Sleep(time.Duration(startupDelay) * time.Second)
 	}
 	tray.Run(cfg, tray.Callbacks{ShowPopupOnStart: !startMinimized, DeveloperTools: developerTools})
+}
+
+func runScreenshot(args []string) int {
+	return runScreenshotWith(args, gdiplus.Start, gdiplus.Shutdown, screenshot.Run, enableConsoleOutput)
+}
+
+func runScreenshotWith(args []string, start func() bool, shutdown func(), run func([]string) error, enableConsole func()) int {
+	start() // failure preserves the popup's GDI fallback paths.
+	enableConsole()
+	err := run(args)
+	shutdown()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "IdleTrigger screenshot failed:", err)
+		return 1
+	}
+	return 0
 }
 
 func enableConsoleOutput() {

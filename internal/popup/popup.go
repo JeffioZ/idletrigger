@@ -10,6 +10,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
+	"github.com/JeffioZ/idletrigger/internal/gdiplus"
 	"github.com/JeffioZ/idletrigger/internal/idlewarning"
 	mylog "github.com/JeffioZ/idletrigger/internal/log"
 	"github.com/JeffioZ/idletrigger/internal/systray"
@@ -2627,7 +2628,25 @@ func (p *panel) triggerOpen(id uint16) bool {
 
 func isDangerQuickAction(id uint16) bool { return id == idShutdown || id == idRestart }
 
-func (p *panel) drawDisclosureArrow(dc windows.Handle, bounds rect, up bool, color uint32) {
+func (p *panel) drawDisclosureArrow(dc windows.Handle, bounds rect, up bool, color uint32) gdiplus.DrawResult {
+	width := int32(p.sc(p.metrics.style.Control.ArrowWidth))
+	height := int32(p.sc(p.metrics.style.Control.ArrowHeight))
+	if width < 2 || height < 1 {
+		return gdiplus.DrawNotStarted
+	}
+	penWidth := p.sc(1)
+	if penWidth < 1 {
+		penWidth = 1
+	}
+	cx := bounds.Right - int32(p.sc(18))
+	cy := (bounds.Top + bounds.Bottom) / 2
+	halfW := width / 2
+	halfH := height / 2
+	stroke := int32(penWidth)
+	return gdiplus.FillPolygon(dc, disclosureArrowPolygon(cx, cy, halfW, halfH, stroke, up), color)
+}
+
+func (p *panel) drawDisclosureArrowGDI(dc windows.Handle, bounds rect, up bool, color uint32) {
 	width := int32(p.sc(p.metrics.style.Control.ArrowWidth))
 	height := int32(p.sc(p.metrics.style.Control.ArrowHeight))
 	if width < 2 || height < 1 {
@@ -2646,8 +2665,7 @@ func (p *panel) drawDisclosureArrow(dc windows.Handle, bounds rect, up bool, col
 	defer pSelectObject.Call(uintptr(dc), old)
 	cx := bounds.Right - int32(p.sc(18))
 	cy := (bounds.Top + bounds.Bottom) / 2
-	halfW := width / 2
-	halfH := height / 2
+	halfW, halfH := width/2, height/2
 	if up {
 		pMoveToEx.Call(uintptr(dc), uintptr(cx-halfW), uintptr(cy+halfH), 0)
 		pLineTo.Call(uintptr(dc), uintptr(cx), uintptr(cy-halfH))
@@ -2657,6 +2675,13 @@ func (p *panel) drawDisclosureArrow(dc windows.Handle, bounds rect, up bool, col
 	pMoveToEx.Call(uintptr(dc), uintptr(cx-halfW), uintptr(cy-halfH), 0)
 	pLineTo.Call(uintptr(dc), uintptr(cx), uintptr(cy+halfH))
 	pLineTo.Call(uintptr(dc), uintptr(cx+halfW), uintptr(cy-halfH))
+}
+
+func disclosureArrowPolygon(cx, cy, halfW, halfH, stroke int32, up bool) []gdiplus.Point {
+	if up {
+		return []gdiplus.Point{{X: cx - halfW, Y: cy + halfH}, {X: cx - halfW + stroke, Y: cy + halfH}, {X: cx, Y: cy - halfH + stroke}, {X: cx + halfW - stroke, Y: cy + halfH}, {X: cx + halfW, Y: cy + halfH}, {X: cx, Y: cy - halfH}}
+	}
+	return []gdiplus.Point{{X: cx - halfW, Y: cy - halfH}, {X: cx - halfW + stroke, Y: cy - halfH}, {X: cx, Y: cy + halfH - stroke}, {X: cx + halfW - stroke, Y: cy - halfH}, {X: cx + halfW, Y: cy - halfH}, {X: cx, Y: cy + halfH}}
 }
 
 // roundRectFocusRing draws one inset outline using only temporary GDI objects.
@@ -2901,7 +2926,13 @@ func (p *panel) drawChoiceButton(item *drawItem, state buttonVisualState) {
 	}
 	pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&item.Rect)), uintptr(p.backgroundBrush))
 	p.roundRect(item.HDC, item.Rect, brush, border, p.sc(p.metrics.style.Control.CornerRadius))
-	p.drawDisclosureArrow(item.HDC, item.Rect, open, arrowColor)
+	arrowResult := p.drawDisclosureArrow(item.HDC, item.Rect, open, arrowColor)
+	if arrowResult != gdiplus.DrawCompleted {
+		if arrowResult == gdiplus.DrawMayBeDirty {
+			p.roundRect(item.HDC, item.Rect, brush, border, p.sc(p.metrics.style.Control.CornerRadius))
+		}
+		p.drawDisclosureArrowGDI(item.HDC, item.Rect, open, arrowColor)
+	}
 	text, _ := windows.UTF16PtrFromString(p.labels[uint16(item.CtlID)])
 	old, _, _ := pSelectObject.Call(uintptr(item.HDC), uintptr(p.font))
 	pSetTextColor.Call(uintptr(item.HDC), uintptr(textColor))
@@ -3003,8 +3034,7 @@ func (p *panel) drawToggle(item *drawItem) {
 	} else if state.Hovered {
 		brush, border = p.hoverBrush, p.accentHoverBrush
 	}
-	pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&box)), uintptr(brush))
-	pFrameRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&box)), uintptr(border))
+	p.drawToggleBox(item.HDC, box, brush, border)
 	old, _, _ := pSelectObject.Call(uintptr(item.HDC), uintptr(p.font))
 	defer pSelectObject.Call(uintptr(item.HDC), old)
 	pSetBkMode.Call(uintptr(item.HDC), transparent)
@@ -3015,8 +3045,14 @@ func (p *panel) drawToggle(item *drawItem) {
 			// White on the light disabled surface has insufficient contrast.
 			checkColor = p.palette.MutedText
 		}
-		pSetTextColor.Call(uintptr(item.HDC), uintptr(checkColor))
-		pDrawText.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(check)), ^uintptr(0), uintptr(unsafe.Pointer(&box)), dtCenter|dtVCenter|dtSingleLine)
+		checkResult := gdiplus.DrawCheck(item.HDC, box.Left, box.Top, box.Right, box.Bottom, checkColor, int32(p.sc(2)))
+		if checkResult != gdiplus.DrawCompleted {
+			if checkResult == gdiplus.DrawMayBeDirty {
+				p.drawToggleBox(item.HDC, box, brush, border)
+			}
+			pSetTextColor.Call(uintptr(item.HDC), uintptr(checkColor))
+			pDrawText.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(check)), ^uintptr(0), uintptr(unsafe.Pointer(&box)), dtCenter|dtVCenter|dtSingleLine)
+		}
 	}
 	if state.Focused {
 		focus := item.Rect
@@ -3035,6 +3071,11 @@ func (p *panel) drawToggle(item *drawItem) {
 	bounds.Right -= int32(p.sc(p.metrics.style.Control.MenuSurfaceInset))
 	pSetTextColor.Call(uintptr(item.HDC), uintptr(textColor))
 	drawTextLeftCentered(item.HDC, text, bounds)
+}
+
+func (p *panel) drawToggleBox(dc windows.Handle, box rect, brush, border windows.Handle) {
+	pFillRect.Call(uintptr(dc), uintptr(unsafe.Pointer(&box)), uintptr(brush))
+	pFrameRect.Call(uintptr(dc), uintptr(unsafe.Pointer(&box)), uintptr(border))
 }
 
 func (p *panel) drawStatic(item *drawItem) {
