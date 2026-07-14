@@ -18,6 +18,8 @@ import (
 	"github.com/akavel/rsrc/binutil"
 	"github.com/akavel/rsrc/coff"
 	"github.com/akavel/rsrc/ico"
+
+	"github.com/JeffioZ/idletrigger/internal/winresource"
 )
 
 const rtVersion = 16
@@ -65,13 +67,7 @@ func main() {
 }
 
 func generate(arch, output, originalFilename, manifestPath, iconPath, trayDarkIconPath, trayLightIconPath, version string) error {
-	const (
-		manifestResourceID      = 1
-		appIconResourceID       = 2
-		trayDarkIconResourceID  = 3
-		trayLightIconResourceID = 4
-	)
-	lastIconImageID := uint16(trayLightIconResourceID)
+	lastIconImageID := uint16(winresource.TrayLightIconID)
 	newIconImageID := func() uint16 {
 		lastIconImageID++
 		return lastIconImageID
@@ -87,19 +83,19 @@ func generate(arch, output, originalFilename, manifestPath, iconPath, trayDarkIc
 		return fmt.Errorf("open manifest: %w", err)
 	}
 	defer manifest.Close()
-	out.AddResource(coff.RT_MANIFEST, manifestResourceID, manifest)
+	out.AddResource(coff.RT_MANIFEST, winresource.ManifestID, manifest)
 
-	iconFile, err := addIcon(out, iconPath, appIconResourceID, newIconImageID)
+	iconFile, err := addIcon(out, iconPath, winresource.AppIconID, newIconImageID)
 	if err != nil {
 		return err
 	}
 	defer iconFile.Close()
-	trayDarkIconFile, err := addIcon(out, trayDarkIconPath, trayDarkIconResourceID, newIconImageID)
+	trayDarkIconFile, err := addIcon(out, trayDarkIconPath, winresource.TrayDarkIconID, newIconImageID)
 	if err != nil {
 		return err
 	}
 	defer trayDarkIconFile.Close()
-	trayLightIconFile, err := addIcon(out, trayLightIconPath, trayLightIconResourceID, newIconImageID)
+	trayLightIconFile, err := addIcon(out, trayLightIconPath, winresource.TrayLightIconID, newIconImageID)
 	if err != nil {
 		return err
 	}

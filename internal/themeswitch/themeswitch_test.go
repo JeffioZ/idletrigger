@@ -1,6 +1,7 @@
 package themeswitch
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,15 @@ import (
 
 	mylog "github.com/JeffioZ/idletrigger/internal/log"
 )
+
+func TestSunriseSunsetRejectsNonFiniteCoordinates(t *testing.T) {
+	date := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+	for _, coordinates := range [][2]float64{{math.NaN(), 0}, {0, math.Inf(1)}} {
+		if light, dark := CalcSunriseSunset(date, coordinates[0], coordinates[1]); light != -1 || dark != -1 {
+			t.Fatalf("non-finite coordinates returned %d/%d", light, dark)
+		}
+	}
+}
 
 func TestParseTime(t *testing.T) {
 	for input, want := range map[string]int{

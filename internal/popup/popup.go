@@ -10,6 +10,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
+	"github.com/JeffioZ/idletrigger/internal/config"
 	"github.com/JeffioZ/idletrigger/internal/gdiplus"
 	"github.com/JeffioZ/idletrigger/internal/idlewarning"
 	mylog "github.com/JeffioZ/idletrigger/internal/log"
@@ -621,76 +622,6 @@ func ensureClass() error {
 	return classErr
 }
 
-const (
-	appIconResourceID       = 2 // Main executable icon; shared class fallback only.
-	trayDarkIconResourceID  = 3 // Dark mark for a light title bar.
-	trayLightIconResourceID = 4 // Light mark for a dark title bar.
-)
-
-// classFallbackIcon is loaded through LoadIconW, whose resource handle is
-// shared by the module and must not be destroyed. Every real panel instance
-// immediately replaces it with the theme-specific, owned WM_SETICON handles.
-func classFallbackIcon(module uintptr) windows.Handle {
-	if module == 0 {
-		return 0
-	}
-	icon, _, _ := pLoadIcon.Call(module, appIconResourceID)
-	return windows.Handle(icon)
-}
-
-func windowIconResourceID(dark bool) uintptr {
-	if dark {
-		return trayLightIconResourceID
-	}
-	return trayDarkIconResourceID
-}
-
-func windowIcon(dark bool, size int) windows.Handle {
-	module, _, _ := pGetModuleHandle.Call(0)
-	if module == 0 {
-		return 0
-	}
-	const imageIcon = 1
-	icon, _, _ := pLoadImage.Call(module, windowIconResourceID(dark), imageIcon, uintptr(size), uintptr(size), 0)
-	return windows.Handle(icon)
-}
-
-func shouldReloadWindowIcons(initialized, currentDark, requestedDark, force bool) bool {
-	return !initialized || force || currentDark != requestedDark
-}
-
-func (p *panel) setWindowIcons(dark, force bool) {
-	if p.hwnd == 0 || !shouldReloadWindowIcons(p.iconsInitialized, p.iconThemeDark, dark, force) {
-		return
-	}
-	largeIcon := windowIcon(dark, p.sc(p.metrics.style.Control.IconLarge))
-	smallIcon := windowIcon(dark, p.sc(p.metrics.style.Control.IconSmall))
-	if largeIcon == 0 || smallIcon == 0 {
-		if largeIcon != 0 {
-			pDestroyIcon.Call(uintptr(largeIcon))
-		}
-		if smallIcon != 0 {
-			pDestroyIcon.Call(uintptr(smallIcon))
-		}
-		mylog.Info("UI icon: surface=popup load failed theme_dark=%v dpi=%d", dark, int(p.metrics.scale*96+0.5))
-		return
-	}
-	oldLargeIcon, oldSmallIcon := p.largeIcon, p.smallIcon
-	p.largeIcon, p.smallIcon = largeIcon, smallIcon
-	p.iconThemeDark, p.iconsInitialized = dark, true
-	const (
-		iconSmall = 0
-		iconBig   = 1
-	)
-	pSendMessage.Call(uintptr(p.hwnd), wmSetIcon, iconBig, uintptr(p.largeIcon))
-	pSendMessage.Call(uintptr(p.hwnd), wmSetIcon, iconSmall, uintptr(p.smallIcon))
-	for _, icon := range []windows.Handle{oldLargeIcon, oldSmallIcon} {
-		if icon != 0 {
-			pDestroyIcon.Call(uintptr(icon))
-		}
-	}
-}
-
 func (p *panel) create() error {
 	titleText := "IdleTrigger"
 	if p.appVersion != "" && p.appVersion != "dev" {
@@ -1268,98 +1199,6 @@ func (p *panel) projectHomeTextVerticalOffset() int {
 	return p.sc(2)
 }
 
-type timeoutChoice struct {
-	minutes int
-	label   string
-}
-
-// Keep the complete list short enough to fit in the popup without a special
-// scrolling path. These are the currently supported minute/hour presets;
-// unsupported persisted values normalize to the default 30-minute preset.
-var timeoutMinutes = []int{1, 2, 3, 5, 10, 15, 30, 60, 120, 300}
-
-func supportedTimeout(minutes int) int {
-	for _, supported := range timeoutMinutes {
-		if supported == minutes {
-			return minutes
-		}
-	}
-	return 30
-}
-
-func timeoutChoices(current int, chinese bool) ([]timeoutChoice, int) {
-	current = supportedTimeout(current)
-	choices := make([]timeoutChoice, 0, len(timeoutMinutes))
-	selected := -1
-	for _, minutes := range timeoutMinutes {
-		choices = append(choices, timeoutChoice{minutes: minutes, label: formatTimeout(minutes, chinese)})
-		if minutes == current {
-			selected = len(choices) - 1
-		}
-	}
-	if selected >= 0 {
-		return choices, selected
-	}
-	return choices, timeoutIndex(choices, current)
-}
-
-func formatTimeout(minutes int, chinese bool) string {
-	if minutes%60 == 0 {
-		if chinese {
-			return fmt.Sprintf("%d 小时", minutes/60)
-		}
-		if minutes == 60 {
-			return "1 hour"
-		}
-		return fmt.Sprintf("%d hours", minutes/60)
-	}
-	if chinese {
-		return fmt.Sprintf("%d 分钟", minutes)
-	}
-	if minutes == 1 {
-		return "1 minute"
-	}
-	return fmt.Sprintf("%d minutes", minutes)
-}
-
-func timeoutLabels(current int, chinese bool, options *[]timeoutChoice) []string {
-	*options, _ = timeoutChoices(current, chinese)
-	labels := make([]string, len(*options))
-	for i, option := range *options {
-		labels[i] = option.label
-	}
-	return labels
-}
-
-func timeoutIndex(options []timeoutChoice, current int) int {
-	current = supportedTimeout(current)
-	for i, option := range options {
-		if option.minutes == current {
-			return i
-		}
-	}
-	return 0
-}
-
-func quickActionIDs() []uint16 {
-	return []uint16{idLock, idSleep, idHibernate, idShutdown, idRestart}
-}
-
-func languageIDs() []uint16 { return []uint16{idLangEN, idLangZH} }
-
-func actionIndex(value string) int {
-	for i, action := range []string{"sleep", "hibernate", "shutdown", "lock"} {
-		if value == action {
-			return i
-		}
-	}
-	return 0
-}
-
-func actionLabels(p *panel) []string {
-	return []string{p.text("menu_action_sleep"), p.text("menu_action_hibernate"), p.text("menu_action_shutdown"), p.text("menu_action_lock")}
-}
-
 func roleForButton(id uint16) buttonRole {
 	switch id {
 	case idNoSleep, idProcess, idIdle, idIdleWarning, idIdleEnhanced,
@@ -1459,11 +1298,7 @@ func (p *panel) openQuickMenu(focusFirst bool) {
 	}
 	p.quickMenuOpen = true
 	p.closeLanguageMenu()
-	for _, id := range append([]uint16{idQuickMenu}, quickActionIDs()...) {
-		if hwnd := p.controls[id]; hwnd != 0 {
-			pSetWindowPos.Call(uintptr(hwnd), 0, 0, 0, 0, 0, swpNoMove|swpNoSize|swpNoActivate|swpShowWindow)
-		}
-	}
+	p.showFixedMenu(idQuickMenu, quickActionIDs())
 	if focusFirst {
 		pSetFocus.Call(uintptr(p.controls[quickActionIDs()[0]]))
 	}
@@ -1480,18 +1315,7 @@ func (p *panel) clearTrackedHover(ids []uint16) {
 }
 
 func (p *panel) closeQuickMenu() {
-	if !p.quickMenuOpen {
-		return
-	}
-	p.quickMenuOpen = false
-	ids := append([]uint16{idQuickMenu}, quickActionIDs()...)
-	p.clearTrackedHover(append([]uint16{idQuickActions}, quickActionIDs()...))
-	p.invalidate(idQuickActions)
-	for _, id := range ids {
-		if hwnd := p.controls[id]; hwnd != 0 {
-			pShowWindow.Call(uintptr(hwnd), swHide)
-		}
-	}
+	p.closeFixedMenu(&p.quickMenuOpen, idQuickMenu, idQuickActions, quickActionIDs())
 }
 
 func (p *panel) openLanguageMenu(focusFirst bool) {
@@ -1504,11 +1328,7 @@ func (p *panel) openLanguageMenu(focusFirst bool) {
 	}
 	p.closeQuickMenu()
 	p.languageMenuOpen = true
-	for _, id := range append([]uint16{idLanguageMenu}, languageIDs()...) {
-		if hwnd := p.controls[id]; hwnd != 0 {
-			pSetWindowPos.Call(uintptr(hwnd), 0, 0, 0, 0, 0, swpNoMove|swpNoSize|swpNoActivate|swpShowWindow)
-		}
-	}
+	p.showFixedMenu(idLanguageMenu, languageIDs())
 	if focusFirst {
 		p.focusUnselectedLanguage()
 	}
@@ -1523,14 +1343,25 @@ func (p *panel) focusUnselectedLanguage() {
 }
 
 func (p *panel) closeLanguageMenu() {
-	if !p.languageMenuOpen {
+	p.closeFixedMenu(&p.languageMenuOpen, idLanguageMenu, idLanguage, languageIDs())
+}
+
+func (p *panel) showFixedMenu(surfaceID uint16, optionIDs []uint16) {
+	for _, id := range append([]uint16{surfaceID}, optionIDs...) {
+		if hwnd := p.controls[id]; hwnd != 0 {
+			pSetWindowPos.Call(uintptr(hwnd), 0, 0, 0, 0, 0, swpNoMove|swpNoSize|swpNoActivate|swpShowWindow)
+		}
+	}
+}
+
+func (p *panel) closeFixedMenu(open *bool, surfaceID, triggerID uint16, optionIDs []uint16) {
+	if !*open {
 		return
 	}
-	p.languageMenuOpen = false
-	ids := append([]uint16{idLanguageMenu}, languageIDs()...)
-	p.clearTrackedHover(append([]uint16{idLanguage}, languageIDs()...))
-	p.invalidate(idLanguage)
-	for _, id := range ids {
+	*open = false
+	p.clearTrackedHover(append([]uint16{triggerID}, optionIDs...))
+	p.invalidate(triggerID)
+	for _, id := range append([]uint16{surfaceID}, optionIDs...) {
 		if hwnd := p.controls[id]; hwnd != 0 {
 			pShowWindow.Call(uintptr(hwnd), swHide)
 		}
@@ -1624,137 +1455,7 @@ func setWindowProc(hwnd windows.Handle, proc uintptr) (uintptr, uintptr, error) 
 	return pSetWindowLongPtr.Call(uintptr(hwnd), gwlpWndProc, proc)
 }
 
-func buttonWndProc(hwnd windows.Handle, msg uint32, wp, lp uintptr) uintptr {
-	p := panelForButton(hwnd)
-	var old uintptr
-	if p != nil {
-		old = p.oldButtonProc[hwnd]
-		id := p.controlID(hwnd)
-		switch msg {
-		case wmMouseMove:
-			if id == idProjectHome {
-				p.setProjectHomeCursor(true)
-			}
-			p.setHover(hwnd)
-		case wmMouseWheel:
-			if owner, _, ok := choiceOptionOwner(p, p.controlID(hwnd)); ok {
-				delta := 1
-				if int16(wp>>16) > 0 {
-					delta = -1
-				}
-				p.scrollChoice(owner, delta)
-				return 0
-			}
-		case wmMouseLeave:
-			p.clearHover(hwnd)
-			if id == idProjectHome {
-				p.setProjectHomeCursor(false)
-			}
-		case wmSetCursor:
-			if id == idProjectHome {
-				p.setProjectHomeCursor(true)
-				return 1
-			}
-		case wmKillFocus:
-			if _, _, ok := choiceOptionOwner(p, p.controlID(hwnd)); ok {
-				focus, _, _ := pGetFocus.Call()
-				if !p.choiceFocusContains(windows.Handle(focus)) {
-					p.closeChoice(false)
-				}
-			}
-		case wmLButtonDown:
-			p.leaveKeyboardNavigation()
-			if !p.menuClickKeepsOpen(id) {
-				p.closeOpenMenus()
-			}
-		case wmKeyDown:
-			id := p.controlID(hwnd)
-			switch wp {
-			case vkUp, vkDown, vkHome, vkEnd, vkReturn, vkSpace, vkF4, vkEscape:
-				// Programmatic SetFocus is not a modality change. Actual keyboard
-				// navigation is the only path that enables focus-visible drawing.
-				p.enterKeyboardNavigation()
-			}
-			if owner, index, ok := choiceOptionOwner(p, id); ok {
-				switch wp {
-				case vkUp:
-					p.focusChoice(owner, index, -1)
-					return 0
-				case vkDown:
-					p.focusChoice(owner, index, 1)
-					return 0
-				case vkHome:
-					p.focusChoice(owner, index, -index)
-					return 0
-				case vkEnd:
-					p.focusChoice(owner, index, len(p.choice.options[owner])-1-index)
-					return 0
-				case vkEscape:
-					p.closeChoice(true)
-					return 0
-				case vkF4:
-					p.closeChoice(true)
-					return 0
-				case vkReturn, vkSpace:
-					p.applyChoice(id)
-					return 0
-				}
-			}
-			if id == idIdleTimeout || id == idIdleAction {
-				switch wp {
-				case vkReturn, vkSpace, vkUp, vkDown, vkF4:
-					p.requestChoice(id, true)
-					return 0
-				}
-			}
-			if containsQuickAction(id) {
-				switch wp {
-				case vkUp:
-					p.focusQuickAction(id, -1)
-					return 0
-				case vkDown:
-					p.focusQuickAction(id, 1)
-					return 0
-				case vkEscape:
-					p.closeQuickMenu()
-					pSetFocus.Call(uintptr(p.controls[idQuickActions]))
-					return 0
-				}
-			}
-			if containsLanguageOption(id) {
-				switch wp {
-				case vkUp, vkDown:
-					other := uint16(idLangEN)
-					if id == idLangEN {
-						other = uint16(idLangZH)
-					}
-					pSetFocus.Call(uintptr(p.controls[other]))
-					return 0
-				case vkEscape:
-					p.closeLanguageMenu()
-					pSetFocus.Call(uintptr(p.controls[idLanguage]))
-					return 0
-				}
-			}
-		case wmSysKeyDown:
-			id := p.controlID(hwnd)
-			if (wp == vkDown || wp == vkF4) && (id == idIdleTimeout || id == idIdleAction) {
-				p.enterKeyboardNavigation()
-				p.requestChoice(id, true)
-				return 0
-			}
-		}
-	}
-	if old != 0 {
-		result, _, _ := pCallWindowProc.Call(old, uintptr(hwnd), uintptr(msg), wp, lp)
-		return result
-	}
-	result, _, _ := pDefWindowProc.Call(uintptr(hwnd), uintptr(msg), wp, lp)
-	return result
-}
-
-func (p *panel) focusQuickAction(current uint16, delta int) {
-	ids := quickActionIDs()
+func (p *panel) focusFixedMenuOption(ids []uint16, current uint16, delta int) {
 	for index, id := range ids {
 		if id == current {
 			next := (index + delta + len(ids)) % len(ids)
@@ -2066,10 +1767,11 @@ func (p *panel) applyTimeoutChoice(index int) {
 }
 
 func (p *panel) applyActionChoice(index int) {
-	if index >= 4 {
+	action, ok := config.IdleActionAt(index)
+	if !ok {
 		return
 	}
-	p.idleAction = []string{"sleep", "hibernate", "shutdown", "lock"}[index]
+	p.idleAction = string(action)
 	if p.onAction != nil {
 		p.onAction(ActIdleAction, index)
 	}
@@ -2598,8 +2300,15 @@ func (p *panel) drawButton(item *drawItem) {
 	id := uint16(item.CtlID)
 	state := p.controlState(id, item.ItemState)
 	if owner, index, ok := choiceOptionOwner(p, id); ok {
-		state.Active = p.choice.selected[owner] == index
-		p.drawChoiceOption(item, state)
+		p.drawMenuOption(item, state, menuOptionStyleFor(id, p.choice.selected[owner] == index))
+		return
+	}
+	if containsLanguageOption(id) {
+		p.drawMenuOption(item, state, menuOptionStyleFor(id, p.selected[id]))
+		return
+	}
+	if containsQuickAction(id) {
+		p.drawMenuOption(item, state, menuOptionStyleFor(id, false))
 		return
 	}
 	if id == idIdleTimeout || id == idIdleAction {
@@ -2619,7 +2328,7 @@ func (p *panel) drawButton(item *drawItem) {
 		return
 	}
 	selected := state.Active
-	danger := id == idExit || isDangerQuickAction(id)
+	danger := id == idExit
 	brush, borderColor, textColor := p.surfaceBrush, p.palette.Border, p.palette.PrimaryText
 	if state.Hovered {
 		brush = p.hoverBrush
@@ -2647,17 +2356,6 @@ func (p *panel) drawButton(item *drawItem) {
 	}
 	pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&item.Rect)), uintptr(p.backgroundBrush))
 	p.roundRect(item.HDC, item.Rect, brush, borderColor, p.sc(p.metrics.style.Control.CornerRadius))
-	if id == idShutdown {
-		// Adjacent menu rows share an edge. Paint on the first danger row after
-		// its surface so no child HWND redraw can cover the separator.
-		separator := item.Rect
-		separator.Left += int32(p.sc(p.metrics.style.Control.MenuSurfaceInset))
-		separator.Right -= int32(p.sc(p.metrics.style.Control.MenuSurfaceInset))
-		separator.Bottom = separator.Top + int32(p.sc(1))
-		if separator.Left < separator.Right {
-			pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&separator)), uintptr(p.dangerBorderBrush))
-		}
-	}
 	pSetTextColor.Call(uintptr(item.HDC), uintptr(textColor))
 	pSetBkMode.Call(uintptr(item.HDC), transparent)
 	old, _, _ := pSelectObject.Call(uintptr(item.HDC), uintptr(p.font))
@@ -2745,20 +2443,57 @@ func projectHomeLinkColor(palette uicolors.Palette, dark bool, state buttonVisua
 	return palette.Accent
 }
 
-func (p *panel) drawChoiceOption(item *drawItem, state buttonVisualState) {
+type menuOptionStyle struct {
+	Selected  bool
+	Danger    bool
+	Separator bool
+}
+
+func menuOptionStyleFor(id uint16, selected bool) menuOptionStyle {
+	return menuOptionStyle{
+		Selected:  selected,
+		Danger:    isDangerQuickAction(id),
+		Separator: id == idShutdown,
+	}
+}
+
+// drawMenuOption is the single rendering path for quick actions, language
+// choices, idle-time choices, and idle-action choices. The style describes
+// only their real semantic differences.
+func (p *panel) drawMenuOption(item *drawItem, state buttonVisualState, style menuOptionStyle) {
 	brush, border, textColor := p.surfaceBrush, p.palette.Border, p.palette.PrimaryText
 	if state.Hovered {
 		brush = p.hoverBrush
 	}
+	if style.Danger {
+		brush, border, textColor = p.dangerBrush, p.palette.DangerBorder, p.palette.DangerText
+		if state.Hovered {
+			brush, border = p.dangerHoverBrush, p.palette.DangerHoverBorder
+		}
+	}
 	if state.Pressed {
 		brush, border = p.elevatedBrush, p.palette.AccentPressed
+		if style.Danger {
+			brush, border, textColor = p.dangerPressedBrush, p.palette.DangerPressedBorder, p.palette.DangerText
+		}
 	}
 	if state.Disabled || item.ItemState&odsDisabled != 0 {
 		brush, border, textColor = p.disabledBrush, p.palette.SubtleBorder, p.palette.DisabledText
 	}
 	pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&item.Rect)), uintptr(p.backgroundBrush))
 	p.roundRect(item.HDC, item.Rect, brush, border, p.sc(p.metrics.style.Control.CornerRadius))
-	if state.Active {
+	if style.Separator {
+		// Adjacent menu rows share an edge. Paint on the first danger row after
+		// its surface so no child HWND redraw can cover the separator.
+		separator := item.Rect
+		separator.Left += int32(p.sc(p.metrics.style.Control.MenuSurfaceInset))
+		separator.Right -= int32(p.sc(p.metrics.style.Control.MenuSurfaceInset))
+		separator.Bottom = separator.Top + int32(p.sc(1))
+		if separator.Left < separator.Right {
+			pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&separator)), uintptr(p.dangerBorderBrush))
+		}
+	}
+	if style.Selected {
 		marker := item.Rect
 		marker.Left += int32(p.sc(p.metrics.style.Control.MenuSurfaceInset))
 		marker.Right = marker.Left + int32(p.sc(p.metrics.style.Control.SelectedMarkerWidth))
@@ -2771,7 +2506,7 @@ func (p *panel) drawChoiceOption(item *drawItem, state buttonVisualState) {
 	pSetTextColor.Call(uintptr(item.HDC), uintptr(textColor))
 	pSetBkMode.Call(uintptr(item.HDC), transparent)
 	font := p.font
-	if state.Active {
+	if style.Selected {
 		font = p.choiceSelectedFont
 	}
 	old, _, _ := pSelectObject.Call(uintptr(item.HDC), uintptr(font))
@@ -2782,7 +2517,11 @@ func (p *panel) drawChoiceOption(item *drawItem, state buttonVisualState) {
 	bounds.Right -= int32(p.sc(p.metrics.style.Control.ButtonTextInset))
 	drawTextCentered(item.HDC, text, bounds)
 	if state.Focused {
-		p.roundRectFocusRing(item.HDC, item.Rect, p.palette.Focus)
+		focusColor := p.palette.Focus
+		if style.Danger {
+			focusColor = p.palette.DangerFocus
+		}
+		p.roundRectFocusRing(item.HDC, item.Rect, focusColor)
 	}
 }
 

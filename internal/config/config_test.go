@@ -1,6 +1,7 @@
 package config
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,43 @@ import (
 
 	"github.com/BurntSushi/toml"
 )
+
+func TestCoordinatesRejectNonFiniteValues(t *testing.T) {
+	for _, value := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+		cfg := DefaultConfig()
+		cfg.ThemeLatitude = value
+		if err := cfg.Validate(); err == nil {
+			t.Fatalf("Validate accepted non-finite latitude %v", value)
+		}
+		if got := NormalizeConfig(cfg).ThemeLatitude; got != DefaultConfig().ThemeLatitude {
+			t.Fatalf("normalized latitude = %v, want default", got)
+		}
+
+		cfg = DefaultConfig()
+		cfg.ThemeLongitude = value
+		if err := cfg.Validate(); err == nil {
+			t.Fatalf("Validate accepted non-finite longitude %v", value)
+		}
+		if got := NormalizeConfig(cfg).ThemeLongitude; got != DefaultConfig().ThemeLongitude {
+			t.Fatalf("normalized longitude = %v, want default", got)
+		}
+	}
+}
+
+func TestIdleActionIndexRoundTrip(t *testing.T) {
+	for index := 0; ; index++ {
+		action, ok := IdleActionAt(index)
+		if !ok {
+			if index != 4 {
+				t.Fatalf("idle action count = %d, want 4", index)
+			}
+			break
+		}
+		if got := IdleActionIndex(action); got != index {
+			t.Fatalf("IdleActionIndex(%q) = %d, want %d", action, got, index)
+		}
+	}
+}
 
 func TestDefaultConfigValid(t *testing.T) {
 	if err := DefaultConfig().Validate(); err != nil {

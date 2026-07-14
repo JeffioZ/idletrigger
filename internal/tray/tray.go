@@ -2,15 +2,16 @@
 package tray
 
 import (
+	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"time"
 
-	"github.com/JeffioZ/idletrigger/assets"
+	"golang.org/x/sys/windows"
+
 	"github.com/JeffioZ/idletrigger/internal/actions"
 	"github.com/JeffioZ/idletrigger/internal/autostart"
 	"github.com/JeffioZ/idletrigger/internal/config"
@@ -29,9 +30,32 @@ import (
 	"github.com/JeffioZ/idletrigger/internal/systray"
 	"github.com/JeffioZ/idletrigger/internal/themeswitch"
 	"github.com/JeffioZ/idletrigger/internal/version"
+	"github.com/JeffioZ/idletrigger/internal/winresource"
 )
 
 const projectHomeURL = "https://github.com/JeffioZ/idletrigger"
+
+var executeShell = windows.ShellExecute
+
+func openWithShell(target, arguments string) error {
+	verb, err := windows.UTF16PtrFromString("open")
+	if err != nil {
+		return err
+	}
+	file, err := windows.UTF16PtrFromString(target)
+	if err != nil {
+		return err
+	}
+	var args *uint16
+	if arguments != "" {
+		args, err = windows.UTF16PtrFromString(arguments)
+		if err != nil {
+			return err
+		}
+	}
+	const swShowNormal = 1
+	return executeShell(0, verb, file, args, nil, swShowNormal)
+}
 
 type Callbacks struct {
 	OnConfigChanged  func(config.Config)
@@ -192,9 +216,9 @@ func (s *trayState) call(fn func() string) string {
 func (s *trayState) updateIcon() {
 	darkTheme := themeswitch.Current() == themeswitch.ModeDark
 	if darkTheme {
-		systray.SetIcon(assets.IconTrayLight)
+		systray.SetIconResource(winresource.TrayLightIconID)
 	} else {
-		systray.SetIcon(assets.IconTrayDark)
+		systray.SetIconResource(winresource.TrayDarkIconID)
 	}
 	s.trayThemeDark = darkTheme
 	systray.SetTooltip(s.buildTooltip())
@@ -418,7 +442,7 @@ func (s *trayState) startMonitor() {
 				mylog.Info("Idle monitor trigger reached: effective_idle=%s action=%s raw_idle_after_trigger=%s",
 					lastEffectiveIdle.Round(time.Second), action, idleFor.Round(time.Second))
 			}
-			if err := executeAction(action); err != nil {
+			if err := s.executeAction(action); err != nil {
 				mylog.Info("Idle monitor action failed: action=%s error=%v", action, err)
 				s.post(func() { s.showError(actionTranslationKey(action), err) })
 				return
@@ -532,7 +556,7 @@ func (s *trayState) startHotkeys() {
 	mgr := hotkey.NewManager(hotkey.DefaultBindings(), hotkey.Callbacks{
 		OnSleep: func() {
 			s.post(func() {
-				if err := actions.Sleep(); err != nil {
+				if err := s.executeAction(config.ActionSleep); err != nil {
 					s.showError("menu_sleep", err)
 				}
 			})
@@ -573,18 +597,38 @@ func (s *trayState) showHotkeyConflict(failed hotkey.Failed) {
 }
 
 func (s *trayState) toggleNoSleep() {
-	if s.cfg.NoSleepEnabled {
-		s.cfg.NoSleepEnabled = false
-	} else {
-		s.cfg.NoSleepEnabled = true
-		s.cfg.IdleTimeoutMinutes = 0
-	}
+	s.setNoSleep(!s.cfg.NoSleepEnabled, s.cfg.KeepScreenOn)
+	mylog.Info("NoSleep toggled: enabled=%v keep_screen_on=%v", nosleep.IsEnabled(), nosleep.IsKeepingScreenOn())
+	s.saveConfig()
+}
+
+func (s *trayState) setNoSleep(enabled, keepScreenOn bool) {
+	setNoSleepConfig(&s.cfg, enabled, keepScreenOn)
 	s.syncProcessWatcher()
 	s.reconcileRuntime()
-	mylog.Info("NoSleep toggled: enabled=%v keep_screen_on=%v", nosleep.IsEnabled(), nosleep.IsKeepingScreenOn())
-
 	s.updateIcon()
-	s.saveConfig()
+}
+
+func (s *trayState) setIdleTimeout(minutes int) {
+	setIdleTimeoutConfig(&s.cfg, minutes)
+	s.syncProcessWatcher()
+	s.reconcileRuntime()
+	s.updateIcon()
+}
+
+func setNoSleepConfig(cfg *config.Config, enabled, keepScreenOn bool) {
+	cfg.NoSleepEnabled = enabled
+	if enabled {
+		cfg.KeepScreenOn = keepScreenOn
+		cfg.IdleTimeoutMinutes = 0
+	}
+}
+
+func setIdleTimeoutConfig(cfg *config.Config, minutes int) {
+	cfg.IdleTimeoutMinutes = minutes
+	if minutes > 0 {
+		cfg.NoSleepEnabled = false
+	}
 }
 
 // ---- process watcher --------------------------------------------------
@@ -738,7 +782,7 @@ func batteryPolicyBlocks(cfg config.Config, status power.Status) bool {
 		return false
 	}
 	return !cfg.NoSleepOnBattery ||
-		(status.Percent > 0 && status.Percent < cfg.NoSleepBatteryThreshold)
+		(status.Percent >= 0 && status.Percent < cfg.NoSleepBatteryThreshold)
 }
 
 // ---- IPC handler ------------------------------------------------------
@@ -751,12 +795,12 @@ func (s *trayState) handleIPCState(cmd string) string {
 	mylog.Info("IPC command received: %s", cmd)
 	switch cmd {
 	case "sleep":
-		if err := actions.Sleep(); err != nil {
+		if err := s.executeAction(config.ActionSleep); err != nil {
 			return "err: " + err.Error()
 		}
 		return "ok"
 	case "hibernate":
-		if err := actions.Hibernate(); err != nil {
+		if err := s.executeAction(config.ActionHibernate); err != nil {
 			return "err: " + err.Error()
 		}
 		return "ok"
@@ -772,32 +816,19 @@ func (s *trayState) handleIPCState(cmd string) string {
 		return "ok"
 
 	case "nosleep:on":
-		s.cfg.NoSleepEnabled = true
-		s.cfg.KeepScreenOn = false
-		s.cfg.IdleTimeoutMinutes = 0
-		s.reconcileRuntime()
-
-		s.updateIcon()
+		s.setNoSleep(true, false)
 		if err := s.saveConfigErr(); err != nil {
 			return "err: " + err.Error()
 		}
 		return "ok"
 	case "nosleep:on:screen":
-		s.cfg.NoSleepEnabled = true
-		s.cfg.KeepScreenOn = true
-		s.cfg.IdleTimeoutMinutes = 0
-		s.reconcileRuntime()
-
-		s.updateIcon()
+		s.setNoSleep(true, true)
 		if err := s.saveConfigErr(); err != nil {
 			return "err: " + err.Error()
 		}
 		return "ok"
 	case "nosleep:off":
-		s.cfg.NoSleepEnabled = false
-		s.reconcileRuntime()
-
-		s.updateIcon()
+		s.setNoSleep(false, s.cfg.KeepScreenOn)
 		if err := s.saveConfigErr(); err != nil {
 			return "err: " + err.Error()
 		}
@@ -809,22 +840,17 @@ func (s *trayState) handleIPCState(cmd string) string {
 		return s.fmtNoSleepStatus()
 
 	case "monitor:on":
-		if s.cfg.IdleTimeoutMinutes <= 0 {
-			s.cfg.IdleTimeoutMinutes = 30
+		minutes := s.cfg.IdleTimeoutMinutes
+		if minutes <= 0 {
+			minutes = config.DefaultIdleTimeoutMinutes
 		}
-		s.cfg.NoSleepEnabled = false
-		s.reconcileRuntime()
-
-		s.updateIcon()
+		s.setIdleTimeout(minutes)
 		if err := s.saveConfigErr(); err != nil {
 			return "err: " + err.Error()
 		}
 		return "ok"
 	case "monitor:off":
-		s.cfg.IdleTimeoutMinutes = 0
-		s.reconcileRuntime()
-
-		s.updateIcon()
+		s.setIdleTimeout(0)
 		if err := s.saveConfigErr(); err != nil {
 			return "err: " + err.Error()
 		}
@@ -969,7 +995,15 @@ func (s *trayState) monitorStatusText() string {
 
 // ---- helpers ----------------------------------------------------------
 
-func executeAction(a config.Action) error {
+func (s *trayState) executeAction(a config.Action) error {
+	if !actionAvailable(a, power.GetCapabilities()) {
+		switch a {
+		case config.ActionSleep:
+			return errors.New(i18n.T(s.lang, "cli_error_sleep_unavailable"))
+		case config.ActionHibernate:
+			return errors.New(i18n.T(s.lang, "cli_error_hibernate_unavailable"))
+		}
+	}
 	switch a {
 	case config.ActionSleep:
 		return actions.Sleep()
@@ -981,6 +1015,17 @@ func executeAction(a config.Action) error {
 		return actions.Lock()
 	default:
 		return fmt.Errorf("unsupported action %q", a)
+	}
+}
+
+func actionAvailable(action config.Action, capabilities power.Capabilities) bool {
+	switch action {
+	case config.ActionSleep:
+		return capabilities.SleepAvailable
+	case config.ActionHibernate:
+		return capabilities.HibernateAvailable
+	default:
+		return true
 	}
 }
 
@@ -1134,7 +1179,7 @@ func (s *trayState) handlePopupAction(action popup.Action, value int) {
 			popup.ActShutdown:  config.ActionShutdown,
 			popup.ActLock:      config.ActionLock,
 		}[action]
-		if err := executeAction(a); err != nil {
+		if err := s.executeAction(a); err != nil {
 			s.showError(actionTranslationKey(a), err)
 		}
 	case popup.ActRestart:
@@ -1151,26 +1196,19 @@ func (s *trayState) handlePopupAction(action popup.Action, value int) {
 		s.saveConfig()
 	case popup.ActIdleToggle:
 		if s.cfg.IdleTimeoutMinutes > 0 {
-			s.cfg.IdleTimeoutMinutes = 0
+			s.setIdleTimeout(0)
 		} else {
-			s.cfg.NoSleepEnabled = false
-			s.cfg.IdleTimeoutMinutes = 30
+			s.setIdleTimeout(config.DefaultIdleTimeoutMinutes)
 		}
-		s.reconcileRuntime()
-		s.updateIcon()
 		s.saveConfig()
 	case popup.ActIdleTimeout:
 		if value > 0 && value <= 7*24*60 {
-			s.cfg.NoSleepEnabled = false
-			s.cfg.IdleTimeoutMinutes = value
-			s.reconcileRuntime()
-			s.updateIcon()
+			s.setIdleTimeout(value)
 			s.saveConfig()
 		}
 	case popup.ActIdleAction:
-		actions := []config.Action{config.ActionSleep, config.ActionHibernate, config.ActionShutdown, config.ActionLock}
-		if value >= 0 && value < len(actions) {
-			s.cfg.IdleAction = actions[value]
+		if action, ok := config.IdleActionAt(value); ok {
+			s.cfg.IdleAction = action
 			s.reconcileRuntime()
 			s.saveConfig()
 		}
@@ -1273,11 +1311,11 @@ func (s *trayState) handlePopupAction(action popup.Action, value int) {
 			mylog.Info("Config path lookup failed: %v", err)
 			return
 		}
-		if err := exec.Command("notepad.exe", path).Start(); err != nil {
+		if err := openWithShell("notepad.exe", windows.EscapeArg(path)); err != nil {
 			mylog.Info("Config editor launch failed: %v", err)
 		}
 	case popup.ActProjectHome:
-		if err := exec.Command("rundll32.exe", "url.dll,FileProtocolHandler", projectHomeURL).Start(); err != nil {
+		if err := openWithShell(projectHomeURL, ""); err != nil {
 			mylog.Info("Project home launch failed: %v", err)
 		}
 	case popup.ActExit:

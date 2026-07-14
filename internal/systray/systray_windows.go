@@ -4,11 +4,7 @@
 package systray
 
 import (
-	"crypto/md5"
-	"encoding/hex"
 	"fmt"
-	"os"
-	"path/filepath"
 	"runtime/debug"
 	"sort"
 	"strings"
@@ -286,7 +282,7 @@ type winTray struct {
 	cursor,
 	window windows.Handle
 
-	loadedImages    map[string]windows.Handle
+	loadedImages    map[uint16]windows.Handle
 	muLoadedImages  sync.RWMutex
 	iconsReleased   bool
 	muIconLifecycle sync.Mutex
@@ -316,14 +312,14 @@ type winTray struct {
 	wmTaskbarCreated uint32
 }
 
-// Loads an image from file and shows it in tray.
+// Loads an icon resource embedded in the executable and shows it in the tray.
 // Shell_NotifyIcon: https://msdn.microsoft.com/en-us/library/windows/desktop/bb762159(v=vs.85).aspx
-func (t *winTray) setIcon(src string) error {
+func (t *winTray) setIcon(resourceID uint16) error {
 	const NIF_ICON = 0x00000002
 	t.muIconLifecycle.Lock()
 	defer t.muIconLifecycle.Unlock()
 
-	h, err := t.loadIconFrom(src)
+	h, err := t.loadIconResource(resourceID)
 	if err != nil {
 		return err
 	}
@@ -338,7 +334,7 @@ func (t *winTray) setIcon(src string) error {
 }
 
 // releaseLoadedIcons destroys only the HICON values created by LoadImageW in
-// loadIconFrom. It runs after NIM_DELETE (or destruction of the owner window),
+// loadIconResource. It runs after NIM_DELETE (or destruction of the owner window),
 // when Shell_NotifyIcon can no longer use the notification icon handle.
 func (t *winTray) releaseLoadedIcons() {
 	for _, icon := range t.takeLoadedIconsForRelease() {
@@ -614,7 +610,7 @@ func (t *winTray) initInstance() error {
 	t.wmTaskbarCreated = uint32(res)
 
 	t.muLoadedImages.Lock()
-	t.loadedImages = make(map[string]windows.Handle)
+	t.loadedImages = make(map[uint16]windows.Handle)
 	t.iconsReleased = false
 	t.muLoadedImages.Unlock()
 
@@ -982,44 +978,40 @@ func (t *winTray) getVisibleItemIndex(parent, val uint32) int {
 	return -1
 }
 
-// Loads an image from file to be shown in tray or menu item.
-// LoadImage: https://msdn.microsoft.com/en-us/library/windows/desktop/ms648045(v=vs.85).aspx
-func (t *winTray) loadIconFrom(src string) (windows.Handle, error) {
-	const IMAGE_ICON = 1               // Loads an icon
-	const LR_LOADFROMFILE = 0x00000010 // Loads the stand-alone image from the file
+// loadIconResource loads and caches an owned HICON from the executable's
+// RT_GROUP_ICON resources. LoadImageW chooses the best image for the current
+// system small-icon metrics.
+func (t *winTray) loadIconResource(resourceID uint16) (windows.Handle, error) {
+	const IMAGE_ICON = 1
 	const (
 		smCxSmallIcon = 49
 		smCySmallIcon = 50
 	)
 
-	// Save and reuse handles of loaded images
+	// Save and reuse handles of loaded resources.
 	t.muLoadedImages.RLock()
-	h, ok := t.loadedImages[src]
+	h, ok := t.loadedImages[resourceID]
 	t.muLoadedImages.RUnlock()
 	if !ok {
-		srcPtr, err := windows.UTF16PtrFromString(src)
-		if err != nil {
-			return 0, err
-		}
 		cx, _, _ := pGetSystemMetrics.Call(smCxSmallIcon)
 		cy, _, _ := pGetSystemMetrics.Call(smCySmallIcon)
 		if cx == 0 || cy == 0 {
 			return 0, fmt.Errorf("get system small icon size")
 		}
 		res, _, err := pLoadImage.Call(
-			0,
-			uintptr(unsafe.Pointer(srcPtr)),
+			uintptr(t.instance),
+			uintptr(resourceID),
 			IMAGE_ICON,
 			cx,
 			cy,
-			LR_LOADFROMFILE,
+			0,
 		)
 		if res == 0 {
 			return 0, err
 		}
 		h = windows.Handle(res)
 		t.muLoadedImages.Lock()
-		t.loadedImages[src] = h
+		t.loadedImages[resourceID] = h
 		t.muLoadedImages.Unlock()
 	}
 	return h, nil
@@ -1105,40 +1097,13 @@ func quit() {
 	)
 }
 
-func iconBytesToFilePath(iconBytes []byte) (string, error) {
-	bh := md5.Sum(iconBytes)
-	dataHash := hex.EncodeToString(bh[:])
-	iconFilePath := filepath.Join(os.TempDir(), "systray_temp_icon_"+dataHash)
-
-	if _, err := os.Stat(iconFilePath); os.IsNotExist(err) {
-		if err := os.WriteFile(iconFilePath, iconBytes, 0644); err != nil {
-			return "", err
-		}
-	}
-	return iconFilePath, nil
-}
-
-// SetIcon sets the systray icon.
-// iconBytes should be the content of .ico for windows and .ico/.jpg/.png
-// for other platforms.
-func SetIcon(iconBytes []byte) {
-	iconFilePath, err := iconBytesToFilePath(iconBytes)
-	if err != nil {
-		reportError("Unable to write icon data to temp file: %v", err)
-		return
-	}
-	if err := wt.setIcon(iconFilePath); err != nil {
+// SetIconResource sets the tray icon from an RT_GROUP_ICON resource embedded
+// in the current executable.
+func SetIconResource(resourceID uint16) {
+	if err := wt.setIcon(resourceID); err != nil {
 		reportError("Unable to set icon: %v", err)
 		return
 	}
-}
-
-// SetTemplateIcon sets the systray icon as a template icon (on macOS), falling back
-// to a regular icon on other platforms.
-// templateIconBytes and iconBytes should be the content of .ico for windows and
-// .ico/.jpg/.png for other platforms.
-func SetTemplateIcon(templateIconBytes []byte, regularIconBytes []byte) {
-	SetIcon(regularIconBytes)
 }
 
 // SetTitle sets the systray title, only available on Mac and Linux.
@@ -1153,18 +1118,12 @@ func (item *MenuItem) parentId() uint32 {
 	return 0
 }
 
-// SetIcon sets the icon of a menu item. Only works on macOS and Windows.
-// iconBytes should be the content of .ico/.jpg/.png
-func (item *MenuItem) SetIcon(iconBytes []byte) {
-	iconFilePath, err := iconBytesToFilePath(iconBytes)
+// SetIconResource sets a menu item's icon from an RT_GROUP_ICON resource
+// embedded in the current executable.
+func (item *MenuItem) SetIconResource(resourceID uint16) {
+	h, err := wt.loadIconResource(resourceID)
 	if err != nil {
-		reportError("Unable to write icon data to temp file: %v", err)
-		return
-	}
-
-	h, err := wt.loadIconFrom(iconFilePath)
-	if err != nil {
-		reportError("Unable to load icon from temp file: %v", err)
+		reportError("Unable to load menu icon resource: %v", err)
 		return
 	}
 
@@ -1199,14 +1158,6 @@ func addOrUpdateMenuItem(item *MenuItem) {
 		reportError("Unable to addOrUpdateMenuItem: %v", err)
 		return
 	}
-}
-
-// SetTemplateIcon sets the icon of a menu item as a template icon (on macOS). On Windows, it
-// falls back to the regular icon bytes and on Linux it does nothing.
-// templateIconBytes and regularIconBytes should be the content of .ico for windows and
-// .ico/.jpg/.png for other platforms.
-func (item *MenuItem) SetTemplateIcon(templateIconBytes []byte, regularIconBytes []byte) {
-	item.SetIcon(regularIconBytes)
 }
 
 func addSeparator(id uint32) {

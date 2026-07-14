@@ -256,110 +256,18 @@ func (m *Monitor) loop(stopCh <-chan struct{}, doneCh chan<- struct{}) {
 		case <-stopCh:
 			return
 		case <-ticker.C:
-			inputTimestampAvailable := false
-			if tick, inputErr := m.inputTimestamp(); inputErr == nil {
-				inputTimestampAvailable = true
-				if m.seenInputTick && tick != m.lastInputTick {
-					wasWarned := m.warned.Load()
-					wasTriggered := m.triggered.Load()
-					previousTick := m.lastInputTick
-					interval := elapsedSinceLastInput(tick, previousTick)
-					threshold := time.Duration(m.thresholdNs.Load())
-					warnAt := threshold - m.warningOffset
-					if warnAt < 0 {
-						warnAt = 0
-					}
-					ignored, reason := m.classifyInputReset(interval)
-					if m.onInputReset != nil {
-						m.onInputReset(InputReset{
-							PreviousLastInputTick:  previousTick,
-							LastInputTick:          tick,
-							SessionIdleBeforeReset: interval,
-							Threshold:              threshold,
-							WarnAt:                 warnAt,
-							WasWarned:              wasWarned,
-							WasTriggered:           wasTriggered,
-							Ignored:                ignored,
-							Reason:                 reason,
-							PeriodicCount:          m.periodic.count,
-							PeriodicBaseline:       m.periodic.baseline,
-						})
-					}
-					m.lastInputTick = tick
-					if ignored {
-						m.periodic.useLogicalIdle = true
-					} else {
-						m.resetSession()
-						if wasWarned && m.onActivity != nil {
-							m.onActivity()
-						}
-						continue
-					}
-				}
-				m.lastInputTick = tick
-				m.seenInputTick = true
+			inputTimestampAvailable, sessionReset := m.observeInputTimestamp()
+			if sessionReset {
+				continue
 			}
-
-			dur, err := m.idleDuration()
+			sample, err := m.sample(inputTimestampAvailable)
 			if err != nil {
 				continue
 			}
-			// GetLastInputInfo reports activity that predates this monitor. A
-			// newly launched or re-enabled monitor must begin its own timeout
-			// window rather than immediately act on that historic idle period.
-			startWindowClamped := false
-			sinceStart := time.Since(m.startedAt)
-			if m.periodic.useLogicalIdle && m.ignorePeriodic.Load() {
-				dur = sinceStart
-			} else if dur > sinceStart {
-				dur = sinceStart
-				startWindowClamped = true
-			}
-
-			threshold := time.Duration(m.thresholdNs.Load())
-			warnAt := threshold - m.warningOffset
-			if warnAt < 0 {
-				warnAt = 0
-			}
 			if m.onSample != nil {
-				m.onSample(Sample{
-					Idle:                    dur,
-					Threshold:               threshold,
-					WarnAt:                  warnAt,
-					InputTimestampAvailable: inputTimestampAvailable,
-					LastInputTick:           m.lastInputTick,
-					StartWindowClamped:      startWindowClamped,
-					Warned:                  m.warned.Load(),
-					Triggered:               m.triggered.Load(),
-				})
+				m.onSample(sample)
 			}
-
-			// Phase 1: warning window — idle >= (threshold − offset) but < threshold
-			if dur >= warnAt && dur < threshold {
-				if !m.warned.Swap(true) && m.onWarning != nil {
-					m.onWarning()
-				}
-			}
-
-			// Phase 2: trigger — idle >= threshold
-			if dur >= threshold {
-				if !m.triggered.Swap(true) && m.onTrigger != nil {
-					m.onTrigger()
-					// An accepted action ends this idle session. Start a fresh
-					// timeout window so unlocking a locked PC cannot immediately
-					// trigger the same action again on stale input timestamps.
-					m.resetSession()
-				}
-			}
-
-			// Reset all state when activity resumes. If a warning was visible,
-			// notify the UI so it can dismiss the now-stale countdown.
-			if !inputTimestampAvailable && dur < warnAt {
-				if m.warned.Swap(false) && m.onActivity != nil {
-					m.onActivity()
-				}
-				m.triggered.Store(false)
-			}
+			m.evaluateSample(sample)
 		}
 	}
 }

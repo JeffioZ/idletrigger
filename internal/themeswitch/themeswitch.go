@@ -19,6 +19,20 @@ import (
 	"github.com/JeffioZ/idletrigger/internal/power"
 )
 
+var (
+	themeUser32   = windows.NewLazySystemDLL("user32.dll")
+	themeKernel32 = windows.NewLazySystemDLL("kernel32.dll")
+
+	pGetTimeZoneInformation        = themeKernel32.NewProc("GetTimeZoneInformation")
+	pUpdatePerUserSystemParameters = themeUser32.NewProc("UpdatePerUserSystemParameters")
+	pSendNotifyMessage             = themeUser32.NewProc("SendNotifyMessageW")
+	pSendMessageTimeout            = themeUser32.NewProc("SendMessageTimeoutW")
+	pGetForegroundWindow           = themeUser32.NewProc("GetForegroundWindow")
+	pGetWindowRect                 = themeUser32.NewProc("GetWindowRect")
+	pMonitorFromWindow             = themeUser32.NewProc("MonitorFromWindow")
+	pGetMonitorInfo                = themeUser32.NewProc("GetMonitorInfoW")
+)
+
 // timezoneLookup maps Windows timezone names to approximate lat/lon.
 var timezoneLookup = map[string][2]float64{
 	"China Standard Time":            {39.9, 116.4},
@@ -60,8 +74,6 @@ func AutoLocationInfo(useIPLocation bool, blockIPLookup bool) LocationInfo {
 	}
 
 	// Get the Windows timezone name via GetTimeZoneInformation.
-	kernel32 := windows.NewLazySystemDLL("kernel32.dll")
-	proc := kernel32.NewProc("GetTimeZoneInformation")
 	type tzInfo struct {
 		Bias         int32
 		StandardName [32]uint16
@@ -72,7 +84,7 @@ func AutoLocationInfo(useIPLocation bool, blockIPLookup bool) LocationInfo {
 		DaylightBias int32
 	}
 	var tz tzInfo
-	result, _, _ := proc.Call(uintptr(unsafe.Pointer(&tz)))
+	result, _, _ := pGetTimeZoneInformation.Call(uintptr(unsafe.Pointer(&tz)))
 	name := windows.UTF16ToString(tz.StandardName[:])
 	return logAutoLocationInfo(locationFromTimezone(name, tz.Bias, tz.StandardBias, tz.DaylightBias, uint32(result)))
 }
@@ -192,10 +204,6 @@ func Refresh() error {
 }
 
 func notifyThemeChanged() {
-	user32 := windows.NewLazySystemDLL("user32.dll")
-	updatePerUser := user32.NewProc("UpdatePerUserSystemParameters")
-	sendNotify := user32.NewProc("SendNotifyMessageW")
-	sendMsg := user32.NewProc("SendMessageTimeoutW")
 	const (
 		hwndBroadcast    = 0xFFFF
 		wmThemeChanged   = 0x031A
@@ -204,7 +212,7 @@ func notifyThemeChanged() {
 		smtoAbortIfHung  = 0x0002
 	)
 
-	updatePerUser.Call(0, 1)
+	pUpdatePerUserSystemParameters.Call(0, 1)
 
 	// Notify every top-level window, including Explorer's taskbars on each
 	// display. Windows components do not all listen for the same token, so send
@@ -212,13 +220,13 @@ func notifyThemeChanged() {
 	for _, token := range []string{"ImmersiveColorSet", "WindowsThemeElement", "Policy"} {
 		ptr, _ := windows.UTF16PtrFromString(token)
 		lp := uintptr(unsafe.Pointer(ptr))
-		sendNotify.Call(hwndBroadcast, wmSettingChange, 0, lp)
-		sendMsg.Call(hwndBroadcast, wmSettingChange, 0, lp, smtoAbortIfHung, 250, 0)
+		pSendNotifyMessage.Call(hwndBroadcast, wmSettingChange, 0, lp)
+		pSendMessageTimeout.Call(hwndBroadcast, wmSettingChange, 0, lp, smtoAbortIfHung, 250, 0)
 	}
-	sendNotify.Call(hwndBroadcast, wmSysColorChange, 0, 0)
-	sendMsg.Call(hwndBroadcast, wmSysColorChange, 0, 0, smtoAbortIfHung, 250, 0)
-	sendNotify.Call(hwndBroadcast, wmThemeChanged, 0, 0)
-	sendMsg.Call(hwndBroadcast, wmThemeChanged, 0, 0, smtoAbortIfHung, 250, 0)
+	pSendNotifyMessage.Call(hwndBroadcast, wmSysColorChange, 0, 0)
+	pSendMessageTimeout.Call(hwndBroadcast, wmSysColorChange, 0, 0, smtoAbortIfHung, 250, 0)
+	pSendNotifyMessage.Call(hwndBroadcast, wmThemeChanged, 0, 0)
+	pSendMessageTimeout.Call(hwndBroadcast, wmThemeChanged, 0, 0, smtoAbortIfHung, 250, 0)
 }
 
 // Current returns the current theme mode.
@@ -474,6 +482,9 @@ func (s *Scheduler) scheduleMinutes(now time.Time) (int, int) {
 // CalcSunriseSunset returns light and dark times as minutes since midnight,
 // calculated using the NOAA solar calculator.
 func CalcSunriseSunset(t time.Time, lat, lon float64) (sunriseMinutes, sunsetMinutes int) {
+	if math.IsNaN(lat) || math.IsInf(lat, 0) || math.IsNaN(lon) || math.IsInf(lon, 0) {
+		return -1, -1
+	}
 	// Day of year
 	doy := float64(t.YearDay())
 
@@ -529,9 +540,7 @@ func CalcSunriseSunset(t time.Time, lat, lon float64) (sunriseMinutes, sunsetMin
 
 // IsFullscreen returns true when the foreground window covers its monitor.
 func IsFullscreen() bool {
-	user32 := windows.NewLazySystemDLL("user32.dll")
-	getForeground := user32.NewProc("GetForegroundWindow")
-	hwnd, _, _ := getForeground.Call()
+	hwnd, _, _ := pGetForegroundWindow.Call()
 
 	if hwnd == 0 {
 		return false
@@ -539,14 +548,12 @@ func IsFullscreen() bool {
 
 	type rect struct{ left, top, right, bottom int32 }
 	var r rect
-	getWindowRect := user32.NewProc("GetWindowRect")
-	if ok, _, _ := getWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&r))); ok == 0 {
+	if ok, _, _ := pGetWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&r))); ok == 0 {
 		return false
 	}
 
-	monitorFromWindow := user32.NewProc("MonitorFromWindow")
 	const monitorDefaultToNearest = 2
-	monitor, _, _ := monitorFromWindow.Call(hwnd, monitorDefaultToNearest)
+	monitor, _, _ := pMonitorFromWindow.Call(hwnd, monitorDefaultToNearest)
 	if monitor == 0 {
 		return false
 	}
@@ -558,8 +565,7 @@ func IsFullscreen() bool {
 	}
 	var info monitorInfo
 	info.size = uint32(unsafe.Sizeof(info))
-	getMonitorInfo := user32.NewProc("GetMonitorInfoW")
-	if ok, _, _ := getMonitorInfo.Call(monitor, uintptr(unsafe.Pointer(&info))); ok == 0 {
+	if ok, _, _ := pGetMonitorInfo.Call(monitor, uintptr(unsafe.Pointer(&info))); ok == 0 {
 		return false
 	}
 

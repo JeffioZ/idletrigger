@@ -5,10 +5,34 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/sys/windows"
+
 	"github.com/JeffioZ/idletrigger/internal/config"
 	"github.com/JeffioZ/idletrigger/internal/devtools"
 	"github.com/JeffioZ/idletrigger/internal/power"
 )
+
+func TestOpenWithShellBuildsNativeArguments(t *testing.T) {
+	previous := executeShell
+	t.Cleanup(func() { executeShell = previous })
+
+	var gotFile, gotArgs string
+	executeShell = func(_ windows.Handle, _ *uint16, file, args, _ *uint16, _ int32) error {
+		gotFile = windows.UTF16PtrToString(file)
+		if args != nil {
+			gotArgs = windows.UTF16PtrToString(args)
+		}
+		return nil
+	}
+
+	path := `C:\Program Files\IdleTrigger\IdleTrigger.toml`
+	if err := openWithShell("notepad.exe", windows.EscapeArg(path)); err != nil {
+		t.Fatalf("openWithShell: %v", err)
+	}
+	if gotFile != "notepad.exe" || gotArgs != `"C:\Program Files\IdleTrigger\IdleTrigger.toml"` {
+		t.Fatalf("shell launch = %q %q", gotFile, gotArgs)
+	}
+}
 
 func TestNoSleepRequestSources(t *testing.T) {
 	cfg := config.DefaultConfig()
@@ -104,9 +128,48 @@ func TestBatteryPolicyBlocksAndRestores(t *testing.T) {
 	if !batteryPolicyBlocks(cfg, battery) {
 		t.Fatal("low battery threshold was ignored")
 	}
+	battery.Percent = 0
+	if !batteryPolicyBlocks(cfg, battery) {
+		t.Fatal("empty battery should remain below the safety threshold")
+	}
 	battery.ACLine = true
 	if batteryPolicyBlocks(cfg, battery) {
 		t.Fatal("AC power should clear the battery block")
+	}
+}
+
+func TestRuntimeModeConfigTransitions(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.ProcessWatchEnabled = true
+	cfg.ProcessWatchList = []string{"obs64.exe"}
+	setNoSleepConfig(&cfg, true, true)
+	if !cfg.NoSleepEnabled || !cfg.KeepScreenOn || cfg.IdleTimeoutMinutes != 0 || !shouldRunProcessWatcher(cfg) {
+		t.Fatalf("Stay Awake transition = %+v", cfg)
+	}
+
+	setIdleTimeoutConfig(&cfg, 90)
+	if cfg.NoSleepEnabled || cfg.IdleTimeoutMinutes != 90 || shouldRunProcessWatcher(cfg) {
+		t.Fatalf("idle-monitor transition = %+v", cfg)
+	}
+}
+
+func TestActionAvailability(t *testing.T) {
+	tests := []struct {
+		action config.Action
+		caps   power.Capabilities
+		want   bool
+	}{
+		{config.ActionSleep, power.Capabilities{}, false},
+		{config.ActionSleep, power.Capabilities{SleepAvailable: true}, true},
+		{config.ActionHibernate, power.Capabilities{}, false},
+		{config.ActionHibernate, power.Capabilities{HibernateAvailable: true}, true},
+		{config.ActionShutdown, power.Capabilities{}, true},
+		{config.ActionLock, power.Capabilities{}, true},
+	}
+	for _, tt := range tests {
+		if got := actionAvailable(tt.action, tt.caps); got != tt.want {
+			t.Errorf("actionAvailable(%q, %+v) = %v, want %v", tt.action, tt.caps, got, tt.want)
+		}
 	}
 }
 

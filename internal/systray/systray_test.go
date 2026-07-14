@@ -57,10 +57,10 @@ func TestThemeChangeMessageScope(t *testing.T) {
 }
 
 func TestTakeLoadedIconsForReleaseTransfersHandlesOnce(t *testing.T) {
-	tray := &winTray{loadedImages: map[string]windows.Handle{
-		"light": 101,
-		"dark":  202,
-		"zero":  0,
+	tray := &winTray{loadedImages: map[uint16]windows.Handle{
+		1: 101,
+		2: 202,
+		3: 0,
 	}}
 	first := tray.takeLoadedIconsForRelease()
 	if len(first) != 2 || !tray.iconsReleased || tray.loadedImages != nil {

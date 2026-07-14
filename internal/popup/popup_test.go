@@ -164,6 +164,21 @@ func TestDangerQuickActionsAreLimitedToShutdownAndRestart(t *testing.T) {
 	}
 }
 
+func TestMenuOptionStylesKeepOnlySemanticDifferences(t *testing.T) {
+	if got := menuOptionStyleFor(idLangEN, true); !got.Selected || got.Danger || got.Separator {
+		t.Fatalf("selected language style = %+v", got)
+	}
+	if got := menuOptionStyleFor(idLock, false); got.Selected || got.Danger || got.Separator {
+		t.Fatalf("regular quick action style = %+v", got)
+	}
+	if got := menuOptionStyleFor(idShutdown, false); got.Selected || !got.Danger || !got.Separator {
+		t.Fatalf("shutdown style = %+v", got)
+	}
+	if got := menuOptionStyleFor(idRestart, false); got.Selected || !got.Danger || got.Separator {
+		t.Fatalf("restart style = %+v", got)
+	}
+}
+
 func TestButtonRoleMappingCoversEveryPanelAction(t *testing.T) {
 	for _, id := range []uint16{idNoSleep, idProcess, idIdle, idIdleWarning, idIdleEnhanced, idTheme, idBattery, idFullscreen, idIPLocation, idHotkeys, idAutostart, idLogging} {
 		if got := roleForButton(id); got != buttonToggle {

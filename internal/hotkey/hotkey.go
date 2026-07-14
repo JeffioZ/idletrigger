@@ -51,6 +51,24 @@ const (
 	className = "IdleTriggerHotkey"
 )
 
+var (
+	user32   = windows.NewLazySystemDLL("user32.dll")
+	kernel32 = windows.NewLazySystemDLL("kernel32.dll")
+
+	pRegisterClassEx    = user32.NewProc("RegisterClassExW")
+	pCreateWindowEx     = user32.NewProc("CreateWindowExW")
+	pRegisterHotKey     = user32.NewProc("RegisterHotKey")
+	pGetMessage         = user32.NewProc("GetMessageW")
+	pDispatchMessage    = user32.NewProc("DispatchMessageW")
+	pUnregisterHotKey   = user32.NewProc("UnregisterHotKey")
+	pDestroyWindow      = user32.NewProc("DestroyWindow")
+	pUnregisterClass    = user32.NewProc("UnregisterClassW")
+	pPostThreadMessage  = user32.NewProc("PostThreadMessageW")
+	pDefWindowProc      = user32.NewProc("DefWindowProcW")
+	pGetModuleHandle    = kernel32.NewProc("GetModuleHandleW")
+	pGetCurrentThreadID = kernel32.NewProc("GetCurrentThreadId")
+)
+
 type wndClassExW struct {
 	Size       uint32
 	Style      uint32
@@ -93,12 +111,8 @@ func NewManager(bindings []Binding, cbs Callbacks) *Manager {
 // Register creates the message-only window and calls RegisterHotKey for each
 // binding.  Returns labels for any that failed (conflict with another app).
 func (m *Manager) Register() Failed {
-	user32 := windows.NewLazySystemDLL("user32.dll")
-
 	classNamePtr, _ := syscall.UTF16PtrFromString(className)
-	kernel32 := windows.NewLazySystemDLL("kernel32.dll")
-	instance := kernel32.NewProc("GetModuleHandleW")
-	hInst, _, _ := instance.Call(0)
+	hInst, _, _ := pGetModuleHandle.Call(0)
 
 	var wc wndClassExW
 	wc.Size = uint32(unsafe.Sizeof(wc))
@@ -106,13 +120,11 @@ func (m *Manager) Register() Failed {
 	wc.Instance = windows.Handle(hInst)
 	wc.ClassName = classNamePtr
 
-	reg := user32.NewProc("RegisterClassExW")
-	reg.Call(uintptr(unsafe.Pointer(&wc)))
+	pRegisterClassEx.Call(uintptr(unsafe.Pointer(&wc)))
 
-	create := user32.NewProc("CreateWindowExW")
 	const wsOverlapped = 0
 	const hwndMessage = ^uintptr(0)
-	ret, _, _ := create.Call(
+	ret, _, _ := pCreateWindowEx.Call(
 		0, uintptr(unsafe.Pointer(classNamePtr)), 0,
 		uintptr(wsOverlapped), 0, 0, 0, 0,
 		hwndMessage, 0, hInst, 0,
@@ -128,8 +140,7 @@ func (m *Manager) Register() Failed {
 
 	var failed Failed
 	for i, b := range m.bindings {
-		regHK := user32.NewProc("RegisterHotKey")
-		r, _, _ := regHK.Call(uintptr(m.hwnd), uintptr(i), uintptr(b.Modifier), uintptr(b.VK))
+		r, _, _ := pRegisterHotKey.Call(uintptr(m.hwnd), uintptr(i), uintptr(b.Modifier), uintptr(b.VK))
 		if r == 0 {
 			failed = append(failed, b.Label)
 		}
@@ -139,19 +150,16 @@ func (m *Manager) Register() Failed {
 
 // Run enters the message pump; blocks until Stop().
 func (m *Manager) Run() {
-	user32 := windows.NewLazySystemDLL("user32.dll")
 	msg2 := &msg{}
-	getMsg := user32.NewProc("GetMessageW")
 	for {
 		// GetMessage blocks until a message arrives. Stop sends WM_QUIT
 		// to this thread via PostThreadMessage, which makes GetMessage
 		// return 0 and exit the loop naturally.
-		r, _, _ := getMsg.Call(uintptr(unsafe.Pointer(msg2)), 0, 0, 0)
+		r, _, _ := pGetMessage.Call(uintptr(unsafe.Pointer(msg2)), 0, 0, 0)
 		if r == 0 || r == ^uintptr(0) {
 			return
 		}
-		dispatch := user32.NewProc("DispatchMessageW")
-		dispatch.Call(uintptr(unsafe.Pointer(msg2)))
+		pDispatchMessage.Call(uintptr(unsafe.Pointer(msg2)))
 	}
 }
 
@@ -175,9 +183,7 @@ func (m *Manager) Start() Failed {
 		defer runtime.UnlockOSThread()
 		defer close(doneCh)
 
-		kernel32 := windows.NewLazySystemDLL("kernel32.dll")
-		getCurrentThreadID := kernel32.NewProc("GetCurrentThreadId")
-		tid, _, _ := getCurrentThreadID.Call()
+		tid, _, _ := pGetCurrentThreadID.Call()
 		m.mu.Lock()
 		m.threadID = uint32(tid)
 		m.mu.Unlock()
@@ -190,21 +196,15 @@ func (m *Manager) Start() Failed {
 			m.Run()
 
 			// Unregister hotkeys and destroy window on this thread.
-			user32 := windows.NewLazySystemDLL("user32.dll")
 			for i := range m.bindings {
-				unreg := user32.NewProc("UnregisterHotKey")
-				unreg.Call(uintptr(m.hwnd), uintptr(i))
+				pUnregisterHotKey.Call(uintptr(m.hwnd), uintptr(i))
 			}
-			destroy := user32.NewProc("DestroyWindow")
-			destroy.Call(uintptr(m.hwnd))
+			pDestroyWindow.Call(uintptr(m.hwnd))
 			m.hwnd = 0
 		}
 		classNamePtr, _ := syscall.UTF16PtrFromString(className)
-		getModuleHandle := kernel32.NewProc("GetModuleHandleW")
-		hInst, _, _ := getModuleHandle.Call(0)
-		user32 := windows.NewLazySystemDLL("user32.dll")
-		unregisterClass := user32.NewProc("UnregisterClassW")
-		unregisterClass.Call(uintptr(unsafe.Pointer(classNamePtr)), hInst)
+		hInst, _, _ := pGetModuleHandle.Call(0)
+		pUnregisterClass.Call(uintptr(unsafe.Pointer(classNamePtr)), hInst)
 		m.mu.Lock()
 		m.threadID = 0
 		m.started = false
@@ -225,10 +225,8 @@ func (m *Manager) Stop() {
 		return
 	}
 	if tid != 0 {
-		user32 := windows.NewLazySystemDLL("user32.dll")
-		postThreadMessage := user32.NewProc("PostThreadMessageW")
 		const wmQuit = 0x0012
-		postThreadMessage.Call(uintptr(tid), uintptr(wmQuit), 0, 0)
+		pPostThreadMessage.Call(uintptr(tid), uintptr(wmQuit), 0, 0)
 	}
 	<-doneCh
 }
@@ -254,8 +252,6 @@ func (m *Manager) wndProc(hwnd windows.Handle, msg2 uint32, wParam, lParam uintp
 		}
 		return 0
 	}
-	user32 := windows.NewLazySystemDLL("user32.dll")
-	defProc := user32.NewProc("DefWindowProcW")
-	r, _, _ := defProc.Call(uintptr(hwnd), uintptr(msg2), wParam, lParam)
+	r, _, _ := pDefWindowProc.Call(uintptr(hwnd), uintptr(msg2), wParam, lParam)
 	return r
 }

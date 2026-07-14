@@ -6,6 +6,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -26,7 +27,34 @@ const (
 	ActionHibernate Action = "hibernate"
 	ActionShutdown  Action = "shutdown"
 	ActionLock      Action = "lock"
+
+	DefaultIdleTimeoutMinutes = 30
 )
+
+var idleActions = [...]Action{ActionSleep, ActionHibernate, ActionShutdown, ActionLock}
+
+// ValidIdleAction reports whether action can be used by the idle monitor.
+func ValidIdleAction(action Action) bool {
+	return IdleActionIndex(action) >= 0
+}
+
+// IdleActionAt returns the idle-monitor action at the stable UI index.
+func IdleActionAt(index int) (Action, bool) {
+	if index < 0 || index >= len(idleActions) {
+		return "", false
+	}
+	return idleActions[index], true
+}
+
+// IdleActionIndex returns the stable UI index for an idle-monitor action.
+func IdleActionIndex(action Action) int {
+	for index, candidate := range idleActions {
+		if action == candidate {
+			return index
+		}
+	}
+	return -1
+}
 
 const configTemplateVersion = 8
 
@@ -114,7 +142,7 @@ type Config struct {
 func DefaultConfig() Config {
 	return Config{
 		Language:                "auto",
-		IdleTimeoutMinutes:      30,
+		IdleTimeoutMinutes:      DefaultIdleTimeoutMinutes,
 		IdleAction:              ActionSleep,
 		IdleWarningSeconds:      30,
 		IdleEnhancedMonitor:     false,
@@ -219,9 +247,7 @@ func NormalizeConfig(cfg Config) Config {
 	if cfg.IdleTimeoutMinutes < 0 || cfg.IdleTimeoutMinutes > 7*24*60 {
 		cfg.IdleTimeoutMinutes = d.IdleTimeoutMinutes
 	}
-	switch cfg.IdleAction {
-	case "sleep", "hibernate", "shutdown", "lock":
-	default:
+	if !ValidIdleAction(cfg.IdleAction) {
 		cfg.IdleAction = d.IdleAction
 	}
 	if cfg.IdleWarningSeconds < 0 || cfg.IdleWarningSeconds > 3600 {
@@ -239,10 +265,10 @@ func NormalizeConfig(cfg Config) Config {
 	if _, err := time.Parse("15:04", cfg.ThemeDarkTime); err != nil {
 		cfg.ThemeDarkTime = d.ThemeDarkTime
 	}
-	if cfg.ThemeLatitude < -90 || cfg.ThemeLatitude > 90 {
+	if !finiteCoordinate(cfg.ThemeLatitude) || cfg.ThemeLatitude < -90 || cfg.ThemeLatitude > 90 {
 		cfg.ThemeLatitude = d.ThemeLatitude
 	}
-	if cfg.ThemeLongitude < -180 || cfg.ThemeLongitude > 180 {
+	if !finiteCoordinate(cfg.ThemeLongitude) || cfg.ThemeLongitude < -180 || cfg.ThemeLongitude > 180 {
 		cfg.ThemeLongitude = d.ThemeLongitude
 	}
 	return cfg
@@ -256,9 +282,7 @@ func (cfg Config) Validate() error {
 	default:
 		return fmt.Errorf("language must be auto, en, or zh-CN")
 	}
-	switch cfg.IdleAction {
-	case ActionSleep, ActionHibernate, ActionShutdown, ActionLock:
-	default:
+	if !ValidIdleAction(cfg.IdleAction) {
 		return fmt.Errorf("invalid idle_action %q", cfg.IdleAction)
 	}
 	if cfg.IdleTimeoutMinutes < 0 || cfg.IdleTimeoutMinutes > 7*24*60 {
@@ -279,13 +303,17 @@ func (cfg Config) Validate() error {
 	if _, err := time.Parse("15:04", cfg.ThemeDarkTime); err != nil {
 		return fmt.Errorf("invalid theme_dark_time: %w", err)
 	}
-	if cfg.ThemeLatitude < -90 || cfg.ThemeLatitude > 90 {
+	if !finiteCoordinate(cfg.ThemeLatitude) || cfg.ThemeLatitude < -90 || cfg.ThemeLatitude > 90 {
 		return fmt.Errorf("theme_latitude must be between -90 and 90")
 	}
-	if cfg.ThemeLongitude < -180 || cfg.ThemeLongitude > 180 {
+	if !finiteCoordinate(cfg.ThemeLongitude) || cfg.ThemeLongitude < -180 || cfg.ThemeLongitude > 180 {
 		return fmt.Errorf("theme_longitude must be between -180 and 180")
 	}
 	return nil
+}
+
+func finiteCoordinate(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0)
 }
 
 // Save atomically writes the configuration to disk.

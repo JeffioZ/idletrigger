@@ -23,32 +23,39 @@ type Status struct {
 var (
 	cachedCaps Capabilities
 	capsOnce   sync.Once
+	powrprof   = windows.NewLazySystemDLL("powrprof.dll")
+	kernel32   = windows.NewLazySystemDLL("kernel32.dll")
+
+	pCallNtPowerInformation = powrprof.NewProc("CallNtPowerInformation")
+	pGetSystemPowerStatus   = kernel32.NewProc("GetSystemPowerStatus")
 )
 
 func GetCapabilities() Capabilities {
 	capsOnce.Do(func() {
 		var caps Capabilities
-		powrprof := windows.NewLazySystemDLL("powrprof.dll")
-		callNt := powrprof.NewProc("CallNtPowerInformation")
-		const bufSize = 128
+		const (
+			bufSize                 = 128
+			systemS3SupportedOffset = 5
+			systemS4SupportedOffset = 6
+			hiberFilePresentOffset  = 8
+			aoAcSupportedOffset     = 20
+		)
 		var buf [bufSize]byte
 		const systemPowerCaps = 4
-		ret, _, _ := callNt.Call(uintptr(systemPowerCaps), 0, 0,
+		ret, _, _ := pCallNtPowerInformation.Call(uintptr(systemPowerCaps), 0, 0,
 			uintptr(unsafe.Pointer(&buf[0])), uintptr(bufSize))
 		if ret != 0 {
 			cachedCaps = caps
 			return
 		}
-		caps.SleepAvailable = buf[5] != 0 || buf[20] != 0
-		caps.HibernateAvailable = buf[6] != 0 && buf[8] != 0
+		caps.SleepAvailable = buf[systemS3SupportedOffset] != 0 || buf[aoAcSupportedOffset] != 0
+		caps.HibernateAvailable = buf[systemS4SupportedOffset] != 0 && buf[hiberFilePresentOffset] != 0
 		cachedCaps = caps
 	})
 	return cachedCaps
 }
 
 func GetStatus() Status {
-	kernel32 := windows.NewLazySystemDLL("kernel32.dll")
-	proc := kernel32.NewProc("GetSystemPowerStatus")
 	type sps struct {
 		ACLineStatus        byte
 		BatteryFlag         byte
@@ -58,7 +65,7 @@ func GetStatus() Status {
 		BatteryFullLifeTime uint32
 	}
 	var s sps
-	r, _, _ := proc.Call(uintptr(unsafe.Pointer(&s)))
+	r, _, _ := pGetSystemPowerStatus.Call(uintptr(unsafe.Pointer(&s)))
 	if r == 0 {
 		return Status{}
 	}
