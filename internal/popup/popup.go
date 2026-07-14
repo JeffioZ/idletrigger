@@ -381,6 +381,7 @@ type panel struct {
 	isChinese               bool
 	owner                   windows.Handle
 	iconThemeDark           bool
+	themeDark               bool
 	iconsInitialized        bool
 	tooltip                 windows.Handle
 	palette                 uicolors.Palette
@@ -1630,15 +1631,10 @@ func buttonWndProc(hwnd windows.Handle, msg uint32, wp, lp uintptr) uintptr {
 		id := p.controlID(hwnd)
 		switch msg {
 		case wmMouseMove:
-			onProjectHomeText := id == idProjectHome && p.projectHomeTextContains(hwnd, point{X: int32(int16(lp)), Y: int32(int16(lp >> 16))})
 			if id == idProjectHome {
-				p.setProjectHomeCursor(onProjectHomeText)
+				p.setProjectHomeCursor(true)
 			}
-			if id != idProjectHome || onProjectHomeText {
-				p.setHover(hwnd)
-			} else {
-				p.clearHover(hwnd)
-			}
+			p.setHover(hwnd)
 		case wmMouseWheel:
 			if owner, _, ok := choiceOptionOwner(p, p.controlID(hwnd)); ok {
 				delta := 1
@@ -1655,7 +1651,7 @@ func buttonWndProc(hwnd windows.Handle, msg uint32, wp, lp uintptr) uintptr {
 			}
 		case wmSetCursor:
 			if id == idProjectHome {
-				p.setProjectHomeCursor(p.projectHomePointerOnText(hwnd))
+				p.setProjectHomeCursor(true)
 				return 1
 			}
 		case wmKillFocus:
@@ -1666,9 +1662,6 @@ func buttonWndProc(hwnd windows.Handle, msg uint32, wp, lp uintptr) uintptr {
 				}
 			}
 		case wmLButtonDown:
-			if id == idProjectHome && !p.projectHomeTextContains(hwnd, point{X: int32(int16(lp)), Y: int32(int16(lp >> 16))}) {
-				return 0
-			}
 			if id == idQuickActions || id == idLanguage {
 				// These menu triggers intentionally open on hover only. Keep Space
 				// available through WM_COMMAND for keyboard navigation.
@@ -1684,9 +1677,6 @@ func buttonWndProc(hwnd windows.Handle, msg uint32, wp, lp uintptr) uintptr {
 			}
 			p.leaveKeyboardNavigation()
 		case wmLButtonUp:
-			if id == idProjectHome && !p.projectHomeTextContains(hwnd, point{X: int32(int16(lp)), Y: int32(int16(lp >> 16))}) {
-				return 0
-			}
 			if id == idQuickActions || id == idLanguage || id == idIdleTimeout || id == idIdleAction {
 				return 0
 			}
@@ -2196,21 +2186,6 @@ func (p *panel) controlID(hwnd windows.Handle) uint16 {
 	return 0
 }
 
-// projectHomeTextContains overrides the BUTTON control's rectangular hit
-// testing with the label's measured bounds. The underlying HWND remains a
-// button for tab/keyboard accessibility, while its blank area stays inert.
-func (p *panel) projectHomeTextContains(hwnd windows.Handle, cursor point) bool {
-	bounds, ok := p.projectHomeTextBounds(hwnd)
-	return ok && cursor.X >= bounds.Left && cursor.X < bounds.Right && cursor.Y >= bounds.Top && cursor.Y < bounds.Bottom
-}
-
-func (p *panel) projectHomePointerOnText(hwnd windows.Handle) bool {
-	var cursor point
-	pGetCursorPos.Call(uintptr(unsafe.Pointer(&cursor)))
-	pScreenToClient.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&cursor)))
-	return p.projectHomeTextContains(hwnd, cursor)
-}
-
 func (p *panel) setProjectHomeCursor(onText bool) {
 	const (
 		idcArrow = 32512
@@ -2223,32 +2198,6 @@ func (p *panel) setProjectHomeCursor(onText bool) {
 	if cursor, _, _ := pLoadCursor.Call(0, cursorID); cursor != 0 {
 		pSetCursor.Call(cursor)
 	}
-}
-
-func (p *panel) projectHomeTextBounds(hwnd windows.Handle) (rect, bool) {
-	if hwnd == 0 || p.font == 0 {
-		return rect{}, false
-	}
-	text, err := windows.UTF16PtrFromString(p.labels[idProjectHome])
-	if err != nil {
-		return rect{}, false
-	}
-	dc, _, _ := pGetDC.Call(uintptr(hwnd))
-	if dc == 0 {
-		return rect{}, false
-	}
-	defer pReleaseDC.Call(uintptr(hwnd), dc)
-	old, _, _ := pSelectObject.Call(dc, uintptr(p.font))
-	defer pSelectObject.Call(dc, old)
-	var client, measured rect
-	pGetClientRect.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&client)))
-	pDrawText.Call(dc, uintptr(unsafe.Pointer(text)), ^uintptr(0), uintptr(unsafe.Pointer(&measured)), dtSingleLine|dtCalcRect)
-	width, height := measured.Right-measured.Left, measured.Bottom-measured.Top
-	measured.Left = (client.Right - client.Left - width) / 2
-	measured.Right = measured.Left + width
-	measured.Top = (client.Bottom-client.Top-height)/2 + int32(p.projectHomeTextVerticalOffset())
-	measured.Bottom = measured.Top + height
-	return measured, width > 0 && height > 0
 }
 
 func panelOrigin(work rect, width, height, margin int32) (int32, int32) {
@@ -2554,6 +2503,7 @@ func (p *panel) refreshTheme(invalidate bool) {
 	defer func() { p.themeRefreshing = false }()
 	p.closeChoice(false)
 	dark := p.resolveTheme()
+	p.themeDark = dark
 	p.setWindowIcons(dark, false)
 	p.palette = uicolors.ForTheme(dark)
 	p.rebuildBrushes(p.palette)
@@ -2805,19 +2755,10 @@ func (p *panel) drawButton(item *drawItem) {
 	}
 }
 
-// drawProjectHomeLink is a text-only link. The control keeps a compact full
-// width hit area, while the visual stays subordinate to the command buttons.
+// drawProjectHomeLink is a text-only link. Its HWND is only text-width, so
+// surrounding panel whitespace remains inert.
 func (p *panel) drawProjectHomeLink(item *drawItem, state buttonVisualState) {
-	textColor := p.palette.Accent
-	if state.Hovered {
-		textColor = p.palette.AccentHover
-	}
-	if state.Pressed {
-		textColor = p.palette.AccentPressed
-	}
-	if state.Disabled || item.ItemState&odsDisabled != 0 {
-		textColor = p.palette.DisabledText
-	}
+	textColor := projectHomeLinkColor(p.palette, p.themeDark, state, item.ItemState)
 	pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&item.Rect)), uintptr(p.backgroundBrush))
 	text, err := windows.UTF16PtrFromString(p.labels[idProjectHome])
 	if err != nil {
@@ -2854,6 +2795,31 @@ func (p *panel) drawProjectHomeLink(item *drawItem, state buttonVisualState) {
 		focusBounds.Bottom += int32(p.sc(2))
 		p.roundRectFocusRing(item.HDC, focusBounds, p.palette.Focus)
 	}
+}
+
+// projectHomeLinkColor keeps the compact text link distinct from filled
+// controls. The light palette needs a clearer hover step because there is no
+// surface fill behind the label; dark mode already has that contrast.
+func projectHomeLinkColor(palette uicolors.Palette, dark bool, state buttonVisualState, itemState uint32) uint32 {
+	if state.Disabled || itemState&odsDisabled != 0 {
+		return palette.DisabledText
+	}
+	if !dark {
+		if state.Pressed {
+			return uicolors.RGB(0, 60, 102)
+		}
+		if state.Hovered {
+			return uicolors.RGB(0, 90, 158)
+		}
+		return palette.Accent
+	}
+	if state.Pressed {
+		return palette.AccentPressed
+	}
+	if state.Hovered {
+		return palette.AccentHover
+	}
+	return palette.Accent
 }
 
 func (p *panel) drawChoiceOption(item *drawItem, state buttonVisualState) {

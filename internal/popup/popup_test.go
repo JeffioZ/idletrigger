@@ -3,8 +3,30 @@ package popup
 import (
 	"testing"
 
+	"github.com/JeffioZ/idletrigger/internal/uicolors"
 	"golang.org/x/sys/windows"
 )
+
+func TestProjectHomeLinkColorUsesASeparateLightHoverRamp(t *testing.T) {
+	light := uicolors.ForTheme(false)
+	dark := uicolors.ForTheme(true)
+
+	if got := projectHomeLinkColor(light, false, buttonVisualState{}, 0); got != light.Accent {
+		t.Fatalf("light normal color = %#x, want %#x", got, light.Accent)
+	}
+	if got := projectHomeLinkColor(light, false, buttonVisualState{Hovered: true}, 0); got != uicolors.RGB(0, 90, 158) {
+		t.Fatalf("light hover color = %#x", got)
+	}
+	if got := projectHomeLinkColor(light, false, buttonVisualState{Pressed: true}, 0); got != uicolors.RGB(0, 60, 102) {
+		t.Fatalf("light pressed color = %#x", got)
+	}
+	if got := projectHomeLinkColor(dark, true, buttonVisualState{Hovered: true}, 0); got != dark.AccentHover {
+		t.Fatalf("dark hover color = %#x, want %#x", got, dark.AccentHover)
+	}
+	if got := projectHomeLinkColor(dark, true, buttonVisualState{Pressed: true, Disabled: true}, 0); got != dark.DisabledText {
+		t.Fatalf("disabled color = %#x, want %#x", got, dark.DisabledText)
+	}
+}
 
 func TestTimeoutChoices(t *testing.T) {
 	choices, selected := timeoutChoices(30, true)
