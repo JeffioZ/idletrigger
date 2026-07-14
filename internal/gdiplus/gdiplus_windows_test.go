@@ -19,7 +19,13 @@ func TestFillModeConstantsMatchSDK(t *testing.T) {
 func TestLifecycleStartAndShutdownAreIdempotent(t *testing.T) {
 	var starts, stops int
 	m := newLifecycle(func() (uintptr, bool) { starts++; return 7, true }, func(uintptr) { stops++ })
-	if !m.start() || !m.start() || starts != 1 {
+	if !m.start() {
+		t.Fatal("first Start failed")
+	}
+	if !m.start() {
+		t.Fatal("idempotent Start failed")
+	}
+	if starts != 1 {
 		t.Fatalf("start calls=%d", starts)
 	}
 	m.close()
@@ -66,7 +72,13 @@ func TestShutdownWaitsAndRejectsNewDrawing(t *testing.T) {
 func TestStartupFailureIsNotRetried(t *testing.T) {
 	starts := 0
 	m := newLifecycle(func() (uintptr, bool) { starts++; return 0, false }, func(uintptr) {})
-	if m.start() || m.start() || starts != 1 {
+	if m.start() {
+		t.Fatal("first Start unexpectedly succeeded")
+	}
+	if m.start() {
+		t.Fatal("failed Start was retried successfully")
+	}
+	if starts != 1 {
 		t.Fatalf("starts=%d, want 1", starts)
 	}
 }
