@@ -42,7 +42,7 @@ func EnsureCurrent() (enabled bool, updated bool, err error) {
 }
 
 // Enable writes the auto-start registry entry pointing to the current
-// executable with a "--minimized --delay=3" argument so it starts to tray.
+// executable with a "--minimized" argument so it starts directly to tray.
 func Enable() error {
 	cmd, err := currentCommandLine()
 	if err != nil {
@@ -113,5 +113,5 @@ func exePath() (string, error) {
 }
 
 func commandLine(exe string) string {
-	return fmt.Sprintf("\"%s\" --minimized --delay=3", exe)
+	return fmt.Sprintf("\"%s\" --minimized", exe)
 }

@@ -2731,29 +2731,25 @@ func (p *panel) drawMenuTrigger(item *drawItem) {
 	brush := p.elevatedBrush
 	borderColor := p.palette.SubtleBorder
 	textColor := p.palette.SecondaryText
-	arrowColor := p.palette.SecondaryText
 	if state.Hovered {
 		brush = p.hoverBrush
 		borderColor = p.palette.Accent
 		textColor = p.palette.PrimaryText
-		arrowColor = p.palette.Accent
 	}
 	if open {
 		brush = p.hoverBrush
 		borderColor = p.palette.Accent
 		textColor = p.palette.PrimaryText
-		arrowColor = p.palette.Accent
 	}
 	if state.Pressed {
 		brush = p.pressedBrush
 		if !open {
 			borderColor = p.palette.AccentPressed
 		}
-		textColor, arrowColor = p.palette.AccentText, p.palette.AccentText
+		textColor = p.palette.AccentText
 	}
 	pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&item.Rect)), uintptr(p.backgroundBrush))
 	p.roundRect(item.HDC, item.Rect, brush, borderColor, p.sc(p.metrics.style.Control.CornerRadius))
-	p.drawDisclosureArrow(item.HDC, item.Rect, open, arrowColor)
 
 	pSetTextColor.Call(uintptr(item.HDC), uintptr(textColor))
 	pSetBkMode.Call(uintptr(item.HDC), transparent)
@@ -2762,7 +2758,7 @@ func (p *panel) drawMenuTrigger(item *drawItem) {
 	text, _ := windows.UTF16PtrFromString(p.labels[id])
 	bounds := item.Rect
 	bounds.Left += int32(p.sc(p.metrics.style.Control.ButtonTextInset))
-	bounds.Right -= int32(p.sc(34))
+	bounds.Right -= int32(p.sc(p.metrics.style.Control.ButtonTextInset))
 	drawTextCentered(item.HDC, text, bounds)
 	if state.Focused {
 		p.roundRectFocusRing(item.HDC, item.Rect, p.palette.Focus)
