@@ -14,14 +14,14 @@
 - [x] 安全关机：移除 `EWX_FORCE`，保留应用保存/取消机会
 - [x] NoSleep 固定 OS 线程设置与清理
 - [x] 空闲预警使用不抢焦点的应用内浮层，避免系统通知静默抑制
-- [x] tray 状态事件串行化，消除配置并发写入
+- [x] app 运行状态事件串行化，消除配置并发写入
 - [x] 用户与进程监测的 NoSleep 请求分离
 - [x] 电池策略阻断后可自动恢复原请求
 - [x] IPC 限定当前登录会话并返回真实动作错误
 - [x] 热键窗口类和 Stop 清理生命周期修复
 - [x] 主题电池模式振荡、配置重载和多显示器全屏修复
 - [x] 配置校验、原子保存和日志轮转
-- [x] 内置最小 Windows systray 实现，内部错误统一接入应用日志
+- [x] 内置最小 Windows trayicon 实现，内部错误统一接入应用日志
 - [x] 386 / amd64 双资源和发布构建
 - [x] 核心配置、主题、IPC、monitor、NoSleep 状态测试
 - [x] 轻量浮层替代传统托盘菜单，支持深浅色、DPI，并保持打开直至手动关闭或再次左键托盘图标
@@ -41,7 +41,7 @@
 
 ### 已完成（不再列为待办）
 
-- [x] popup 资源生命周期、style / metrics / layout 集中，以及真实深浅色、中英文 UI 截图基线。
+- [x] controlpanel 资源生命周期、style / metrics / layout 集中，以及真实深浅色、中英文 UI 截图基线。
 - [x] choice button + choice layer、触发器上下箭头和真实 open 状态、selected marker 与稳定字重。
 - [x] 键盘 focus-visible 语义与圆角 focus ring、Toggle 的局部 hover / pressed 反馈、Shutdown / Restart 的危险分组与分隔线。
 - [x] 主图标、深浅 tray/title 图标和 GitHub Social Preview 的统一品牌资源更新。
@@ -50,7 +50,7 @@
 
 - [ ] **Shutdown / Restart 的原生确认（需要产品确认）**
   - **目标与价值：** 为不可逆且会中断工作的两项操作提供一次明确、默认取消的原生确认，降低误触损失；Sleep / Hibernate 继续保持快速操作。
-  - **实施建议与前置：** 仅覆盖 Shutdown、Restart，使用轻量 Win32 对话框或现有 popup 体系中的明确确认文案与按钮；需确认产品仍接受“非立即执行”的交互契约。
+  - **实施建议与前置：** 仅覆盖 Shutdown、Restart，使用轻量 Win32 对话框或现有控制面板体系中的明确确认文案与按钮；需确认产品仍接受“非立即执行”的交互契约。
   - **成本、风险与阶段：** 低到中等成本；风险是降低少量高级用户的快速操作效率。不要使用短暂撤销（系统电源动作不可可靠撤销），也不建议二次点击。
   - **验收：** 鼠标和键盘均能安全取消/确认；默认焦点为取消；现有命令、语言、DPI、主题和菜单关闭生命周期不回归。
 
@@ -122,7 +122,7 @@
 - [ ] 统一 quick/language/choice 浮层 metrics、清理 choice 临时像素补偿，或评估预创建 option HWND：仅在可见 UI 缺陷或可测量性能问题出现时处理。
 - [ ] 空闲预警倒计时主动取消：当前序号校验已保证隐藏后的旧倒计时不会更新错误窗口；仅在长预警时间、频繁取消场景出现可测量的 goroutine 或 UI 消息积压时补充取消生命周期。
 - [ ] Process Watch 回调 generation 防护：当前 watcher 停止会等待后台轮询退出；仅在复现旧回调晚到并覆盖新状态后增加代际标识，不为理论竞态增加同步复杂度。
-- [ ] 继续拆分 `popup.build`、`popup.handleCommand`、`tray.handlePopupAction` 等顺序型大函数：只在相关功能再次修改、审查成本明显上升时按职责小步拆分，不为复杂度指标制造跨层抽象。
+- [ ] 继续拆分 `controlpanel.build`、`controlpanel.handleCommand`、`app.handleControlPanelAction` 等顺序型大函数：只在相关功能再次修改、审查成本明显上升时按职责小步拆分，不为复杂度指标制造跨层抽象。
 - [ ] 针对性启用 `errcheck`：先为 Win32 `Proc.Call`、幂等清理和刻意忽略返回值建立明确排除，再逐步覆盖普通错误路径；不直接全仓开启产生大量无效告警。
 - [ ] 独立 Windows 7 legacy 构建：仅在真实用户需求出现时评估。
 - [ ] CI race detector：仅测试增强，短期不投入。

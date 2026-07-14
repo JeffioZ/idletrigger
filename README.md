@@ -21,7 +21,7 @@ IdleTrigger is a single executable with no runtime dependencies beyond Windows s
 - x64 build for most PCs; x86 build for 32-bit Windows
 - Theme switching requires Windows Personalize settings. It may be unavailable on Server Core or policy-managed desktops.
 
-Windows 7 is intentionally not supported by the main build. See [BUILD.md](BUILD.md) for the compatibility rationale.
+Windows 7 is intentionally not supported by the main build. See [development guide](docs/development.md) for the compatibility rationale.
 
 ## Quick Start
 
@@ -108,22 +108,21 @@ Each line includes a startup session identifier, making separate runs easy to di
 
 ## Build and Development
 
-See [BUILD.md](BUILD.md) for prerequisites, dual-architecture builds, resource generation, and verification commands.
+See [development guide](docs/development.md) for prerequisites, dual-architecture builds, resource generation, and verification commands.
 
 ## Project Layout
 
 ```text
-assets/                  Application icon, manifest, tray icon variants, resource tools
-docs/images/             README screenshots
-internal/actions/        Windows lock, sleep, hibernate, shutdown, and restart actions
-internal/config/         TOML load, validation, migration, and atomic save
-internal/idlewarning/    Non-activating, DPI-aware idle warning overlay
-internal/monitor/        Keyboard/mouse idle tracking and trigger lifecycle
-internal/popup/          Native DPI-aware control panel
-internal/systray/        Local Windows notification-area implementation
-internal/themeswitch/    Fixed-time and sunrise/sunset theme scheduler
-internal/tray/           Serialized application state and feature coordination
-scripts/                 Resource and themed-icon generators
+cmd/idletrigger/            Application entry point and generated Windows resources
+build/windows/              Manifest and checked-in application/tray icons
+docs/                       Development guide, roadmap, and README screenshots
+internal/app/               Serialized application state and feature coordination
+internal/feature/           Idle, keep-awake, process-watch, and theme features
+internal/ui/                Control panel, idle warning, tray icon, and UI primitives
+internal/platform/windows/  Native Windows integrations and system operations
+internal/config/            TOML load, validation, migration, and atomic save
+internal/devtools/          Build-tagged diagnostics and screenshot support
+tools/                      Checks, generators, and screenshot automation
 ```
 
 ## Acknowledgments

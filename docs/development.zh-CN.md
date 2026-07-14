@@ -1,6 +1,6 @@
 # 构建 IdleTrigger
 
-[English](BUILD.md)
+[English](development.md)
 
 ## 前置条件
 
@@ -25,10 +25,10 @@ go mod download
 $env:CGO_ENABLED = "0"
 $env:GOARCH = "amd64" # 32 位 Windows 使用 "386"
 $version = "dev"
-go run ./scripts/gen_resource.go -version $version
+go run ./tools/resourcegen.go -version $version
 $ldflags = "-s -w -H windowsgui -X github.com/JeffioZ/idletrigger/internal/version.Value=$version"
 $output = if ($env:GOARCH -eq "amd64") { "IdleTrigger-x64.exe" } else { "IdleTrigger-x86.exe" }
-go build -trimpath "-ldflags=$ldflags" -o $output .
+go build -trimpath "-ldflags=$ldflags" -o $output ./cmd/idletrigger
 ```
 
 `CGO_ENABLED=0` 使 EXE 保持自包含；`-H windowsgui` 避免托盘程序启动时显示控制台窗口。
@@ -38,14 +38,15 @@ go build -trimpath "-ldflags=$ldflags" -o $output .
 在 Windows PowerShell 5.1 或更高版本中执行本地标准检查：
 
 ```powershell
-.\scripts\check.ps1
+.\tools\check.ps1
 ```
 
-已安装 `golangci-lint` 时脚本会执行它；未安装时会明确打印 `SKIPPED`。
+检查脚本会覆盖普通、`devtools` 和 `tools` 三种构建标签组合。已安装
+`golangci-lint` 时脚本会执行它；未安装时会明确打印 `SKIPPED`。
 联网时可执行可选漏洞扫描：
 
 ```powershell
-.\scripts\check.ps1 -Vulncheck
+.\tools\check.ps1 -Vulncheck
 ```
 
 未传 `-Vulncheck` 时不会执行漏洞扫描，脚本会明确提示。若系统缓存目录不可写，
@@ -61,14 +62,14 @@ $env:GOLANGCI_LINT_CACHE = Join-Path $env:LOCALAPPDATA "IdleTrigger\cache\golang
 ```powershell
 $env:CGO_ENABLED = "0"
 $version = "dev"
-go run ./scripts/gen_resource.go -version $version
+go run ./tools/resourcegen.go -version $version
 $ldflags = "-s -w -H windowsgui -X github.com/JeffioZ/idletrigger/internal/version.Value=$version"
 
 $env:GOARCH = "amd64"
-go build -trimpath "-ldflags=$ldflags" -o dist/IdleTrigger-x64.exe .
+go build -trimpath "-ldflags=$ldflags" -o dist/IdleTrigger-x64.exe ./cmd/idletrigger
 
 $env:GOARCH = "386"
-go build -trimpath "-ldflags=$ldflags" -o dist/IdleTrigger-x86.exe .
+go build -trimpath "-ldflags=$ldflags" -o dist/IdleTrigger-x86.exe ./cmd/idletrigger
 ```
 
 发布工作流会先运行格式、依赖、test 与 vet 检查，再生成两种 EXE，并发布 `SHA256SUMS.txt`。
@@ -78,18 +79,18 @@ go build -trimpath "-ldflags=$ldflags" -o dist/IdleTrigger-x86.exe .
 主图标与两套托盘图标采用独立图稿。更新时先生成主 ICO，再生成专门适配任务栏的托盘变体：
 
 ```powershell
-go run ./scripts/gen_app_icon/main.go assets
-go run ./scripts/gen_tray_theme_icons assets
+go run ./tools/appicon/main.go build/windows/icons
+go run ./tools/trayicons/main.go build/windows/icons
 ```
 
 然后重新生成两种架构资源。资源命令与发布构建必须使用同一个版本号：
 
 ```powershell
 $version = "1.3.0"
-go run ./scripts/gen_resource.go -version $version
+go run ./tools/resourcegen.go -version $version
 ```
 
-请将 `app.ico`、两个托盘 ICO、`assets/manifest.xml` 和生成器一并提交。不要提交 `.syso` 文件；发布工作流会按 tag 版本自动重新生成。
+请将 `app.ico`、两个托盘 ICO、`build/windows/manifest.xml` 和生成器一并提交。不要提交 `.syso` 文件；发布工作流会按 tag 版本自动重新生成。
 
 ## 重新生成 README 截图
 
@@ -97,13 +98,13 @@ go run ./scripts/gen_resource.go -version $version
 devtools EXE、重新生成四张受版本管理的图片、校验 PNG 尺寸，并删除临时构建目录：
 
 ```powershell
-.\scripts\capture-screenshots.ps1
+.\tools\capture-screenshots.ps1
 ```
 
 如只想验证截图流程而不覆盖仓库图片，可指定临时输出目录：
 
 ```powershell
-.\scripts\capture-screenshots.ps1 -OutputDirectory (Join-Path $env:TEMP "IdleTrigger-screenshots")
+.\tools\capture-screenshots.ps1 -OutputDirectory (Join-Path $env:TEMP "IdleTrigger-screenshots")
 ```
 
 正式 EXE 明确不包含 `screenshot` 命令及其 PNG/压缩依赖。
@@ -117,18 +118,18 @@ go mod vendor
 
 $env:CGO_ENABLED = "0"
 $env:GOARCH = "amd64"
-go run ./scripts/gen_resource.go -version dev
-go build -mod=vendor -trimpath -ldflags="-s -w -H windowsgui" -o dist/IdleTrigger-x64.exe .
+go run ./tools/resourcegen.go -version dev
+go build -mod=vendor -trimpath -ldflags="-s -w -H windowsgui" -o dist/IdleTrigger-x64.exe ./cmd/idletrigger
 ```
 
 ## 开发调试
 
 ```powershell
 go test ./...
-go run ./scripts/gen_resource.go -version dev
+go run ./tools/resourcegen.go -version dev
 $env:CGO_ENABLED = "0"
 $env:GOARCH = "amd64"
-go build -tags devtools -trimpath -ldflags="-H windowsgui" -o dist/IdleTrigger-x64-devtools.exe .
+go build -tags devtools -trimpath -ldflags="-H windowsgui" -o dist/IdleTrigger-x64-devtools.exe ./cmd/idletrigger
 .\dist\IdleTrigger-x64-devtools.exe
 
 # 托盘程序启动后，在第二个终端中执行：

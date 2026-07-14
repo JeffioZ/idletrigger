@@ -1,6 +1,6 @@
 # Build IdleTrigger
 
-[简体中文](BUILD.zh-CN.md)
+[简体中文](development.zh-CN.md)
 
 ## Requirements
 
@@ -25,10 +25,10 @@ The architecture-specific `.syso` files contain the application icon, manifest, 
 $env:CGO_ENABLED = "0"
 $env:GOARCH = "amd64" # "386" for 32-bit Windows
 $version = "dev"
-go run ./scripts/gen_resource.go -version $version
+go run ./tools/resourcegen.go -version $version
 $ldflags = "-s -w -H windowsgui -X github.com/JeffioZ/idletrigger/internal/version.Value=$version"
 $output = if ($env:GOARCH -eq "amd64") { "IdleTrigger-x64.exe" } else { "IdleTrigger-x86.exe" }
-go build -trimpath "-ldflags=$ldflags" -o $output .
+go build -trimpath "-ldflags=$ldflags" -o $output ./cmd/idletrigger
 ```
 
 `CGO_ENABLED=0` keeps the binary self-contained. `-H windowsgui` prevents a console window when launching the tray app.
@@ -38,14 +38,15 @@ go build -trimpath "-ldflags=$ldflags" -o $output .
 Run the standard local checks in Windows PowerShell 5.1 or later:
 
 ```powershell
-.\scripts\check.ps1
+.\tools\check.ps1
 ```
 
+The check script covers normal, `devtools`, and `tools` build-tag variants.
 `golangci-lint` is run when installed; otherwise the script prints `SKIPPED`.
 Run the optional vulnerability scan while online:
 
 ```powershell
-.\scripts\check.ps1 -Vulncheck
+.\tools\check.ps1 -Vulncheck
 ```
 
 Without `-Vulncheck`, the vulnerability scan is not run and the script reports
@@ -62,14 +63,14 @@ Build both targets explicitly:
 ```powershell
 $env:CGO_ENABLED = "0"
 $version = "dev"
-go run ./scripts/gen_resource.go -version $version
+go run ./tools/resourcegen.go -version $version
 $ldflags = "-s -w -H windowsgui -X github.com/JeffioZ/idletrigger/internal/version.Value=$version"
 
 $env:GOARCH = "amd64"
-go build -trimpath "-ldflags=$ldflags" -o dist/IdleTrigger-x64.exe .
+go build -trimpath "-ldflags=$ldflags" -o dist/IdleTrigger-x64.exe ./cmd/idletrigger
 
 $env:GOARCH = "386"
-go build -trimpath "-ldflags=$ldflags" -o dist/IdleTrigger-x86.exe .
+go build -trimpath "-ldflags=$ldflags" -o dist/IdleTrigger-x86.exe ./cmd/idletrigger
 ```
 
 The release workflow runs formatting, module, test, and vet checks, produces both executables, and publishes `SHA256SUMS.txt`.
@@ -80,18 +81,18 @@ The application icon and the two taskbar icons have separate artwork. Regenerate
 the application ICO first, then the purpose-built taskbar variants:
 
 ```powershell
-go run ./scripts/gen_app_icon/main.go assets
-go run ./scripts/gen_tray_theme_icons assets
+go run ./tools/appicon/main.go build/windows/icons
+go run ./tools/trayicons/main.go build/windows/icons
 ```
 
 Then regenerate both architecture resources. Use the identical version value in the resource command and release build:
 
 ```powershell
 $version = "1.3.0"
-go run ./scripts/gen_resource.go -version $version
+go run ./tools/resourcegen.go -version $version
 ```
 
-Commit `app.ico`, both tray ICO files, `assets/manifest.xml`, and the generators together. Do not commit `.syso` files; the release workflow regenerates them from the tag version.
+Commit `app.ico`, both tray ICO files, `build/windows/manifest.xml`, and the generators together. Do not commit `.syso` files; the release workflow regenerates them from the tag version.
 
 ## Regenerate README Screenshots
 
@@ -101,14 +102,14 @@ regenerates all four checked-in images, validates their PNG dimensions, and
 removes the temporary build directory:
 
 ```powershell
-.\scripts\capture-screenshots.ps1
+.\tools\capture-screenshots.ps1
 ```
 
 To validate the process without replacing the checked-in images, provide a
 temporary output directory:
 
 ```powershell
-.\scripts\capture-screenshots.ps1 -OutputDirectory (Join-Path $env:TEMP "IdleTrigger-screenshots")
+.\tools\capture-screenshots.ps1 -OutputDirectory (Join-Path $env:TEMP "IdleTrigger-screenshots")
 ```
 
 The normal release EXE deliberately does not contain the `screenshot` command
@@ -123,18 +124,18 @@ go mod vendor
 
 $env:CGO_ENABLED = "0"
 $env:GOARCH = "amd64"
-go run ./scripts/gen_resource.go -version dev
-go build -mod=vendor -trimpath -ldflags="-s -w -H windowsgui" -o dist/IdleTrigger-x64.exe .
+go run ./tools/resourcegen.go -version dev
+go build -mod=vendor -trimpath -ldflags="-s -w -H windowsgui" -o dist/IdleTrigger-x64.exe ./cmd/idletrigger
 ```
 
 ## Development Loop
 
 ```powershell
 go test ./...
-go run ./scripts/gen_resource.go -version dev
+go run ./tools/resourcegen.go -version dev
 $env:CGO_ENABLED = "0"
 $env:GOARCH = "amd64"
-go build -tags devtools -trimpath -ldflags="-H windowsgui" -o dist/IdleTrigger-x64-devtools.exe .
+go build -tags devtools -trimpath -ldflags="-H windowsgui" -o dist/IdleTrigger-x64-devtools.exe ./cmd/idletrigger
 .\dist\IdleTrigger-x64-devtools.exe
 
 # In a second terminal after the tray app starts:
