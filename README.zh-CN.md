@@ -56,7 +56,7 @@ IdleTrigger 是一个仅依赖 Windows 系统 DLL 的单文件程序。它驻留
 
 默认启用空闲监测，空闲时长为 30 分钟，动作为睡眠。浮层可选时长为：
 
-`1、2、3、5、10、15、20、25、30、45 分钟；1、2、3、4、5 小时`。
+`1、2、3、5、10、15、30 分钟；1、2、5 小时`。
 
 空闲监测通过 Windows `GetLastInputInfo` 识别真实键盘和鼠标操作。程序刚启动、重新启用监测时会从新的空闲窗口开始，不会因为启动前系统已经空闲而立刻执行。动作触发后会先重置空闲窗口，再继续监测。
 
@@ -74,9 +74,7 @@ IdleTrigger sleep | hibernate | shutdown | restart | lock
 IdleTrigger nosleep on [--screen]
 IdleTrigger nosleep off | toggle | status
 
-IdleTrigger monitor on | off
-
-IdleTrigger diagnostics idle [--watch]
+IdleTrigger monitor on | off | status
 
 IdleTrigger autostart enable | disable | status
 IdleTrigger config:reload
@@ -84,9 +82,7 @@ IdleTrigger status
 IdleTrigger version
 ```
 
-`nosleep`、`monitor` 与 `config:reload` 会通过 `\\.\pipe\IdleTrigger-<session>` 转发给运行中的托盘实例，因此需要先启动托盘程序。一次性电源动作直接执行。
-
-`diagnostics idle` 会输出一次原始 Windows 空闲计时数据；排查输入重置时加上 `--watch` 可每秒刷新一次。它不需要托盘程序正在运行。
+改变 `nosleep` 或 `monitor` 状态的命令以及 `config:reload` 会通过 `\\.\pipe\IdleTrigger-<session>` 转发给运行中的托盘实例，因此需要先启动托盘程序。状态查询在托盘程序未运行时仍会返回结果；一次性电源动作直接执行。
 
 ## 配置
 

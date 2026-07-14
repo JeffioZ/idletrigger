@@ -56,7 +56,7 @@ The control panel follows Windows light/dark mode, responds to DPI changes, and 
 
 The idle monitor is enabled by default with a 30-minute idle time and Sleep as its action. Available panel idle-time choices are:
 
-`1, 2, 3, 5, 10, 15, 20, 25, 30, 45 minutes; 1, 2, 3, 4, 5 hours`.
+`1, 2, 3, 5, 10, 15, 30 minutes; 1, 2, 5 hours`.
 
 The monitor uses Windows `GetLastInputInfo` to observe real keyboard and mouse activity. A newly started or re-enabled monitor begins a fresh idle window; it never acts immediately because the machine had already been idle before IdleTrigger started. After an action is triggered, the idle window is reset before monitoring continues.
 
@@ -74,9 +74,7 @@ IdleTrigger sleep | hibernate | shutdown | restart | lock
 IdleTrigger nosleep on [--screen]
 IdleTrigger nosleep off | toggle | status
 
-IdleTrigger monitor on | off
-
-IdleTrigger diagnostics idle [--watch]
+IdleTrigger monitor on | off | status
 
 IdleTrigger autostart enable | disable | status
 IdleTrigger config:reload
@@ -84,9 +82,7 @@ IdleTrigger status
 IdleTrigger version
 ```
 
-`nosleep`, `monitor`, and `config:reload` forward to the active tray instance through `\\.\pipe\IdleTrigger-<session>`. Start the tray app first for these stateful commands. One-shot power actions execute directly.
-
-`diagnostics idle` prints the raw Windows idle-timing values once; add `--watch` to refresh them every second while investigating input resets. It does not require a running tray instance.
+Commands that change `nosleep` or `monitor` state, plus `config:reload`, forward to the active tray instance through `\\.\pipe\IdleTrigger-<session>` and require the tray app to be running. Status queries still return a result when the tray app is not running. One-shot power actions execute directly.
 
 ## Configuration
 
