@@ -3,20 +3,17 @@
 
 # Source files
 *.go    text eol=lf
-*.py    text eol=lf
 
 # Scripts
-*.sh    text eol=lf
 *.ps1   text eol=lf
 *.bat   text eol=crlf
-*.cmd   text eol=crlf
 
 # Project metadata / docs / config examples
 *.md    text eol=lf
 *.json  text eol=lf
 *.toml  text eol=lf
+*.xml   text eol=lf
 *.yml   text eol=lf
-*.yaml  text eol=lf
 *.mod   text eol=lf
 *.sum   text eol=lf
 .gitignore text eol=lf
@@ -27,16 +24,3 @@
 *.exe   binary
 *.syso  binary
 *.png   binary
-*.jpg   binary
-*.jpeg  binary
-*.gif   binary
-*.webp  binary
-*.pdf   binary
-*.gz    binary
-*.zip   binary
-*.7z    binary
-*.rar   binary
-*.tar   binary
-*.dll   binary
-*.pdb   binary
-*.msi   binary

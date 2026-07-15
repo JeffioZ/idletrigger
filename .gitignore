@@ -6,9 +6,8 @@
 *.prof
 coverage.out
 
-# Local build / Go caches
+# Local Go cache and vendored dependencies
 /.gocache/
-/bin/
 /vendor/
 
 # Runtime config and logs generated next to the EXE
@@ -18,9 +17,7 @@ IdleTrigger.log
 IdleTrigger.log.*
 .IdleTrigger-*.toml.tmp
 
-# Temporary / editor backup files
-*.tmp
-*.bak
+# Editor backup files
 *.swp
 *.swo
 *~
