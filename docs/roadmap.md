@@ -2,9 +2,7 @@
 
 ## 发布检查清单
 
-- [ ] `gofmt -l .` 无输出
-- [ ] `go test ./...` 通过
-- [ ] `go vet ./...` 无警告
+- [ ] `.\tools\check.ps1` 核心检查通过，并确认 `SKIPPED` / `NOT RUN` 项符合本次发布预期
 - [ ] 386 / amd64 Windows GUI 构建通过
 - [ ] 两种架构 EXE 均包含应用图标和 manifest
 - [ ] CLI、控制面板、IPC、热键、空闲预警做一次人工冒烟测试
