@@ -75,6 +75,26 @@ go build -trimpath "-ldflags=$ldflags" -o dist/IdleTrigger-x86.exe ./cmd/idletri
 
 The release workflow runs formatting, module, test, and vet checks, produces both executables, and publishes `SHA256SUMS.txt`.
 
+## Cross-Layer Change Checklist
+
+Use the relevant row before considering a change complete:
+
+- **Configuration field:** update `Config`, defaults, normalization, validation,
+  annotated TOML output, `IdleTrigger.example.toml`, related UI text, and tests.
+- **Control-panel action:** update the control ID/choice path, `controlpanel.Action`
+  mapping, the single `internal/app` action entry point, persistence, runtime
+  reconciliation, icon/schedule refreshes, and mapping tests.
+- **User-facing text:** update English and Simplified Chinese locales together;
+  keep format verbs identical and check tooltip, CLI, and screenshot consumers.
+- **Windows integration:** keep business policy outside `internal/platform/windows`,
+  verify error and cleanup paths, then compile both 386 and amd64 targets.
+- **Developer-only capability:** keep it behind `devtools`, update dependency
+  boundary expectations, and verify the normal build excludes it.
+
+The automated checks enforce locale-key coverage, configuration/example parity,
+control-panel action paths, build-tag dependency boundaries, and direct package
+layering. They complement, rather than replace, behavior-specific tests.
+
 ## Regenerate Resources
 
 The application icon and the two taskbar icons have separate artwork. Regenerate

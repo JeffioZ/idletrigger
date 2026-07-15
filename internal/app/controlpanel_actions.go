@@ -14,6 +14,9 @@ import (
 	"github.com/JeffioZ/idletrigger/internal/ui/trayicon"
 )
 
+// handleControlPanelAction is the sole application-state entry point for
+// control-panel actions. Each handler owns its runtime reconciliation, config
+// persistence, icon refresh, and scheduler restart side effects.
 func (s *runtimeState) handleControlPanelAction(action controlpanel.Action, value int) {
 	if s.handleSystemControlAction(action) || s.handleIdleControlAction(action, value) || s.handleThemeControlAction(action) {
 		return
