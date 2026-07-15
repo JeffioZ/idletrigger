@@ -145,7 +145,9 @@ func Run(cfg config.Config, cbs Callbacks) {
 		if s.cfg.NoSleepEnabled && s.cfg.IdleTimeoutMinutes > 0 {
 			s.cfg.IdleTimeoutMinutes = 0
 		}
-		s.batteryBlocked = batteryPolicyBlocks(s.cfg, powerstate.GetStatus())
+		powerStatus := powerstate.GetStatus()
+		s.batteryBlocked = batteryPolicyBlocks(s.cfg, powerStatus)
+		s.logPowerState("startup", powerStatus)
 		s.reconcileRuntime()
 
 		s.updateIcon()
@@ -174,8 +176,8 @@ func Run(cfg config.Config, cbs Callbacks) {
 		}
 
 		trayicon.SetOnLeftClick(func() { s.showControlPanel() })
-		trayicon.SetOnPowerChange(func() {
-			s.post(func() { s.refreshBatteryPolicy() })
+		trayicon.SetOnPowerChange(func(event uint32) {
+			s.post(func() { s.handlePowerEvent(event) })
 		})
 		trayicon.SetOnThemeChange(func() {
 			s.post(s.refreshTrayThemeIcon)

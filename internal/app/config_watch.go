@@ -1,11 +1,14 @@
 package app
 
 import (
-	"github.com/JeffioZ/idletrigger/internal/config"
-	mylog "github.com/JeffioZ/idletrigger/internal/logging"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/JeffioZ/idletrigger/internal/config"
+	"github.com/JeffioZ/idletrigger/internal/feature/keepawake"
+	mylog "github.com/JeffioZ/idletrigger/internal/logging"
+	"github.com/JeffioZ/idletrigger/internal/platform/windows/powerstate"
 )
 
 func (s *runtimeState) applyLogging() {
@@ -13,6 +16,12 @@ func (s *runtimeState) applyLogging() {
 		exePath, _ := os.Executable()
 		mylog.Init(true, filepath.Dir(exePath))
 		mylog.Info("Debug logging enabled from control panel")
+		ps := powerstate.GetStatus()
+		s.logPowerState("logging-enabled", ps)
+		mylog.Info("Runtime snapshot: nosleep_configured=%v process_watch_enabled=%v process_list_count=%d process_match=%v wants_nosleep=%v battery_blocked=%v keepawake_enabled=%v keep_screen_on=%v idle_timeout_min=%d monitor_running=%v",
+			s.cfg.NoSleepEnabled, s.cfg.ProcessWatchEnabled, len(effectiveProcessWatchList(s.cfg)), s.processNoSleep,
+			noSleepRequested(s.cfg, s.processNoSleep), batteryPolicyBlocks(s.cfg, ps), keepawake.IsEnabled(),
+			keepawake.IsKeepingScreenOn(), s.cfg.IdleTimeoutMinutes, s.mon != nil)
 		return
 	}
 	mylog.Info("Debug logging disabled from control panel")

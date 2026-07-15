@@ -1,10 +1,13 @@
 package app
 
 import (
+	"fmt"
+	"time"
+
 	"github.com/JeffioZ/idletrigger/internal/config"
+	"github.com/JeffioZ/idletrigger/internal/feature/keepawake"
 	mylog "github.com/JeffioZ/idletrigger/internal/logging"
 	"github.com/JeffioZ/idletrigger/internal/platform/windows/powerstate"
-	"time"
 )
 
 // syncBatteryLoop keeps the periodic battery poll dormant when neither
@@ -59,20 +62,44 @@ func (s *runtimeState) batteryLoop(stopCh <-chan struct{}, doneCh chan<- struct{
 }
 
 func (s *runtimeState) refreshBatteryPolicy() {
-	ps := powerstate.GetStatus()
+	s.refreshBatteryPolicyWithStatus(powerstate.GetStatus())
+}
+
+func (s *runtimeState) refreshBatteryPolicyWithStatus(ps powerstate.Status) bool {
 	blocked := batteryPolicyBlocks(s.cfg, ps)
 	if s.themeSched != nil {
 		s.themeSched.CheckNow()
 	}
 	s.refreshTrayThemeIcon()
 	if blocked == s.batteryBlocked {
-		return
+		return false
 	}
 	s.batteryBlocked = blocked
-	mylog.Info("Battery policy changed: nosleep_blocked=%v", blocked)
+	mylog.Info("Battery policy changed: nosleep_blocked=%v reason=%s ac_line=%v battery=%v percent=%d charging=%v valid=%v",
+		blocked, batteryPolicyReason(s.cfg, ps), ps.ACLine, ps.Battery, ps.Percent, ps.Charging, ps.Valid)
 	s.reconcileRuntime()
 
 	s.updateIcon()
+	return true
+}
+
+func (s *runtimeState) handlePowerEvent(event uint32) {
+	ps := powerstate.GetStatus()
+	s.logPowerState(fmt.Sprintf("event:%s(0x%04x)", powerEventName(event), event), ps)
+	changed := s.refreshBatteryPolicyWithStatus(ps)
+	if isResumePowerEvent(event) && !changed {
+		if noSleepRequested(s.cfg, s.processNoSleep) && !s.batteryBlocked {
+			mylog.Info("Power resume: reasserting effective Stay Awake request")
+		}
+		s.reconcileRuntime()
+	}
+}
+
+func (s *runtimeState) logPowerState(source string, ps powerstate.Status) {
+	mylog.Info("Power state: source=%s ac_line=%v battery=%v percent=%d charging=%v valid=%v nosleep_configured=%v wants_nosleep=%v nosleep_blocked=%v keepawake_enabled=%v keep_screen_on=%v reason=%s",
+		source, ps.ACLine, ps.Battery, ps.Percent, ps.Charging, ps.Valid,
+		s.cfg.NoSleepEnabled, noSleepRequested(s.cfg, s.processNoSleep), batteryPolicyBlocks(s.cfg, ps),
+		keepawake.IsEnabled(), keepawake.IsKeepingScreenOn(), batteryPolicyReason(s.cfg, ps))
 }
 
 func batteryPolicyBlocks(cfg config.Config, status powerstate.Status) bool {
@@ -81,6 +108,22 @@ func batteryPolicyBlocks(cfg config.Config, status powerstate.Status) bool {
 	}
 	return !cfg.NoSleepOnBattery ||
 		(status.Percent >= 0 && status.Percent < cfg.NoSleepBatteryThreshold)
+}
+
+func batteryPolicyReason(cfg config.Config, status powerstate.Status) string {
+	if !status.Valid {
+		return "power-status-unknown"
+	}
+	if status.ACLine || !status.Battery {
+		return "ac-or-no-battery"
+	}
+	if !cfg.NoSleepOnBattery {
+		return "battery-not-allowed"
+	}
+	if status.Percent >= 0 && status.Percent < cfg.NoSleepBatteryThreshold {
+		return "battery-below-threshold"
+	}
+	return "battery-allowed"
 }
 
 // ---- IPC handler ------------------------------------------------------

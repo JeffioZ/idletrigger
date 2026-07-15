@@ -148,10 +148,10 @@ func (s *runtimeState) reconcileRuntime() {
 		}
 		s.stopMonitor()
 		if err := keepawake.Enable(s.cfg.KeepScreenOn); err != nil {
-			mylog.Info("Stay Awake enable failed: keep_screen_on=%v error=%v", s.cfg.KeepScreenOn, err)
+			mylog.Info("Stay Awake enable failed: api=SetThreadExecutionState continuous=true system_required=true display_required=%v error=%v", s.cfg.KeepScreenOn, err)
 			s.showError("menu_nosleep", err)
 		} else {
-			mylog.Info("Stay Awake enabled: keep_screen_on=%v", s.cfg.KeepScreenOn)
+			mylog.Info("Stay Awake enabled: api=SetThreadExecutionState continuous=true system_required=true display_required=%v", s.cfg.KeepScreenOn)
 		}
 		return
 	}

@@ -138,6 +138,54 @@ func TestBatteryPolicyBlocksAndRestores(t *testing.T) {
 	}
 }
 
+func TestBatteryPolicyReasons(t *testing.T) {
+	cfg := config.DefaultConfig()
+	tests := []struct {
+		name   string
+		status powerstate.Status
+		setup  func(*config.Config)
+		want   string
+	}{
+		{"unknown", powerstate.Status{}, nil, "power-status-unknown"},
+		{"ac", powerstate.Status{Valid: true, ACLine: true, Battery: true, Percent: 80}, nil, "ac-or-no-battery"},
+		{"battery disabled", powerstate.Status{Valid: true, Battery: true, Percent: 80}, nil, "battery-not-allowed"},
+		{"battery low", powerstate.Status{Valid: true, Battery: true, Percent: 10}, func(c *config.Config) { c.NoSleepOnBattery = true }, "battery-below-threshold"},
+		{"battery allowed", powerstate.Status{Valid: true, Battery: true, Percent: 80}, func(c *config.Config) { c.NoSleepOnBattery = true }, "battery-allowed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			current := cfg
+			if tt.setup != nil {
+				tt.setup(&current)
+			}
+			if got := batteryPolicyReason(current, tt.status); got != tt.want {
+				t.Fatalf("batteryPolicyReason() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPowerEventClassification(t *testing.T) {
+	for _, tt := range []struct {
+		event  uint32
+		name   string
+		resume bool
+	}{
+		{pbtAPMSuspend, "suspend", false},
+		{pbtAPMResumeSuspend, "resume-user", true},
+		{pbtAPMResumeAutomatic, "resume-automatic", true},
+		{pbtPowerSettingChange, "power-setting-change", false},
+		{0xffff, "unknown", false},
+	} {
+		if got := powerEventName(tt.event); got != tt.name {
+			t.Errorf("powerEventName(0x%x) = %q, want %q", tt.event, got, tt.name)
+		}
+		if got := isResumePowerEvent(tt.event); got != tt.resume {
+			t.Errorf("isResumePowerEvent(0x%x) = %v, want %v", tt.event, got, tt.resume)
+		}
+	}
+}
+
 func TestRuntimeModeConfigTransitions(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.ProcessWatchEnabled = true

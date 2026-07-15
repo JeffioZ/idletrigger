@@ -33,7 +33,7 @@ func (t *winTray) wndProc(hWnd windows.Handle, message uint32, wParam, lParam ui
 	case WM_POWERBROADCAST:
 		_, callback, _ := callbacks()
 		if callback != nil {
-			go callback()
+			go callback(uint32(wParam))
 		}
 	case WM_CLOSE:
 		pDestroyWindow.Call(uintptr(t.window))

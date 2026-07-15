@@ -18,7 +18,7 @@ var (
 	errorLock     sync.RWMutex
 	callbackLock  sync.RWMutex
 	onLeftClick   func()
-	onPowerChange func()
+	onPowerChange func(uint32)
 	onThemeChange func()
 
 	currentID = uint32(0)
@@ -262,7 +262,7 @@ func SetOnLeftClick(fn func()) {
 }
 
 // SetOnPowerChange sets the callback used for Windows power-state changes.
-func SetOnPowerChange(fn func()) {
+func SetOnPowerChange(fn func(uint32)) {
 	callbackLock.Lock()
 	onPowerChange = fn
 	callbackLock.Unlock()
@@ -275,7 +275,7 @@ func SetOnThemeChange(fn func()) {
 	callbackLock.Unlock()
 }
 
-func callbacks() (leftClick, powerChange, themeChange func()) {
+func callbacks() (leftClick func(), powerChange func(uint32), themeChange func()) {
 	callbackLock.RLock()
 	defer callbackLock.RUnlock()
 	return onLeftClick, onPowerChange, onThemeChange
