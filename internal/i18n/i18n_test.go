@@ -1,7 +1,14 @@
 package i18n
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"io/fs"
+	"path/filepath"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -37,6 +44,82 @@ func TestLocalesUseMatchingFormatVerbs(t *testing.T) {
 			t.Errorf("format verbs differ for %q: en=%q zh-CN=%q", key, enVerbs, zhVerbs)
 		}
 	}
+}
+
+func TestLiteralLocaleKeysUsedBySourceExist(t *testing.T) {
+	missing := map[string][]string{}
+	root := filepath.Join("..", "..")
+	for _, sourceRoot := range []string{"cmd", "internal"} {
+		err := filepath.WalkDir(filepath.Join(root, sourceRoot), func(path string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() || filepath.Ext(path) != ".go" || strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+			if err != nil {
+				return err
+			}
+			ast.Inspect(file, func(node ast.Node) bool {
+				call, ok := node.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				key, ok := literalLocaleKey(call)
+				if !ok {
+					return true
+				}
+				if _, exists := store["en"][key]; !exists {
+					relative, relErr := filepath.Rel(root, path)
+					if relErr != nil {
+						relative = path
+					}
+					missing[key] = append(missing[key], relative)
+				}
+				return true
+			})
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("scan %s: %v", sourceRoot, err)
+		}
+	}
+
+	keys := make([]string, 0, len(missing))
+	for key := range missing {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		t.Errorf("source uses missing locale key %q in %s", key, strings.Join(missing[key], ", "))
+	}
+}
+
+func literalLocaleKey(call *ast.CallExpr) (string, bool) {
+	argument := -1
+	switch function := call.Fun.(type) {
+	case *ast.Ident:
+		if function.Name == "T" {
+			argument = 1
+		}
+	case *ast.SelectorExpr:
+		switch function.Sel.Name {
+		case "T":
+			argument = 1
+		case "text":
+			argument = 0
+		}
+	}
+	if argument < 0 || len(call.Args) <= argument {
+		return "", false
+	}
+	literal, ok := call.Args[argument].(*ast.BasicLit)
+	if !ok || literal.Kind != token.STRING {
+		return "", false
+	}
+	key, err := strconv.Unquote(literal.Value)
+	return key, err == nil
 }
 
 func TestVersionPlaceholder(t *testing.T) {

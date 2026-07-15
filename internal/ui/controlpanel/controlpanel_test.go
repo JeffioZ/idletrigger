@@ -502,3 +502,47 @@ func TestLanguageCommandDispatchesOnlyForAChange(t *testing.T) {
 		t.Fatalf("language actions = %v, values = %v", actions, values)
 	}
 }
+
+func TestEveryControlPanelActionHasAUICommandPath(t *testing.T) {
+	p := &panel{
+		toggles:  map[uint16]bool{},
+		disabled: map[uint16]bool{},
+	}
+	mapped := map[Action]bool{
+		ActIdleTimeout: true,
+		ActIdleAction:  true,
+		ActLanguage:    true,
+	}
+	for _, id := range []uint16{
+		idSleep, idHibernate, idShutdown, idLock, idRestart,
+		idThemeSwitch, idThemeRepair, idConfig, idProjectHome, idExit,
+	} {
+		action, _, ok := p.commandAction(id)
+		if !ok {
+			t.Fatalf("command ID %d has no action", id)
+		}
+		mapped[action] = true
+	}
+	for _, id := range []uint16{
+		idNoSleep, idProcess, idIdle, idIdleWarning, idIdleEnhanced,
+		idTheme, idBattery, idFullscreen, idIPLocation,
+		idHotkeys, idAutostart, idLogging,
+	} {
+		action, ok := p.toggleCommand(id)
+		if !ok {
+			t.Fatalf("toggle ID %d has no action", id)
+		}
+		mapped[action] = true
+	}
+
+	for action := ActSleep; action <= ActIdleToggle; action++ {
+		if !mapped[action] {
+			t.Errorf("control panel action %d has no UI command path", action)
+		}
+	}
+	for action := ActIdleTimeout; action <= ActExit; action++ {
+		if !mapped[action] {
+			t.Errorf("control panel action %d has no UI command path", action)
+		}
+	}
+}
