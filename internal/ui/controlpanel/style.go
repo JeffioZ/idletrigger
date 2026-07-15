@@ -16,7 +16,7 @@ const (
 type layoutTokens struct {
 	PanelWidth, Padding, Gap, SectionGap, LabelGap int
 	ButtonHeight, SectionHeight, SubtitleHeight    int
-	QuickMenuRowHeight                             int
+	QuickMenuRowHeight, QuickMenuRowGap            int
 }
 
 type fontTokens struct {
@@ -45,7 +45,8 @@ type panelStyle struct {
 var defaultPanelStyle = panelStyle{
 	Layout: layoutTokens{
 		PanelWidth: 472, Padding: 18, Gap: 8, SectionGap: 14, LabelGap: 2,
-		ButtonHeight: 36, SectionHeight: 22, SubtitleHeight: 18, QuickMenuRowHeight: 34,
+		ButtonHeight: 36, SectionHeight: 22, SubtitleHeight: 18,
+		QuickMenuRowHeight: 34, QuickMenuRowGap: 1,
 	},
 	Fonts: fontTokens{
 		BodySize: 14, SectionSize: 14, SubtitleSize: 12,

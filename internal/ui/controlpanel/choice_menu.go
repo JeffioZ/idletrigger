@@ -184,17 +184,19 @@ func (p *panel) positionChoiceLayer(id uint16, count int) {
 	origin := point{X: x, Y: y}
 	pScreenToClient.Call(uintptr(p.hwnd), uintptr(unsafe.Pointer(&origin)))
 	rowH := p.metrics.style.Layout.QuickMenuRowHeight
+	rowGap := p.metrics.style.Layout.QuickMenuRowGap
+	surfaceInset := p.metrics.style.Control.MenuSurfaceInset
 	var client rect
 	pGetClientRect.Call(uintptr(p.hwnd), uintptr(unsafe.Pointer(&client)))
-	availableDown := int(client.Bottom-origin.Y) - int(p.sc(8))
-	availableUp := int(origin.Y) - int(p.sc(8))
-	maxRows := availableDown / p.sc(rowH)
+	availableDown := int(float64(client.Bottom-origin.Y) / p.metrics.scale)
+	availableUp := int(float64(origin.Y) / p.metrics.scale)
+	maxRows := menuRowsFit(availableDown, rowH, rowGap, surfaceInset)
 	if maxRows < 1 && availableUp > availableDown {
-		maxRows = availableUp / p.sc(rowH)
+		maxRows = menuRowsFit(availableUp, rowH, rowGap, surfaceInset)
 		if maxRows < 1 {
 			maxRows = 1
 		}
-		origin.Y = int32(origin.Y) - int32(p.sc(8+maxRows*rowH)) - margin
+		origin.Y = int32(origin.Y) - int32(p.sc(menuHeight(maxRows, rowH, rowGap, surfaceInset))) - margin
 	} else if maxRows < 1 {
 		maxRows = 1
 	}
@@ -213,11 +215,11 @@ func (p *panel) positionChoiceLayer(id uint16, count int) {
 	}
 	p.choice.scroll[id] = start
 	p.choice.visible[id] = maxRows
-	menuHeight := 8 + maxRows*rowH
+	menuH := menuHeight(maxRows, rowH, rowGap, surfaceInset)
 	if surface := p.controls[idChoiceSurface]; surface != 0 {
 		// Keep the surface above the panel's other child controls so its border
 		// is not covered by the rows below/behind it.
-		pSetWindowPos.Call(uintptr(surface), 0, uintptr(origin.X), uintptr(origin.Y), uintptr(width), uintptr(p.sc(menuHeight)), swpShowWindow)
+		pSetWindowPos.Call(uintptr(surface), 0, uintptr(origin.X), uintptr(origin.Y), uintptr(width), uintptr(p.sc(menuH)), swpShowWindow)
 		pUpdateWindow.Call(uintptr(surface))
 	}
 	for i, optionID := range p.choice.optionIDs[id] {
@@ -226,9 +228,9 @@ func (p *panel) positionChoiceLayer(id uint16, count int) {
 				pShowWindow.Call(uintptr(hwnd), swHide)
 				continue
 			}
-			ox := origin.X + int32(p.sc(4))
-			oy := origin.Y + int32(p.sc(4+(i-start)*rowH))
-			pSetWindowPos.Call(uintptr(hwnd), 0, uintptr(ox), uintptr(oy), uintptr(width-p.sc(8)), uintptr(p.sc(rowH)), swpShowWindow)
+			ox := origin.X + int32(p.sc(surfaceInset))
+			oy := origin.Y + int32(p.sc(menuRowOffset(i-start, rowH, rowGap, surfaceInset)))
+			pSetWindowPos.Call(uintptr(hwnd), 0, uintptr(ox), uintptr(oy), uintptr(width-p.sc(2*surfaceInset)), uintptr(p.sc(rowH)), swpShowWindow)
 			pUpdateWindow.Call(uintptr(hwnd))
 		}
 	}

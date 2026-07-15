@@ -165,17 +165,53 @@ func TestDangerQuickActionsAreLimitedToShutdownAndRestart(t *testing.T) {
 }
 
 func TestMenuOptionStylesKeepOnlySemanticDifferences(t *testing.T) {
-	if got := menuOptionStyleFor(idLangEN, true); !got.Selected || got.Danger || got.Separator {
+	if got := menuOptionStyleFor(idLangEN, true); !got.Selected || got.Danger {
 		t.Fatalf("selected language style = %+v", got)
 	}
-	if got := menuOptionStyleFor(idLock, false); got.Selected || got.Danger || got.Separator {
+	if got := menuOptionStyleFor(idLock, false); got.Selected || got.Danger {
 		t.Fatalf("regular quick action style = %+v", got)
 	}
-	if got := menuOptionStyleFor(idShutdown, false); got.Selected || !got.Danger || !got.Separator {
+	if got := menuOptionStyleFor(idShutdown, false); got.Selected || !got.Danger {
 		t.Fatalf("shutdown style = %+v", got)
 	}
-	if got := menuOptionStyleFor(idRestart, false); got.Selected || !got.Danger || got.Separator {
+	if got := menuOptionStyleFor(idRestart, false); got.Selected || !got.Danger {
 		t.Fatalf("restart style = %+v", got)
+	}
+}
+
+func TestSharedMenuGeometryIncludesRowGaps(t *testing.T) {
+	const rowHeight, rowGap, surfaceInset = 34, 1, 4
+	heights := map[int]int{0: 8, 1: 42, 2: 77, 5: 182, 10: 357}
+	for rows, want := range heights {
+		if got := menuHeight(rows, rowHeight, rowGap, surfaceInset); got != want {
+			t.Fatalf("menuHeight(%d) = %d, want %d", rows, got, want)
+		}
+	}
+	offsets := map[int]int{0: 4, 1: 39, 4: 144, 9: 319}
+	for index, want := range offsets {
+		if got := menuRowOffset(index, rowHeight, rowGap, surfaceInset); got != want {
+			t.Fatalf("menuRowOffset(%d) = %d, want %d", index, got, want)
+		}
+	}
+}
+
+func TestSharedMenuRowsFitExactAvailableHeight(t *testing.T) {
+	const rowHeight, rowGap, surfaceInset = 34, 1, 4
+	cases := []struct {
+		available int
+		want      int
+	}{
+		{41, 0},
+		{42, 1},
+		{76, 1},
+		{77, 2},
+		{181, 4},
+		{182, 5},
+	}
+	for _, tc := range cases {
+		if got := menuRowsFit(tc.available, rowHeight, rowGap, surfaceInset); got != tc.want {
+			t.Fatalf("menuRowsFit(%d) = %d, want %d", tc.available, got, tc.want)
+		}
 	}
 }
 

@@ -189,24 +189,26 @@ func (p *panel) build() error {
 	}
 	quickW := bottomW
 	menuRowH := layout.QuickMenuRowHeight
-	menuH := 8 + len(quickActionIDs())*menuRowH
+	menuRowGap := layout.QuickMenuRowGap
+	menuInset := p.metrics.style.Control.MenuSurfaceInset
+	menuH := menuHeight(len(quickActionIDs()), menuRowH, menuRowGap, menuInset)
 	menuY := y - menuH
 	if err := createMenuSurface(p, idQuickMenu, pad, menuY, quickW, menuH); err != nil {
 		return err
 	}
 	for i, id := range quickActionIDs() {
-		if err := buttonHidden(p, p.text(quickActionTranslationKey(id)), pad+4, menuY+4+i*menuRowH, quickW-8, menuRowH, id); err != nil {
+		if err := buttonHidden(p, p.text(quickActionTranslationKey(id)), pad+menuInset, menuY+menuRowOffset(i, menuRowH, menuRowGap, menuInset), quickW-2*menuInset, menuRowH, id); err != nil {
 			return err
 		}
 	}
 	languageX := pad + bottomW + gap
-	languageMenuH := 8 + len(languageIDs())*menuRowH
+	languageMenuH := menuHeight(len(languageIDs()), menuRowH, menuRowGap, menuInset)
 	languageMenuY := y - languageMenuH
 	if err := createMenuSurface(p, idLanguageMenu, languageX, languageMenuY, bottomW, languageMenuH); err != nil {
 		return err
 	}
 	for i, id := range languageIDs() {
-		if err := buttonHidden(p, []string{p.text("menu_lang_en"), p.text("menu_lang_zh")}[i], languageX+4, languageMenuY+4+i*menuRowH, bottomW-8, menuRowH, id); err != nil {
+		if err := buttonHidden(p, []string{p.text("menu_lang_en"), p.text("menu_lang_zh")}[i], languageX+menuInset, languageMenuY+menuRowOffset(i, menuRowH, menuRowGap, menuInset), bottomW-2*menuInset, menuRowH, id); err != nil {
 			return err
 		}
 	}

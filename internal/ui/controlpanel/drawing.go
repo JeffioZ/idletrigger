@@ -248,16 +248,14 @@ func projectHomeLinkColor(palette colors.Palette, dark bool, state buttonVisualS
 }
 
 type menuOptionStyle struct {
-	Selected  bool
-	Danger    bool
-	Separator bool
+	Selected bool
+	Danger   bool
 }
 
 func menuOptionStyleFor(id uint16, selected bool) menuOptionStyle {
 	return menuOptionStyle{
-		Selected:  selected,
-		Danger:    isDangerQuickAction(id),
-		Separator: id == idShutdown,
+		Selected: selected,
+		Danger:   isDangerQuickAction(id),
 	}
 }
 
@@ -284,19 +282,11 @@ func (p *panel) drawMenuOption(item *drawItem, state buttonVisualState, style me
 	if state.Disabled || item.ItemState&odsDisabled != 0 {
 		brush, border, textColor = p.disabledBrush, p.palette.SubtleBorder, p.palette.DisabledText
 	}
-	pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&item.Rect)), uintptr(p.backgroundBrush))
+	// Menu rows live on the elevated popup surface. Clearing with the same
+	// brush keeps rounded corners and the shared row gap free of panel-colored
+	// seams at every DPI scale.
+	pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&item.Rect)), uintptr(p.elevatedBrush))
 	p.roundRect(item.HDC, item.Rect, brush, border, p.sc(p.metrics.style.Control.CornerRadius))
-	if style.Separator {
-		// Adjacent menu rows share an edge. Paint on the first danger row after
-		// its surface so no child HWND redraw can cover the separator.
-		separator := item.Rect
-		separator.Left += int32(p.sc(p.metrics.style.Control.MenuSurfaceInset))
-		separator.Right -= int32(p.sc(p.metrics.style.Control.MenuSurfaceInset))
-		separator.Bottom = separator.Top + int32(p.sc(1))
-		if separator.Left < separator.Right {
-			pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&separator)), uintptr(p.dangerBorderBrush))
-		}
-	}
 	if style.Selected {
 		marker := item.Rect
 		marker.Left += int32(p.sc(p.metrics.style.Control.MenuSurfaceInset))
