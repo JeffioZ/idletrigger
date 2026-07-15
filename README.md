@@ -127,7 +127,7 @@ tools/                      Checks, generators, and screenshot automation
 
 ## Acknowledgments
 
-- [getlantern/systray](https://github.com/getlantern/systray): local Windows tray implementation derived from v1.2.2 and adapted for IdleTrigger (Apache-2.0)
+- [getlantern/systray](https://github.com/getlantern/systray): Windows tray implementation adapted from v1.2.2 (Apache-2.0)
 - [BurntSushi/toml](https://github.com/BurntSushi/toml): TOML parser
 - [golang.org/x/sys](https://pkg.go.dev/golang.org/x/sys): Windows API bindings
 - [NoSleep](https://github.com/CHerSun/NoSleep): inspiration for the Stay Awake feature

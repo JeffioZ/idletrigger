@@ -127,7 +127,7 @@ tools/                      检查、生成器和截图自动化
 
 ## 致谢
 
-- [getlantern/systray](https://github.com/getlantern/systray)：本地 Windows 托盘实现基于 v1.2.2 派生，并按 IdleTrigger 需求调整（Apache-2.0）
+- [getlantern/systray](https://github.com/getlantern/systray)：Windows 托盘实现，基于 v1.2.2 调整（Apache-2.0）
 - [BurntSushi/toml](https://github.com/BurntSushi/toml)：TOML 解析器
 - [golang.org/x/sys](https://pkg.go.dev/golang.org/x/sys)：Windows API 绑定
 - [NoSleep](https://github.com/CHerSun/NoSleep)：保持唤醒功能的设计灵感来源
