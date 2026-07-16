@@ -23,9 +23,17 @@ type Palette struct {
 }
 
 // ForTheme returns the compact native-control palette for the active Windows
-// theme. Accent colors follow the app icon's restrained cyan-blue family while
-// preserving readable white text for selected controls.
+// theme. High contrast uses the current system color roles; otherwise accent
+// colors follow the app icon's restrained cyan-blue family while preserving
+// readable white text for selected controls.
 func ForTheme(dark bool) Palette {
+	if palette, active := systemHighContrastPalette(); active {
+		return palette
+	}
+	return themePalette(dark)
+}
+
+func themePalette(dark bool) Palette {
 	if dark {
 		return Palette{
 			WindowBackground: RGB(32, 36, 42),
