@@ -23,13 +23,13 @@ func (s *runtimeState) startMonitor() {
 	}
 	snap, snapErr := idle.Snapshot()
 	if snapErr != nil {
-		mylog.Info("Idle monitor starting: config_timeout_min=%d effective_threshold=%s warning=%s action=%s idle_snapshot_error=%v",
+		mylog.Info("Idle monitoring starting: config_timeout_min=%d effective_threshold=%s warning=%s action=%s idle_snapshot_error=%v",
 			s.cfg.IdleTimeoutMinutes, threshold, warnOffset, string(action), snapErr)
 	} else {
-		mylog.Info("Idle monitor starting: config_timeout_min=%d effective_threshold=%s warning=%s action=%s tick_now=%d tick32=%d last_input=%d raw_delta_ms=%d idle=%s",
+		mylog.Info("Idle monitoring starting: config_timeout_min=%d effective_threshold=%s warning=%s action=%s tick_now=%d tick32=%d last_input=%d raw_delta_ms=%d idle=%s",
 			s.cfg.IdleTimeoutMinutes, threshold, warnOffset, string(action), snap.NowTick64, snap.NowTick32, snap.LastInputTick, snap.RawDeltaMS, snap.Idle.Round(time.Second))
 	}
-	mylog.Info("Idle monitor input policy: enhanced_idle_monitor=%v periodic_window=%s..%s periodic_tolerance=%s periodic_required=%d",
+	mylog.Info("Idle monitoring input policy: enhanced_idle_monitor=%v periodic_window=%s..%s periodic_tolerance=%s periodic_required=%d",
 		s.cfg.IdleEnhancedMonitor, 20*time.Second, 2*time.Minute, 5*time.Second, 3)
 	lang := s.lang
 	warningSeconds := int(warnOffset / time.Second)
@@ -79,27 +79,27 @@ func (s *runtimeState) startMonitor() {
 			}
 			idleFor, idleErr := idle.IdleDuration()
 			if idleErr != nil {
-				mylog.Info("Idle monitor trigger reached: effective_idle=%s action=%s raw_idle_after_trigger_error=%v",
+				mylog.Info("Idle monitoring trigger reached: effective_idle=%s action=%s raw_idle_after_trigger_error=%v",
 					lastEffectiveIdle.Round(time.Second), action, idleErr)
 			} else {
-				mylog.Info("Idle monitor trigger reached: effective_idle=%s action=%s raw_idle_after_trigger=%s",
+				mylog.Info("Idle monitoring trigger reached: effective_idle=%s action=%s raw_idle_after_trigger=%s",
 					lastEffectiveIdle.Round(time.Second), action, idleFor.Round(time.Second))
 			}
 			if err := executeActionWithLanguage(action, lang); err != nil {
-				mylog.Info("Idle monitor action failed: action=%s error=%v", action, err)
+				mylog.Info("Idle monitoring action failed: action=%s error=%v", action, err)
 				if !s.exiting.Load() {
 					s.post(func() { s.showError(actionTranslationKey(action), err) })
 				}
 				return
 			}
-			mylog.Info("Idle monitor action accepted: action=%s", action)
+			mylog.Info("Idle monitoring action accepted: action=%s", action)
 		},
 		time.Second,
 	)
 	s.mon.SetEnhancedIdleMonitor(enhancedIdleMonitor)
 	s.mon.SetOnActivity(func() { trayicon.Post(idlewarning.Hide) })
 	s.mon.SetOnInputReset(func(reset idle.InputReset) {
-		mylog.Info("Idle monitor input reset: previous_last_input=%d last_input=%d session_idle_before_reset=%s threshold=%s warn_at=%s was_warned=%v was_triggered=%v ignored=%v reason=%s periodic_count=%d periodic_baseline=%s enhanced_idle_monitor=%v action=%s source=GetLastInputInfo",
+		mylog.Info("Idle monitoring input reset: previous_last_input=%d last_input=%d session_idle_before_reset=%s threshold=%s warn_at=%s was_warned=%v was_triggered=%v ignored=%v reason=%s periodic_count=%d periodic_baseline=%s enhanced_idle_monitor=%v action=%s source=GetLastInputInfo",
 			reset.PreviousLastInputTick, reset.LastInputTick, reset.SessionIdleBeforeReset.Round(time.Millisecond),
 			reset.Threshold, reset.WarnAt, reset.WasWarned, reset.WasTriggered, reset.Ignored, reset.Reason,
 			reset.PeriodicCount, reset.PeriodicBaseline.Round(time.Millisecond), enhancedIdleMonitor, action)
@@ -112,13 +112,13 @@ func (s *runtimeState) startMonitor() {
 		}
 		lastSampleLog = now
 		if snap, err := idle.Snapshot(); err == nil {
-			mylog.Info("Idle monitor sample: effective_idle=%s raw_idle=%s raw_delta_ms=%d threshold=%s warn_at=%s last_input=%d tick_now=%d clamped_to_start=%v warned=%v triggered=%v input_timestamp=%v enhanced_idle_monitor=%v nosleep_requested=%v keep_screen_on=%v automation_rules_active=%d",
+			mylog.Info("Idle monitoring sample: effective_idle=%s raw_idle=%s raw_delta_ms=%d threshold=%s warn_at=%s last_input=%d tick_now=%d clamped_to_start=%v warned=%v triggered=%v input_timestamp=%v enhanced_idle_monitor=%v nosleep_requested=%v keep_screen_on=%v automation_rules_active=%d",
 				sample.Idle.Round(time.Millisecond), snap.Idle.Round(time.Millisecond), snap.RawDeltaMS,
 				sample.Threshold, sample.WarnAt, sample.LastInputTick, snap.NowTick64,
 				sample.StartWindowClamped, sample.Warned, sample.Triggered, sample.InputTimestampAvailable,
 				enhancedIdleMonitor, noSleepEnabled, keepScreenOn, automationActiveCount)
 		} else {
-			mylog.Info("Idle monitor sample: effective_idle=%s threshold=%s warn_at=%s last_input=%d clamped_to_start=%v warned=%v triggered=%v input_timestamp=%v snapshot_error=%v",
+			mylog.Info("Idle monitoring sample: effective_idle=%s threshold=%s warn_at=%s last_input=%d clamped_to_start=%v warned=%v triggered=%v input_timestamp=%v snapshot_error=%v",
 				sample.Idle.Round(time.Millisecond), sample.Threshold, sample.WarnAt, sample.LastInputTick,
 				sample.StartWindowClamped, sample.Warned, sample.Triggered, sample.InputTimestampAvailable, err)
 		}
@@ -132,7 +132,7 @@ func (s *runtimeState) stopMonitor() {
 	if s.mon != nil {
 		s.mon.Stop()
 		s.mon = nil
-		mylog.Info("Idle monitor stopped")
+		mylog.Info("Idle monitoring stopped")
 	}
 }
 

@@ -8,7 +8,7 @@ IdleTrigger is a single executable with no runtime dependencies beyond Windows s
 
 ## What It Does
 
-- **Idle monitor**: after a chosen period without keyboard or mouse input, lock, sleep, hibernate, or shut down the PC.
+- **Idle Monitoring**: after a chosen period without keyboard or mouse input, lock, sleep, hibernate, or shut down the PC.
 - **Pre-action reminder**: show a non-activating reminder before an idle action; mouse or keyboard input, or closing the reminder, cancels the pending action.
 - **Stay Awake**: prevent automatic sleep, optionally keeping the display on.
 - **Automatic tasks**: combine time windows, one-time/daily/weekly schedules, or process conditions with supported built-in actions.
@@ -54,9 +54,9 @@ The control panel follows Windows light/dark mode, responds to DPI changes, and 
 
 </details>
 
-## Idle Monitor
+## Idle Monitoring
 
-The idle monitor is enabled by default with a 30-minute idle time and Sleep as its action. Available panel idle-time choices are:
+Idle Monitoring is enabled by default with a 30-minute idle time and Sleep as its action. Available panel idle-time choices are:
 
 `1, 2, 3, 5, 10, 15, 30 minutes; 1, 2, 5 hours`.
 
@@ -68,15 +68,15 @@ If a device, driver, or app refreshes Windows idle time at a fixed interval and 
 
 ## Automatic Tasks
 
-Open the manager from the control panel's independent **Automatic Tasks** section to create, edit, delete, enable, or disable rules. An empty list explains how to create the first task; Edit, Delete, and Enable/Disable are unavailable without a selection, and deletion requires confirmation. The editor progressively shows only the fields required by its **Basics**, **Trigger Conditions**, and **Action Options** sections. Task names have an input cue and can still be generated automatically; active days use multi-select buttons plus **Weekdays** and **Every day** shortcuts. Validation explains and focuses the first invalid field. The manager is modal to the control panel, and the process picker is modal to the task editor. Closing the editor returns to the task list and confirms before discarding changes. Supported state actions are enable or pause Stay Awake and enable or pause the idle monitor; system actions are Lock, Sleep, Hibernate, Shut Down, and Restart. State actions can run while selected processes are running or during a time window. A pause temporarily overrides the corresponding manual setting and releases it when the task condition ends. System actions can run once, daily, weekly, when any selected process starts, or after all selected processes exit; a scheduled system action can also require a process condition.
+Open the manager from the control panel's independent **Automatic Tasks** section to create, edit, delete, enable, or disable rules. An empty list explains how to create the first task; Edit, Delete, and Enable/Disable are unavailable without a selection, and deletion requires confirmation. The editor progressively shows only the fields required by its **Basics**, **Trigger Conditions**, and **Action Options** sections. Task names have an input cue and can still be generated automatically; active days use multi-select buttons plus **Weekdays** and **Every day** shortcuts. Validation explains and focuses the first invalid field. The manager is modal to the control panel, and the process picker is modal to the task editor. Closing the editor returns to the task list and confirms before discarding changes. Supported state actions are enable or pause Stay Awake and enable or pause Idle Monitoring; system actions are Lock, Sleep, Hibernate, Shut Down, and Restart. State actions can run while selected processes are running or during a time window. A pause temporarily overrides the corresponding manual setting and releases it when the task condition ends. System actions can run once, daily, weekly, when any selected process starts, or after all selected processes exit; a scheduled system action can also require a process condition.
 
-The process picker loads names first and fills descriptions in the background, stays within a bounded scrolling window, and provides a search cue plus explicit **Refresh** and **Browse** buttons. When the picker becomes active again with a stale snapshot, it performs a lightweight refresh while preserving search, sorting, checks, and the visible position where possible; manual Refresh remains available. Choice popups, the task list, the process list, and the current-selection preview share the same themed scrollbar. Its sortable Process, Description, and Instances columns contain one row per executable name; clicking the checkbox or process name selects every same-name instance. Use **Browse** to choose a specific Windows EXE instead. Exact-file choices appear only in the current-selection preview, so paths are not mixed into the running-process list. PIDs and descriptions are never stored as rule identity.
+The process picker loads names first and fills descriptions in the background, stays within a bounded scrolling window, and provides a search cue plus explicit **Refresh** and **Browse** buttons. When a stale picker becomes active again, it refreshes process names and instance counts, then resolves descriptions only for newly seen names; known successes and failures are cached for that window session. Search, sorting, checks, and the visible position are preserved where possible. Manual **Refresh** performs a full rescan and retries unresolved metadata. Choice popups, the task list, the process list, and the current-selection preview share the same themed scrollbar. Its sortable Process, Description, and Instances columns contain one row per executable name; clicking the checkbox or process name selects every same-name instance. Use **Browse** to choose a specific Windows EXE instead. Exact-file choices appear only in the current-selection preview, so paths are not mixed into the running-process list. PIDs and descriptions are never stored as rule identity.
 
-A **When any process starts** task fires only when the selected set changes from none running to at least one running. Processes already running when IdleTrigger starts do not backfill an event, and later same-name instances do not trigger duplicates. A process-exit task waits until every matching instance has exited, then applies a 5-second grace period; brief exits or restarts inside that grace period do not produce repeated actions.
+A **When any process starts** task fires only when the selected set changes from none running to at least one running. Processes already running when IdleTrigger starts do not backfill an event, and later same-name instances do not trigger duplicates. A process-exit task waits until every matching instance has exited, then applies a 5-second grace period; brief exits or restarts inside that grace period do not produce repeated actions. Process state is sampled every five seconds, so a process that starts and exits entirely between samples may not be observed.
 
 Process discovery uses the Windows Toolhelp process list. Name matching does not open processes. Description enrichment opens at most one accessible instance per executable name with `PROCESS_QUERY_LIMITED_INFORMATION`; exact-path rules request the same limited access only for matching names. Protected processes remain available by name when Windows denies metadata access. Browsed files are validated and read for description only; IdleTrigger never launches them. IdleTrigger does not request debug privilege, read process memory, inject code, terminate processes, install a service, or create Windows Task Scheduler entries.
 
-Every automatic system action displays a cancellable countdown of at least 10 seconds. If multiple system actions become due together, confirming one clears the remaining queued actions for that occurrence instead of cascading through them. Rules work only while IdleTrigger is running and can invoke built-in actions only—custom commands, scripts, and arbitrary program launches are intentionally unsupported. Manual panel settings and automatic-task requests remain independent; ending a task does not rewrite a manual toggle.
+Every automatic system action displays a cancellable countdown of at least 10 seconds. If multiple system actions become due together, confirming one clears the remaining queued actions for that occurrence instead of cascading through them. Rules work only while IdleTrigger is running, and scheduled occurrences missed while Windows is asleep are not replayed after resume. Rules can invoke built-in actions only—custom commands, scripts, and arbitrary program launches are intentionally unsupported. Manual panel settings and automatic-task requests remain independent; ending a task does not rewrite a manual toggle.
 
 ## Command Line
 
@@ -117,7 +117,7 @@ Enable **Debug Log** in the panel or set `logging_enabled = true`. The log is wr
 Each line includes a startup session identifier, making separate runs easy to distinguish:
 
 ```text
-[2026-07-11 12:34:56.789] [session:18a0f0-2b4c] Idle monitor started
+[2026-07-11 12:34:56.789] [session:18a0f0-2b4c] Idle monitoring started
 ```
 
 ## Build and Development

@@ -132,7 +132,7 @@ func TestSaveToAtomicallyReplacesExistingFile(t *testing.T) {
 		strings.Contains(text, "autostart_enabled") ||
 		!strings.Contains(text, configTemplateVersionMarker()) ||
 		!strings.Contains(text, "idle_action = \"sleep\"") ||
-		!strings.Contains(text, "# -- 空闲监测 / Idle Monitor --") {
+		!strings.Contains(text, "# -- 空闲监测 / Idle Monitoring --") {
 		t.Fatalf("unexpected saved config: %s", text)
 	}
 	matches, err := filepath.Glob(filepath.Join(filepath.Dir(path), ".IdleTrigger-*.tmp"))
@@ -187,7 +187,7 @@ func TestSaveToWritesAnnotatedConfigThatParses(t *testing.T) {
 		configTemplateVersionMarker(),
 		"# -- 保持唤醒 / Stay Awake --",
 		"# -- 自动任务 / Automatic Tasks --",
-		"# -- 空闲监测 / Idle Monitor --",
+		"# -- 空闲监测 / Idle Monitoring --",
 		"# -- 昼夜主题 / Day/Night Theme --",
 		"# -- 设置 / Settings --",
 		"[[automation_rules]]",
@@ -479,7 +479,7 @@ func assertConfigOrder(t *testing.T, text string) {
 		"nosleep_enabled =",
 		"# -- 自动任务 / Automatic Tasks --",
 		"automation_enabled =",
-		"# -- 空闲监测 / Idle Monitor --",
+		"# -- 空闲监测 / Idle Monitoring --",
 		"idle_timeout_minutes =",
 		"# -- 昼夜主题 / Day/Night Theme --",
 		"theme_switch_enabled =",

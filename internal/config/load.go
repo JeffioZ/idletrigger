@@ -86,7 +86,7 @@ func needsAnnotatedTOMLRefresh(data []byte) bool {
 	for _, marker := range []string{
 		"# -- 保持唤醒 / Stay Awake --",
 		"# -- 自动任务 / Automatic Tasks --",
-		"# -- 空闲监测 / Idle Monitor --",
+		"# -- 空闲监测 / Idle Monitoring --",
 		"# -- 昼夜主题 / Day/Night Theme --",
 		"# -- 设置 / Settings --",
 	} {

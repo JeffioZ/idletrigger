@@ -42,7 +42,7 @@ func IdleActionIndex(action Action) int {
 	return -1
 }
 
-const configTemplateVersion = 11
+const configTemplateVersion = 12
 
 // Config holds all user-configurable settings.
 type Config struct {

@@ -31,10 +31,11 @@ func renderAnnotatedTOML(cfg Config) string {
 	fmt.Fprintf(&b, "automation_enabled = %t\n", cfg.AutomationEnabled)
 	b.WriteString("# 任务建议通过控制界面创建；列表按进程名匹配全部同名实例，也可浏览选择指定 EXE，PID 和说明不会写入规则 / Create tasks from the control UI; list choices match all same-name instances, or Browse can select a specific EXE; PIDs and descriptions are not stored in rules\n")
 	b.WriteString("# 进程启动任务只在所选进程由无到有时触发；退出任务需所有同名实例退出并经过 5 秒宽限 / Process-start tasks fire only when selected processes change from none to any; exit tasks wait for all same-name instances plus a 5-second grace period\n")
+	b.WriteString("# Windows 睡眠期间错过的计划时间不会补执行；短于 5 秒扫描周期的进程可能无法捕获 / Scheduled times missed during Windows sleep are not replayed; processes shorter than the 5-second scan interval may be missed\n")
 	b.WriteString("# 自动系统操作始终显示至少 10 秒的可取消倒计时 / Automatic system actions always show a cancellable countdown of at least 10 seconds\n")
 	b.WriteString("\n")
 
-	b.WriteString("# -- 空闲监测 / Idle Monitor --\n")
+	b.WriteString("# -- 空闲监测 / Idle Monitoring --\n")
 	b.WriteString("# 空闲时长：无键鼠操作多少分钟后触发动作，设为 0 禁用 / Idle time in minutes before triggering after no keyboard or mouse input, 0 = disabled\n")
 	fmt.Fprintf(&b, "idle_timeout_minutes = %d\n", cfg.IdleTimeoutMinutes)
 	b.WriteString("# 达到空闲时长后执行的动作 / Action to run after the idle time is reached: \"sleep\", \"hibernate\", \"shutdown\", \"lock\"\n")

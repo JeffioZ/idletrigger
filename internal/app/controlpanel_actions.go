@@ -81,7 +81,7 @@ func (s *runtimeState) handleIdleControlAction(action controlpanel.Action, value
 		s.saveConfig()
 	case controlpanel.ActIdleEnhancedMonitorToggle:
 		s.cfg.IdleEnhancedMonitor = !s.cfg.IdleEnhancedMonitor
-		mylog.Info("Idle monitor enhanced mode toggled: enabled=%v", s.cfg.IdleEnhancedMonitor)
+		mylog.Info("Idle monitoring enhanced mode toggled: enabled=%v", s.cfg.IdleEnhancedMonitor)
 		s.reconcileRuntime()
 		s.saveConfig()
 	default:
