@@ -587,18 +587,29 @@ func TestProcessPickerReleasesResourcesAcrossRepresentativeCycles(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	for index := 0; index < measuredCycles; index++ {
-		if err := Capture(testPickerOptions(), groups, 1, index%2 == 0, nil); err != nil {
-			t.Fatalf("cycle %d: %v", index+1, err)
+	runMeasuredCycles := func() {
+		for index := 0; index < measuredCycles; index++ {
+			if err := Capture(testPickerOptions(), groups, 1, index%2 == 0, nil); err != nil {
+				t.Fatalf("cycle %d: %v", index+1, err)
+			}
 		}
 	}
+	runMeasuredCycles()
 	after, err := wintest.StableResources()
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Logf("process-picker resources across %d cycles before=%+v after=%+v", measuredCycles, before, after)
 	if after.GDI > before.GDI || after.USER > before.USER {
-		t.Fatalf("GUI resources grew after %d process-picker cycles: before=%+v after=%+v", measuredCycles, before, after)
+		runMeasuredCycles()
+		repeated, repeatErr := wintest.StableResources()
+		if repeatErr != nil {
+			t.Fatal(repeatErr)
+		}
+		if repeated.GDI > after.GDI || repeated.USER > after.USER {
+			t.Fatalf("GUI resources kept growing across repeated process-picker cycles: before=%+v after=%+v repeated=%+v", before, after, repeated)
+		}
+		t.Logf("process-picker cycles initialized stable process resources: before=%+v after=%+v repeated=%+v", before, after, repeated)
 	}
 }
 
