@@ -20,7 +20,6 @@ type wndClassExW struct {
 }
 
 type rect struct{ Left, Top, Right, Bottom int32 }
-type point struct{ X, Y int32 }
 
 type buttonRole uint8
 
@@ -280,7 +279,6 @@ var (
 	pSetWindowLongPtr      = user32.NewProc("SetWindowLongPtrW")
 	pSetWindowPos          = user32.NewProc("SetWindowPos")
 	pPostMessage           = user32.NewProc("PostMessageW")
-	pGetFocus              = user32.NewProc("GetFocus")
 	pGetCursorPos          = user32.NewProc("GetCursorPos")
 	pMonitorFromWindow     = user32.NewProc("MonitorFromWindow")
 	pMonitorFromRect       = user32.NewProc("MonitorFromRect")
@@ -299,8 +297,6 @@ var (
 	pDrawText              = user32.NewProc("DrawTextW")
 	pInvalidateRect        = user32.NewProc("InvalidateRect")
 	pGetClientRect         = user32.NewProc("GetClientRect")
-	pGetWindowRect         = user32.NewProc("GetWindowRect")
-	pScreenToClient        = user32.NewProc("ScreenToClient")
 	pGetDC                 = user32.NewProc("GetDC")
 	pReleaseDC             = user32.NewProc("ReleaseDC")
 	pTrackMouseEvent       = user32.NewProc("TrackMouseEvent")

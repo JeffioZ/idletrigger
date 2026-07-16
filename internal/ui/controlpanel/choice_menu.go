@@ -95,9 +95,10 @@ func (p *panel) applyChoice(owner uint16, index int) {
 	p.choice.selected[owner] = index
 	p.labels[owner] = options[index]
 	p.invalidate(owner)
-	if owner == idIdleTimeout {
+	switch owner {
+	case idIdleTimeout:
 		p.applyTimeoutChoice(index)
-	} else if owner == idIdleAction {
+	case idIdleAction:
 		p.applyActionChoice(index)
 	}
 }
