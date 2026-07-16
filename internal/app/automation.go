@@ -218,6 +218,7 @@ func (s *runtimeState) showNextAutomationEvent() {
 	event := s.automationEvents[0]
 	s.automationEvents = s.automationEvents[1:]
 	s.automationWarningOpen = true
+	generation := s.automationGeneration
 	seconds := event.WarningSeconds
 	if seconds < 0 {
 		seconds = 0
@@ -234,15 +235,19 @@ func (s *runtimeState) showNextAutomationEvent() {
 		},
 		OnCancel: func() {
 			s.post(func() {
+				if !s.acceptAutomationWarning(generation) {
+					return
+				}
 				mylog.Info("Automation occurrence cancelled: rule=%s occurrence=%s", event.RuleID, event.Occurrence)
-				s.automationWarningOpen = false
 				s.finishOneTimeRule(event.RuleID)
 				s.showNextAutomationEvent()
 			})
 		},
 		OnExecute: func() {
 			s.post(func() {
-				s.automationWarningOpen = false
+				if !s.acceptAutomationWarning(generation) {
+					return
+				}
 				s.finishOneTimeRule(event.RuleID)
 				if queued := len(s.automationEvents); queued > 0 {
 					mylog.Info("Automation events cleared after a system action was confirmed: count=%d", queued)
@@ -257,6 +262,14 @@ func (s *runtimeState) showNextAutomationEvent() {
 			})
 		},
 	})
+}
+
+func (s *runtimeState) acceptAutomationWarning(generation uint64) bool {
+	if s.exiting.Load() || s.automationGeneration != generation || !s.automationWarningOpen {
+		return false
+	}
+	s.automationWarningOpen = false
+	return true
 }
 
 func (s *runtimeState) finishOneTimeRule(ruleID string) {

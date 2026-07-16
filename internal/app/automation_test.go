@@ -11,6 +11,25 @@ import (
 	"github.com/JeffioZ/idletrigger/internal/ui/automationpanel"
 )
 
+func TestStaleAutomationWarningCannotCrossRunnerGeneration(t *testing.T) {
+	state := &runtimeState{automationGeneration: 4, automationWarningOpen: true}
+	if state.acceptAutomationWarning(3) {
+		t.Fatal("stale automation warning was accepted")
+	}
+	if !state.automationWarningOpen {
+		t.Fatal("stale callback changed the current warning state")
+	}
+	if !state.acceptAutomationWarning(4) {
+		t.Fatal("current automation warning was rejected")
+	}
+	if state.automationWarningOpen {
+		t.Fatal("accepted warning remained open")
+	}
+	if state.acceptAutomationWarning(4) {
+		t.Fatal("completed automation warning was accepted twice")
+	}
+}
+
 func TestPostUntilStopsWaitingOnFullQueue(t *testing.T) {
 	state := runtimeState{requestCh: make(chan runtimeRequest, 1)}
 	state.requestCh <- runtimeRequest{fn: func() string { return "" }}
