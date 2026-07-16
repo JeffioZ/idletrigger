@@ -250,5 +250,22 @@ EXEs can return before output is attached.
 Maintenance capabilities such as `diagnostics`, screenshots, and local test
 environment variables exist only in devtools builds.
 
+Tracked launch wrappers for representative manual checks live in
+`tools/devtools/`. They require PowerShell 7, default to
+`dist/IdleTrigger-x64-devtools.exe`, reject release builds and existing
+IdleTrigger instances, and keep all developer variables scoped to the child
+process:
+
+```text
+Start-IdleTrigger-Devtools-Idle-Monitor-Test.bat [devtools.exe] [10..600]
+Start-IdleTrigger-Devtools-Input-Trace.bat [devtools.exe]
+Start-IdleTrigger-Devtools-UI-Capture.bat [devtools.exe]
+Start-IdleTrigger-Devtools-Warning-Preview.bat [devtools.exe]
+```
+
+Run or drag a devtools EXE onto one of the mode-specific wrappers. The shared
+BAT bridge and PowerShell engine are implementation details and should not be
+invoked directly.
+
 Release builds stay unpacked and self-contained. Do not use UPX or similar
 packers: they complicate diagnostics and can increase antivirus scrutiny.
