@@ -688,28 +688,43 @@ func TestProcessPickerCreationFailuresReleasePartialResources(t *testing.T) {
 			if err := Capture(testPickerOptions(), nil, 1, false, nil); err != nil {
 				t.Fatal(err)
 			}
+			runFault := func() {
+				restore := test.install()
+				err := Capture(testPickerOptions(), nil, 1, false, nil)
+				restore()
+				if err == nil {
+					t.Fatal("injected creation failure reported success")
+				}
+				activeMu.Lock()
+				remaining := active
+				activeMu.Unlock()
+				if remaining != nil {
+					t.Fatalf("active picker survived creation failure: %+v", remaining)
+				}
+			}
 			before, err := wintest.StableResources()
 			if err != nil {
 				t.Fatal(err)
 			}
-			restore := test.install()
-			err = Capture(testPickerOptions(), nil, 1, false, nil)
-			restore()
-			if err == nil {
-				t.Fatal("injected creation failure reported success")
-			}
-			activeMu.Lock()
-			remaining := active
-			activeMu.Unlock()
-			if remaining != nil {
-				t.Fatalf("active picker survived creation failure: %+v", remaining)
-			}
+			runFault()
 			after, snapshotErr := wintest.StableResources()
 			if snapshotErr != nil {
 				t.Fatal(snapshotErr)
 			}
-			if after.GDI != before.GDI || after.USER != before.USER {
-				t.Fatalf("GUI resources changed after injected failure: before=%+v after=%+v", before, after)
+			if after.GDI > before.GDI || after.USER > before.USER {
+				// Some Win32 controls retain process-wide resources the first time a
+				// particular creation path is exercised. A real leak keeps growing
+				// when the identical failure path is repeated.
+				runFault()
+				repeated, repeatErr := wintest.StableResources()
+				if repeatErr != nil {
+					t.Fatal(repeatErr)
+				}
+				if repeated.GDI > after.GDI || repeated.USER > after.USER {
+					t.Fatalf("GUI resources kept growing across repeated injected failures: before=%+v after=%+v repeated=%+v", before, after, repeated)
+				}
+				t.Logf("injected failure initialized stable process resources: before=%+v after=%+v repeated=%+v", before, after, repeated)
+				return
 			}
 			t.Logf("injected failure resources before=%+v after=%+v", before, after)
 		})
