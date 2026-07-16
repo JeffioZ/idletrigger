@@ -6,10 +6,44 @@ package wintest
 
 import (
 	"fmt"
+	"runtime"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
+
+// StableResources waits for the Go runtime's lazily created worker threads to
+// settle before returning a process resource baseline. Native UI tests use it
+// to distinguish steady-state HWND/GDI/USER ownership from one-time runtime
+// thread initialization in a fresh or heavily contended test process.
+func StableResources() (Resources, error) {
+	const (
+		maxSamples      = 12
+		requiredMatches = 2
+		settleDelay     = 10 * time.Millisecond
+	)
+	var previous Resources
+	matches := 0
+	for sample := 0; sample < maxSamples; sample++ {
+		runtime.GC()
+		time.Sleep(settleDelay)
+		current, err := SnapshotResources()
+		if err != nil {
+			return Resources{}, err
+		}
+		if sample > 0 && current == previous {
+			matches++
+			if matches >= requiredMatches {
+				return current, nil
+			}
+		} else {
+			matches = 0
+		}
+		previous = current
+	}
+	return Resources{}, fmt.Errorf("process resources did not stabilize after %d samples: last=%+v", maxSamples, previous)
+}
 
 type Resources struct {
 	GDI, USER uint32
