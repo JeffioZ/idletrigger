@@ -293,15 +293,15 @@ func (s *Scrollbar) draw(target windows.Handle, bounds Rect) {
 	}
 }
 
-func scrollbarWndProc(hwnd windows.Handle, message uint32, wParam uintptr, lParam unsafe.Pointer) uintptr {
+func scrollbarWndProc(hwnd windows.Handle, message uint32, wParam, lParam uintptr) uintptr {
 	scrollbarMu.Lock()
 	s := scrollbars[hwnd]
 	scrollbarMu.Unlock()
 	if s == nil {
-		result, _, _ := sbDefWindowProc.Call(uintptr(hwnd), uintptr(message), wParam, uintptr(lParam))
+		result, _, _ := sbDefWindowProc.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
 		return result
 	}
-	point := scrollbarPoint{X: int32(int16(uintptr(lParam))), Y: int32(int16(uintptr(lParam) >> 16))}
+	point := scrollbarPoint{X: int32(int16(lParam)), Y: int32(int16(lParam >> 16))}
 	switch message {
 	case sbWMPaint:
 		var paint scrollbarPaint
@@ -381,6 +381,6 @@ func scrollbarWndProc(hwnd windows.Handle, message uint32, wParam uintptr, lPara
 		scrollbarMu.Unlock()
 		return 0
 	}
-	result, _, _ := sbDefWindowProc.Call(uintptr(hwnd), uintptr(message), wParam, uintptr(lParam))
+	result, _, _ := sbDefWindowProc.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
 	return result
 }

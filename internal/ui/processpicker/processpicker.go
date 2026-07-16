@@ -38,11 +38,6 @@ type Options struct {
 
 type rect struct{ Left, Top, Right, Bottom int32 }
 type logicalBounds struct{ X, Y, Width, Height int }
-type monitorInfo struct {
-	Size          uint32
-	Monitor, Work rect
-	Flags         uint32
-}
 type wndClassEx struct {
 	Size, Style              uint32
 	WndProc                  uintptr
@@ -163,47 +158,58 @@ type openFileName struct {
 }
 
 type picker struct {
-	hwnd           windows.Handle
-	options        Options
-	controls       map[uint16]windows.Handle
-	bounds         map[uint16]logicalBounds
-	labels         map[uint16]string
-	surfaceFields  map[uint16]uint16
-	font           windows.Handle
-	windowBrush    windows.Handle
-	surfaceBrush   windows.Handle
-	palette        colors.Palette
-	themeDark      bool
-	icons          nativeform.WindowIcons
-	style          uintptr
-	exStyle        uintptr
-	tooltip        windows.Handle
-	tooltipText    [][]uint16
-	items          []item
-	visible        []item
-	selected       map[string]automation.ProcessTarget
-	descriptions   map[string]string
-	sortColumn     int
-	sortAscending  bool
-	populating     bool
-	captureHost    bool
-	captureScale   float64
-	themeOverride  *bool
-	generation     uint64
-	loading        bool
-	enriching      bool
-	closed         atomic.Bool
-	interaction    nativeform.InteractionTracker
-	stateImages    windows.Handle
-	header         windows.Handle
-	headerHover    int
-	headerPressed  int
-	scrollbar      *nativeform.Scrollbar
-	previewScroll  *nativeform.ListboxScrollbar
-	searchCue      *nativeform.CueBanner
-	lastSnapshot   time.Time
-	anchorTopKey   string
-	anchorFocusKey string
+	hwnd             windows.Handle
+	options          Options
+	controls         map[uint16]windows.Handle
+	bounds           map[uint16]logicalBounds
+	labels           map[uint16]string
+	surfaceFields    map[uint16]uint16
+	font             windows.Handle
+	windowBrush      windows.Handle
+	surfaceBrush     windows.Handle
+	palette          colors.Palette
+	themeDark        bool
+	icons            nativeform.WindowIcons
+	style            uintptr
+	exStyle          uintptr
+	tooltip          windows.Handle
+	tooltipText      [][]uint16
+	items            []item
+	visible          []item
+	selected         map[string]automation.ProcessTarget
+	descriptions     map[string]string
+	sortColumn       int
+	sortAscending    bool
+	populating       bool
+	captureHost      bool
+	captureScale     float64
+	themeOverride    *bool
+	generation       uint64
+	loading          bool
+	enriching        bool
+	closed           atomic.Bool
+	cleanupOnce      sync.Once
+	workers          sync.WaitGroup
+	interaction      nativeform.InteractionTracker
+	stateImages      windows.Handle
+	header           windows.Handle
+	headerHover      int
+	headerPressed    int
+	scrollbar        *nativeform.Scrollbar
+	previewScroll    *nativeform.ListboxScrollbar
+	contentScroll    *nativeform.Scrollbar
+	searchCue        *nativeform.CueBanner
+	lastSnapshot     time.Time
+	anchorTopKey     string
+	anchorFocusKey   string
+	ownerDisabled    bool
+	createErr        error
+	layoutErr        error
+	dpiScale         float64
+	contentOffset    int
+	viewportWidth    int
+	viewportHeight   int
+	pendingSuggested *nativeform.Rect
 }
 
 const (
@@ -235,6 +241,7 @@ const (
 	wmCommand             = 0x0111
 	wmNotify              = 0x004E
 	wmTimer               = 0x0113
+	wmMouseWheel          = 0x020A
 	wmSetRedraw           = 0x000B
 	wmCtlColorStatic      = 0x0138
 	wmCtlColorEdit        = 0x0133
@@ -307,12 +314,15 @@ const (
 	lvnItemChanged        = -101
 	lvnColumnClick        = -108
 	lvnGetInfoTipW        = -158
+	lvnSetFocus           = -7
 	nmClick               = -2
 	lvhtOnItemLabel       = 0x0004
 	lvhtOnItemStateIcon   = 0x0008
 	wmGetTextLength       = 0x000E
 	wmGetText             = 0x000D
 	enChange              = 0x0300
+	enSetFocus            = 0x0100
+	bnSetFocus            = 6
 	ttfIDIsHwnd           = 0x0001
 	ttfSubclass           = 0x0010
 	ttmAddTool            = 0x0432
@@ -330,7 +340,6 @@ const (
 	odsSelected           = 0x0001
 	odsFocus              = 0x0010
 	odsDisabled           = 0x0004
-	monitorNearest        = 2
 	lvsilState            = 2
 	ilcColor32            = 0x00000020
 	swpNoZOrder           = 0x0004
@@ -350,58 +359,78 @@ const (
 const processPickerRefreshAge = 5 * time.Second
 
 var (
-	user32              = windows.NewLazySystemDLL("user32.dll")
-	gdi32               = windows.NewLazySystemDLL("gdi32.dll")
-	pCreateWindowEx     = user32.NewProc("CreateWindowExW")
-	pDestroyWindow      = user32.NewProc("DestroyWindow")
-	pDefWindowProc      = user32.NewProc("DefWindowProcW")
-	pRegisterClassEx    = user32.NewProc("RegisterClassExW")
-	pSendMessage        = user32.NewProc("SendMessageW")
-	pSetWindowText      = user32.NewProc("SetWindowTextW")
-	pSetWindowPos       = user32.NewProc("SetWindowPos")
-	pShowWindow         = user32.NewProc("ShowWindow")
-	pUpdateWindow       = user32.NewProc("UpdateWindow")
-	pRedrawWindow       = user32.NewProc("RedrawWindow")
-	pSetForeground      = user32.NewProc("SetForegroundWindow")
-	pEnableWindow       = user32.NewProc("EnableWindow")
-	pIsWindowEnabled    = user32.NewProc("IsWindowEnabled")
-	pGetDpiForWindow    = user32.NewProc("GetDpiForWindow")
-	pGetWindowRect      = user32.NewProc("GetWindowRect")
-	pShowScrollBar      = user32.NewProc("ShowScrollBar")
-	pGetClientRect      = user32.NewProc("GetClientRect")
-	pAdjustWindowRect   = user32.NewProc("AdjustWindowRectEx")
-	pMonitorFromWindow  = user32.NewProc("MonitorFromWindow")
-	pGetMonitorInfo     = user32.NewProc("GetMonitorInfoW")
-	pFillRect           = user32.NewProc("FillRect")
-	pInvalidateRect     = user32.NewProc("InvalidateRect")
-	pSetTimer           = user32.NewProc("SetTimer")
-	pKillTimer          = user32.NewProc("KillTimer")
-	pGetDC              = user32.NewProc("GetDC")
-	pReleaseDC          = user32.NewProc("ReleaseDC")
-	pSetTextColor       = gdi32.NewProc("SetTextColor")
-	pSetBkColor         = gdi32.NewProc("SetBkColor")
-	pSetBkMode          = gdi32.NewProc("SetBkMode")
-	pCreateBrush        = gdi32.NewProc("CreateSolidBrush")
-	pDeleteObject       = gdi32.NewProc("DeleteObject")
-	pCreateCompatibleDC = gdi32.NewProc("CreateCompatibleDC")
-	pDeleteDC           = gdi32.NewProc("DeleteDC")
-	pCreateBitmap       = gdi32.NewProc("CreateCompatibleBitmap")
-	pSelectObject       = gdi32.NewProc("SelectObject")
-	comdlg32            = windows.NewLazySystemDLL("comdlg32.dll")
-	pGetOpenFileName    = comdlg32.NewProc("GetOpenFileNameW")
-	kernel32            = windows.NewLazySystemDLL("kernel32.dll")
-	pGetBinaryType      = kernel32.NewProc("GetBinaryTypeW")
-	comctl              = windows.NewLazySystemDLL("comctl32.dll")
-	pInitCommonControls = comctl.NewProc("InitCommonControlsEx")
-	pImageListCreate    = comctl.NewProc("ImageList_Create")
-	pImageListAdd       = comctl.NewProc("ImageList_Add")
-	pImageListDestroy   = comctl.NewProc("ImageList_Destroy")
-	classOnce           sync.Once
-	classErr            error
-	activeMu            sync.Mutex
-	active              *picker
-	nextGeneration      atomic.Uint64
-	wndCallback         = windows.NewCallback(wndProc)
+	user32                = windows.NewLazySystemDLL("user32.dll")
+	gdi32                 = windows.NewLazySystemDLL("gdi32.dll")
+	pCreateWindowEx       = user32.NewProc("CreateWindowExW")
+	pDestroyWindow        = user32.NewProc("DestroyWindow")
+	pDefWindowProc        = user32.NewProc("DefWindowProcW")
+	pRegisterClassEx      = user32.NewProc("RegisterClassExW")
+	pSendMessage          = user32.NewProc("SendMessageW")
+	pSetWindowText        = user32.NewProc("SetWindowTextW")
+	pSetWindowPos         = user32.NewProc("SetWindowPos")
+	pShowWindow           = user32.NewProc("ShowWindow")
+	pUpdateWindow         = user32.NewProc("UpdateWindow")
+	pRedrawWindow         = user32.NewProc("RedrawWindow")
+	pSetForeground        = user32.NewProc("SetForegroundWindow")
+	pEnableWindow         = user32.NewProc("EnableWindow")
+	pIsWindow             = user32.NewProc("IsWindow")
+	pIsWindowEnabled      = user32.NewProc("IsWindowEnabled")
+	pGetDpiForWindow      = user32.NewProc("GetDpiForWindow")
+	pGetWindowRect        = user32.NewProc("GetWindowRect")
+	pShowScrollBar        = user32.NewProc("ShowScrollBar")
+	pGetClientRect        = user32.NewProc("GetClientRect")
+	pFillRect             = user32.NewProc("FillRect")
+	pInvalidateRect       = user32.NewProc("InvalidateRect")
+	pSetTimer             = user32.NewProc("SetTimer")
+	pKillTimer            = user32.NewProc("KillTimer")
+	pGetDC                = user32.NewProc("GetDC")
+	pReleaseDC            = user32.NewProc("ReleaseDC")
+	pSetTextColor         = gdi32.NewProc("SetTextColor")
+	pSetBkColor           = gdi32.NewProc("SetBkColor")
+	pSetBkMode            = gdi32.NewProc("SetBkMode")
+	pCreateBrush          = gdi32.NewProc("CreateSolidBrush")
+	pDeleteObject         = gdi32.NewProc("DeleteObject")
+	pCreateCompatibleDC   = gdi32.NewProc("CreateCompatibleDC")
+	pDeleteDC             = gdi32.NewProc("DeleteDC")
+	pCreateBitmap         = gdi32.NewProc("CreateCompatibleBitmap")
+	pSelectObject         = gdi32.NewProc("SelectObject")
+	comdlg32              = windows.NewLazySystemDLL("comdlg32.dll")
+	pGetOpenFileName      = comdlg32.NewProc("GetOpenFileNameW")
+	kernel32              = windows.NewLazySystemDLL("kernel32.dll")
+	pGetBinaryType        = kernel32.NewProc("GetBinaryTypeW")
+	comctl                = windows.NewLazySystemDLL("comctl32.dll")
+	pInitCommonControls   = comctl.NewProc("InitCommonControlsEx")
+	pImageListCreate      = comctl.NewProc("ImageList_Create")
+	pImageListAdd         = comctl.NewProc("ImageList_Add")
+	pImageListDestroy     = comctl.NewProc("ImageList_Destroy")
+	classOnce             sync.Once
+	classErr              error
+	activeMu              sync.Mutex
+	active                *picker
+	nextGeneration        atomic.Uint64
+	wndCallback           = windows.NewCallback(wndProc)
+	createWindowForPicker = func(exStyle uintptr, class, caption *uint16, style uintptr, x, y, width, height int, parent windows.Handle, id uintptr) (windows.Handle, error) {
+		hwnd, _, callErr := pCreateWindowEx.Call(
+			exStyle, uintptr(unsafe.Pointer(class)), uintptr(unsafe.Pointer(caption)), style,
+			uintptr(x), uintptr(y), uintptr(width), uintptr(height), uintptr(parent), id, 0, 0,
+		)
+		if hwnd == 0 {
+			return 0, callErr
+		}
+		return windows.Handle(hwnd), nil
+	}
+	newFontForPicker            = font.New
+	newCueBannerForPicker       = nativeform.NewCueBanner
+	newScrollbarForPicker       = nativeform.NewScrollbar
+	newListboxScrollForPicker   = nativeform.NewListboxScrollbar
+	postPickerUI                = trayicon.Post
+	snapshotNamesForPicker      = processcatalog.SnapshotNames
+	enrichDescriptionsForPicker = processcatalog.EnrichDescriptions
+	fileDescriptionForPicker    = processcatalog.FileDescription
+	createBrushForPicker        = func(color uint32) windows.Handle {
+		brush, _, _ := pCreateBrush.Call(uintptr(color))
+		return windows.Handle(brush)
+	}
 )
 
 func Show(options Options) error {
@@ -462,7 +491,7 @@ func Hide() {
 	p := active
 	activeMu.Unlock()
 	if p != nil && p.hwnd != 0 {
-		pDestroyWindow.Call(uintptr(p.hwnd))
+		p.destroy()
 	}
 }
 
@@ -508,16 +537,16 @@ func Capture(options Options, groups []processcatalog.Group, scale float64, dark
 	}
 	defer func() {
 		if p.hwnd != 0 {
-			pDestroyWindow.Call(uintptr(p.hwnd))
+			p.destroy()
 		}
 	}()
 	p.items = buildItems(groups, p.selected, options.Text)
 	p.loading = false
 	p.applyFilter()
-	p.repaint()
 	if capture == nil {
 		return nil
 	}
+	p.repaint()
 	return capture(p.hwnd)
 }
 
@@ -532,6 +561,91 @@ func (p *picker) repaint() {
 		pUpdateWindow.Call(uintptr(control))
 	}
 	pRedrawWindow.Call(uintptr(p.hwnd), 0, 0, 0x0001|0x0080|0x0100|0x0400)
+}
+
+func (p *picker) abortCreate() {
+	p.closed.Store(true)
+	p.generation = nextGeneration.Add(1)
+	if p.hwnd != 0 {
+		if destroyed, _, _ := pDestroyWindow.Call(uintptr(p.hwnd)); destroyed != 0 {
+			return
+		}
+	}
+	p.releaseResources()
+}
+
+func (p *picker) destroy() {
+	if p == nil {
+		return
+	}
+	p.closed.Store(true)
+	p.generation = nextGeneration.Add(1)
+	if p.hwnd != 0 {
+		if destroyed, _, _ := pDestroyWindow.Call(uintptr(p.hwnd)); destroyed != 0 {
+			return
+		}
+	}
+	p.releaseResources()
+}
+
+func (p *picker) releaseResources() {
+	p.cleanupOnce.Do(func() {
+		p.closed.Store(true)
+		p.generation = nextGeneration.Add(1)
+		hwnd := p.hwnd
+		if hwnd != 0 {
+			pKillTimer.Call(uintptr(hwnd), searchTimerID)
+		}
+		p.releaseHeaderRenderer()
+		p.interaction.Release()
+		if p.searchCue != nil {
+			p.searchCue.Close()
+			p.searchCue = nil
+		}
+		if p.scrollbar != nil {
+			p.scrollbar.Close()
+			p.scrollbar = nil
+		}
+		if p.previewScroll != nil {
+			p.previewScroll.Close()
+			p.previewScroll = nil
+		}
+		if p.contentScroll != nil {
+			p.contentScroll.Close()
+			p.contentScroll = nil
+		}
+		p.releaseStateImages()
+		if p.tooltip != 0 {
+			pDestroyWindow.Call(uintptr(p.tooltip))
+			p.tooltip = 0
+		}
+		if hwnd != 0 {
+			trayicon.ClearTabNavigationWindow(hwnd)
+		}
+		if p.font != 0 {
+			pDeleteObject.Call(uintptr(p.font))
+			p.font = 0
+		}
+		p.releaseBrushes()
+		p.icons.Release()
+		if p.ownerDisabled && p.options.Owner != 0 {
+			if valid, _, _ := pIsWindow.Call(uintptr(p.options.Owner)); valid != 0 {
+				pEnableWindow.Call(uintptr(p.options.Owner), 1)
+				pSetForeground.Call(uintptr(p.options.Owner))
+				trayicon.SetTabNavigationWindow(p.options.Owner, nil)
+			}
+			p.ownerDisabled = false
+		}
+		activeMu.Lock()
+		if active == p {
+			active = nil
+		}
+		activeMu.Unlock()
+		p.hwnd = 0
+		p.controls = nil
+		p.bounds = nil
+		p.tooltipText = nil
+	})
 }
 
 func ensureClass() error {
@@ -550,33 +664,58 @@ func ensureClass() error {
 	return classErr
 }
 
-func (p *picker) create() error {
-	class, _ := windows.UTF16PtrFromString(windowClass)
-	title, _ := windows.UTF16PtrFromString(p.text("process_picker_title"))
+func (p *picker) create() (err error) {
+	defer func() {
+		if err != nil {
+			p.abortCreate()
+		}
+	}()
+	class, err := windows.UTF16PtrFromString(windowClass)
+	if err != nil {
+		return err
+	}
+	title, err := windows.UTF16PtrFromString(p.text("process_picker_title"))
+	if err != nil {
+		return err
+	}
 	p.style = wsPopup | wsCaption | wsSysMenu | wsClipChildren
 	p.exStyle = wsExTopmost
 	if p.captureHost {
 		p.style = wsOverlapped | wsCaption | wsSysMenu | wsThickFrame | wsMinimizeBox | wsMaximizeBox | wsClipChildren
 		p.exStyle = wsExAppWindow | wsExComposited
 	}
-	hwnd, _, callErr := pCreateWindowEx.Call(p.exStyle, uintptr(unsafe.Pointer(class)), uintptr(unsafe.Pointer(title)), p.style, 0, 0, 1, 1, uintptr(p.options.Owner), 0, 0, 0)
-	if hwnd == 0 {
+	hwnd, callErr := createWindowForPicker(p.exStyle, class, title, p.style, 0, 0, 1, 1, p.options.Owner, 0)
+	if callErr != nil {
 		return fmt.Errorf("create process picker: %w", callErr)
 	}
-	p.hwnd = windows.Handle(hwnd)
+	p.hwnd = hwnd
+	p.dpiScale = p.windowScale()
 	scale := p.scale()
-	p.font, _ = font.New(int32(14*scale+0.5), 400, p.options.Chinese)
+	p.font, _ = newFontForPicker(int32(14*scale+0.5), 400, p.options.Chinese)
+	if p.font == 0 {
+		return fmt.Errorf("create process picker font")
+	}
 	p.applyTheme()
+	if p.windowBrush == 0 || p.surfaceBrush == 0 {
+		return fmt.Errorf("create process picker brushes")
+	}
 	init := initCommonControlsEx{Size: uint32(unsafe.Sizeof(initCommonControlsEx{})), ICC: 0x00000001}
-	pInitCommonControls.Call(uintptr(unsafe.Pointer(&init)))
+	if ok, _, callErr := pInitCommonControls.Call(uintptr(unsafe.Pointer(&init))); ok == 0 {
+		return fmt.Errorf("initialize process picker controls: %w", callErr)
+	}
 	p.child("STATIC", p.text("process_picker_heading"), wsChild|wsVisible|ssLeft, 18, 16, 664, 20, idHeading)
 	p.child("STATIC", p.text("process_picker_helper"), wsChild|wsVisible|ssLeft, 18, 40, 664, 30, idHelper)
 	searchSurface := p.child("STATIC", "", wsChild|wsVisible|ssOwnerDraw, 18, 78, 370, 34, idSearchSurface)
 	pSetWindowPos.Call(uintptr(searchSurface), 1, 0, 0, 0, 0, swpNoMove|swpNoSize|swpNoActivate)
 	search := p.child("EDIT", "", wsChild|wsVisible|wsTabStop|esAutoHScroll, 20, 85, 366, 20, idSearch)
-	if cue, err := nativeform.NewCueBanner(search, p.text("process_picker_search_hint"), p.palette.MutedText, p.scale()); err == nil {
-		p.searchCue = cue
+	if p.createErr != nil {
+		return p.createErr
 	}
+	cue, cueErr := newCueBannerForPicker(search, p.text("process_picker_search_hint"), p.palette.MutedText, p.scale())
+	if cueErr != nil {
+		return cueErr
+	}
+	p.searchCue = cue
 	p.surfaceFields[idSearchSurface] = idSearch
 	p.interaction.Track(search, p.controls[idSearchSurface])
 	p.child("BUTTON", p.text("process_picker_refresh"), wsChild|wsVisible|wsTabStop|bsOwnerDraw, 396, 78, 132, 34, idRefresh)
@@ -584,15 +723,22 @@ func (p *picker) create() error {
 	listSurface := p.child("STATIC", "", wsChild|wsVisible|ssOwnerDraw, 18, 120, 664, 180, idListSurface)
 	pSetWindowPos.Call(uintptr(listSurface), 1, 0, 0, 0, 0, swpNoMove|swpNoSize|swpNoActivate)
 	list := p.child("SysListView32", "", wsChild|wsVisible|wsTabStop|wsClipSiblings|lvsReport|lvsSingleSel|lvsShowSelAlways, 20, 122, 660, 176, idList)
+	if p.createErr != nil {
+		return p.createErr
+	}
 	p.surfaceFields[idListSurface] = idList
 	pSendMessage.Call(uintptr(list), lvmSetExtendedStyle, 0, lvsExCheckboxes|lvsExFullRowSelect|lvsExInfoTip|lvsExDoubleBuffer)
 	p.createColumns()
 	p.resizeColumns()
 	p.updateHeaderLabels()
-	p.installHeaderRenderer()
+	if err := p.installHeaderRenderer(); err != nil {
+		return err
+	}
 	p.applyListTheme()
-	p.applyStateImages()
-	scrollbar, scrollErr := nativeform.NewScrollbar(nativeform.ScrollbarOptions{
+	if err := p.applyStateImages(); err != nil {
+		return err
+	}
+	scrollbar, scrollErr := newScrollbarForPicker(nativeform.ScrollbarOptions{
 		Parent: p.hwnd, Palette: p.palette, Background: p.palette.Surface, Scale: p.scale(),
 		OnChange: p.scrollListTo,
 	})
@@ -610,7 +756,10 @@ func (p *picker) create() error {
 	previewSurface := p.child("STATIC", "", wsChild|wsVisible|ssOwnerDraw, 18, 360, 664, 58, idPreviewSurface)
 	pSetWindowPos.Call(uintptr(previewSurface), 1, 0, 0, 0, 0, swpNoMove|swpNoSize|swpNoActivate)
 	preview := p.child("LISTBOX", "", wsChild|wsVisible|wsVScroll|lbsNoSelection|lbsNoIntegralHeight, 20, 362, 660, 54, idPreview)
-	previewScroll, previewErr := nativeform.NewListboxScrollbar(nativeform.ListboxScrollbarOptions{
+	if p.createErr != nil {
+		return p.createErr
+	}
+	previewScroll, previewErr := newListboxScrollForPicker(nativeform.ListboxScrollbarOptions{
 		Parent: p.hwnd, Listbox: preview, Palette: p.palette, Background: p.palette.Surface, Scale: p.scale(),
 	})
 	if previewErr != nil {
@@ -621,27 +770,46 @@ func (p *picker) create() error {
 	p.child("STATIC", p.text("process_picker_privacy"), wsChild|wsVisible|ssLeft, 18, 426, 664, 22, idPrivacy)
 	p.child("BUTTON", p.text("common_cancel"), wsChild|wsVisible|wsTabStop|bsOwnerDraw, 462, 456, 106, 36, idCancel)
 	p.child("BUTTON", p.text("process_picker_confirm"), wsChild|wsVisible|wsTabStop|bsOwnerDraw, 576, 456, 106, 36, idConfirm)
+	if p.createErr != nil {
+		return p.createErr
+	}
+	contentScroll, contentScrollErr := newScrollbarForPicker(nativeform.ScrollbarOptions{
+		Parent: p.hwnd, Palette: p.palette, Background: p.palette.WindowBackground, Scale: p.scale(),
+		OnChange: p.scrollContentTo,
+	})
+	if contentScrollErr != nil {
+		return contentScrollErr
+	}
+	p.contentScroll = contentScroll
 	for _, id := range []uint16{idSearch, idList, idPreview} {
 		pSetWindowPos.Call(uintptr(p.controls[id]), 0, 0, 0, 0, 0, swpNoMove|swpNoSize|swpNoActivate)
 	}
 	p.updatePreview()
-	p.createTooltips()
-	p.position()
+	if err := p.createTooltips(); err != nil {
+		return err
+	}
+	p.positionInWorkArea(nil)
+	if p.layoutErr != nil {
+		return p.layoutErr
+	}
 	if p.options.Owner != 0 {
-		pEnableWindow.Call(uintptr(p.options.Owner), 0)
+		if enabled, _, _ := pIsWindowEnabled.Call(uintptr(p.options.Owner)); enabled != 0 {
+			pEnableWindow.Call(uintptr(p.options.Owner), 0)
+			p.ownerDisabled = true
+		}
 	}
 	if !p.captureHost {
 		// Establish the loading state before the first visible frame so the
 		// picker never flashes an uninitialized empty list.
 		p.startLoad(true)
 	}
-	pShowWindow.Call(hwnd, 5)
+	pShowWindow.Call(uintptr(hwnd), 5)
 	if p.captureHost {
 		// STARTUPINFO from a hidden screenshot host may override the first
 		// ShowWindow call; repeat it so PrintWindow sees the child controls.
-		pShowWindow.Call(hwnd, 5)
+		pShowWindow.Call(uintptr(hwnd), 5)
 	} else {
-		pSetForeground.Call(hwnd)
+		pSetForeground.Call(uintptr(hwnd))
 		trayicon.SetTabNavigationWindow(p.hwnd, nil)
 	}
 	return nil
@@ -674,13 +842,18 @@ func (p *picker) resizeColumns() {
 	for index, width := range widths {
 		pSendMessage.Call(uintptr(list), lvmSetColumnWidth, uintptr(index), uintptr(width))
 	}
+	// Common controls may recreate non-client scrollbars after a column resize.
+	// Reassert the themed vertical overlay and the no-horizontal-scroll contract
+	// after the final widths are installed.
+	pShowScrollBar.Call(uintptr(list), sbVert, 0)
+	pShowScrollBar.Call(uintptr(list), sbHorz, 0)
 }
 
 func processColumnWidths(clientWidth int, scale float64) [3]int {
-	// The themed scrollbar begins below the native header, so the header can
-	// use the full width. In the report body it overlays only the empty right
-	// edge of the roomy instance-count column.
-	available := max(0, clientWidth-max(2, int(2*scale+0.5)))
+	// The themed scrollbar begins below the native header, so the header and
+	// its columns use the full client width. The body scrollbar overlays the
+	// roomy instance-count column without creating a fourth header remainder.
+	available := max(0, clientWidth)
 	last := min(available, int(82*scale+0.5))
 	remaining := available - last
 	minimumFirst := int(190*scale + 0.5)
@@ -710,7 +883,7 @@ func (p *picker) syncListScrollbarBounds() {
 	width := int(float64(nativeform.ScrollbarWidth)*scale + 0.5)
 	rightInset := int(2*scale + 0.5)
 	x := int(float64(bounds.X+bounds.Width)*scale+0.5) - width - rightInset
-	y := int(float64(bounds.Y)*scale+0.5) + headerHeight
+	y := int(float64(bounds.Y-p.contentOffset)*scale+0.5) + headerHeight
 	height := int(float64(bounds.Height)*scale+0.5) - headerHeight
 	p.scrollbar.SetBounds(x, y, width, max(1, height))
 }
@@ -738,7 +911,7 @@ func (p *picker) syncPreviewScrollbarBounds() {
 	width := int(float64(nativeform.ScrollbarWidth)*scale + 0.5)
 	inset := max(1, int(2*scale+0.5))
 	x := int(float64(bounds.X+bounds.Width)*scale+0.5) - width - inset
-	y := int(float64(bounds.Y)*scale+0.5) + inset
+	y := int(float64(bounds.Y-p.contentOffset)*scale+0.5) + inset
 	height := int(float64(bounds.Height)*scale+0.5) - 2*inset
 	p.previewScroll.SetBounds(x, y, width, max(1, height))
 }
@@ -788,50 +961,84 @@ func (p *picker) headerCaption(index int) string {
 }
 
 func (p *picker) child(className, value string, style uintptr, x, y, width, height int, id uint16) windows.Handle {
-	class, _ := windows.UTF16PtrFromString(className)
-	caption, _ := windows.UTF16PtrFromString(value)
+	if p.createErr != nil {
+		return 0
+	}
+	class, err := windows.UTF16PtrFromString(className)
+	if err != nil {
+		p.createErr = err
+		return 0
+	}
+	caption, err := windows.UTF16PtrFromString(value)
+	if err != nil {
+		p.createErr = err
+		return 0
+	}
 	scale := p.scale()
-	hwnd, _, _ := pCreateWindowEx.Call(0, uintptr(unsafe.Pointer(class)), uintptr(unsafe.Pointer(caption)), style, uintptr(int(float64(x)*scale)), uintptr(int(float64(y)*scale)), uintptr(int(float64(width)*scale)), uintptr(int(float64(height)*scale)), uintptr(p.hwnd), uintptr(id), 0, 0)
-	if hwnd != 0 && p.font != 0 {
-		pSendMessage.Call(hwnd, wmSetFont, uintptr(p.font), 1)
+	hwnd, err := createWindowForPicker(0, class, caption, style,
+		int(float64(x)*scale), int(float64(y)*scale), int(float64(width)*scale), int(float64(height)*scale),
+		p.hwnd, uintptr(id))
+	if err != nil {
+		p.createErr = fmt.Errorf("create process picker control %d: %w", id, err)
+		return 0
 	}
-	if hwnd != 0 {
-		nativeform.ApplyControl(windows.Handle(hwnd), p.themeDark)
+	if p.font != 0 {
+		pSendMessage.Call(uintptr(hwnd), wmSetFont, uintptr(p.font), 1)
 	}
-	p.controls[id] = windows.Handle(hwnd)
+	nativeform.ApplyControl(hwnd, p.themeDark)
+	p.controls[id] = hwnd
 	p.bounds[id] = logicalBounds{X: x, Y: y, Width: width, Height: height}
 	p.labels[id] = value
 	if strings.EqualFold(className, "BUTTON") && style&bsOwnerDraw != 0 {
-		p.interaction.Track(windows.Handle(hwnd), 0)
+		p.interaction.Track(hwnd, 0)
 	}
-	return windows.Handle(hwnd)
+	return hwnd
 }
 
-func (p *picker) createTooltips() {
-	class, _ := windows.UTF16PtrFromString("tooltips_class32")
-	hwnd, _, _ := pCreateWindowEx.Call(0, uintptr(unsafe.Pointer(class)), 0, wsPopup|ttsAlwaysTip|ttsNoPrefix, 0, 0, 0, 0, uintptr(p.hwnd), 0, 0, 0)
-	p.tooltip = windows.Handle(hwnd)
+func (p *picker) createTooltips() error {
+	class, err := windows.UTF16PtrFromString("tooltips_class32")
+	if err != nil {
+		return err
+	}
+	hwnd, err := createWindowForPicker(0, class, nil, wsPopup|ttsAlwaysTip|ttsNoPrefix, 0, 0, 0, 0, p.hwnd, 0)
+	if err != nil {
+		return fmt.Errorf("create process picker tooltip: %w", err)
+	}
+	p.tooltip = hwnd
 	nativeform.ApplyTooltip(p.tooltip, p.themeDark, p.palette)
-	pSendMessage.Call(hwnd, ttmSetMaxTipWidth, 0, uintptr(int(360*p.scale())))
+	pSendMessage.Call(uintptr(hwnd), ttmSetMaxTipWidth, 0, uintptr(int(360*p.scale())))
 	for id, key := range map[uint16]string{
 		idSearch: "tip_process_search", idRefresh: "tip_process_refresh", idBrowse: "tip_process_browse",
 		idCancel: "tip_process_cancel", idConfirm: "tip_process_confirm",
 	} {
-		p.addTooltip(p.controls[id], p.text(key))
+		if err := p.addTooltip(p.controls[id], p.text(key)); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-func (p *picker) addTooltip(control windows.Handle, value string) {
+func (p *picker) addTooltip(control windows.Handle, value string) error {
 	if p.tooltip == 0 || control == 0 || value == "" {
-		return
+		return nil
 	}
-	text, _ := windows.UTF16FromString(value)
+	text, err := windows.UTF16FromString(value)
+	if err != nil {
+		return err
+	}
 	p.tooltipText = append(p.tooltipText, text)
 	info := toolInfo{Size: uint32(unsafe.Sizeof(toolInfo{})), Flags: ttfIDIsHwnd | ttfSubclass, Hwnd: p.hwnd, ID: uintptr(control), Text: &p.tooltipText[len(p.tooltipText)-1][0]}
+	// Some common-controls builds return zero here even though the tooltip is
+	// registered and displayed. HWND creation is the reliable lifecycle gate;
+	// the tooltip remains optional if an individual tool registration is refused.
 	pSendMessage.Call(uintptr(p.tooltip), ttmAddTool, 0, uintptr(unsafe.Pointer(&info)))
+	return nil
 }
 
 func (p *picker) startLoad(enrich bool) {
+	if p.closed.Load() || p.hwnd == 0 {
+		return
+	}
 	p.captureSelection()
 	p.captureViewAnchors()
 	p.loading = true
@@ -853,29 +1060,31 @@ func (p *picker) startLoad(enrich bool) {
 	for key, value := range p.descriptions {
 		cachedDescriptions[key] = value
 	}
+	p.workers.Add(1)
 	go func() {
-		instances, err := processcatalog.SnapshotNames()
+		defer p.workers.Done()
+		instances, err := snapshotNamesForPicker()
 		if err != nil {
-			trayicon.Post(func() { p.finishLoad(generation, nil, err, true) })
+			postPickerUI(func() { p.finishLoad(generation, nil, err, true) })
 			return
 		}
 		for index := range instances {
 			key := (automation.ProcessTarget{Match: automation.MatchName, Executable: instances[index].Executable}).Key()
 			instances[index].Description = cachedDescriptions[key]
 		}
-		trayicon.Post(func() { p.finishLoad(generation, instances, nil, !enrich) })
+		postPickerUI(func() { p.finishLoad(generation, instances, nil, !enrich) })
 		if enrich {
-			enriched := processcatalog.EnrichDescriptions(instances)
-			trayicon.Post(func() { p.finishLoad(generation, enriched, nil, true) })
+			enriched := enrichDescriptionsForPicker(instances)
+			postPickerUI(func() { p.finishLoad(generation, enriched, nil, true) })
 		}
 		descriptions := make(map[string]string, len(exactTargets))
 		for _, target := range exactTargets {
-			if description := processcatalog.FileDescription(target.Path); description != "" {
+			if description := fileDescriptionForPicker(target.Path); description != "" {
 				descriptions[target.Key()] = description
 			}
 		}
 		if len(descriptions) > 0 {
-			trayicon.Post(func() { p.finishTargetDescriptions(generation, descriptions) })
+			postPickerUI(func() { p.finishTargetDescriptions(generation, descriptions) })
 		}
 	}()
 }
@@ -1304,7 +1513,7 @@ func (p *picker) confirm() {
 		}
 	}
 	callback := p.options.OnConfirm
-	pDestroyWindow.Call(uintptr(p.hwnd))
+	p.destroy()
 	if callback != nil {
 		callback(targets, descriptions)
 	}
@@ -1357,12 +1566,14 @@ func (p *picker) browseExecutable() {
 	p.updatePreview()
 	p.updateSelectionStatus()
 	key := target.Key()
+	p.workers.Add(1)
 	go func() {
-		description := processcatalog.FileDescription(path)
+		defer p.workers.Done()
+		description := fileDescriptionForPicker(path)
 		if description == "" {
 			return
 		}
-		trayicon.Post(func() {
+		postPickerUI(func() {
 			if p.closed.Load() || p.hwnd == 0 {
 				return
 			}
@@ -1373,6 +1584,9 @@ func (p *picker) browseExecutable() {
 }
 
 func (p *picker) handleCommand(id, notification uint16) {
+	if notification == bnSetFocus || notification == enSetFocus {
+		p.ensureControlVisible(id)
+	}
 	switch id {
 	case idSearch:
 		if notification == enChange {
@@ -1384,7 +1598,7 @@ func (p *picker) handleCommand(id, notification uint16) {
 	case idBrowse:
 		p.browseExecutable()
 	case idCancel:
-		pDestroyWindow.Call(uintptr(p.hwnd))
+		p.destroy()
 	case idConfirm:
 		p.confirm()
 	}
@@ -1399,6 +1613,8 @@ func (p *picker) handleNotify(lParam unsafe.Pointer) {
 		return
 	}
 	switch header.Code {
+	case lvnSetFocus:
+		p.ensureControlVisible(idList)
 	case lvnColumnClick:
 		notification := (*nmListView)(lParam)
 		column := int(notification.SubItem)
@@ -1535,6 +1751,13 @@ func (p *picker) scale() float64 {
 	if p.captureScale > 0 {
 		return p.captureScale
 	}
+	if p.dpiScale > 0 {
+		return p.dpiScale
+	}
+	return p.windowScale()
+}
+
+func (p *picker) windowScale() float64 {
 	if p.hwnd == 0 {
 		return 1
 	}
@@ -1545,40 +1768,141 @@ func (p *picker) scale() float64 {
 	return float64(dpi) / 96
 }
 
-func (p *picker) position() {
+func (p *picker) positionInWorkArea(workArea *nativeform.Rect) {
 	scale := p.scale()
-	dimensions := rect{Right: int32(float64(windowWidth) * scale), Bottom: int32(float64(windowHeight) * scale)}
-	pAdjustWindowRect.Call(uintptr(unsafe.Pointer(&dimensions)), p.style, 0, p.exStyle)
-	width, height := dimensions.Right-dimensions.Left, dimensions.Bottom-dimensions.Top
 	anchor := p.hwnd
 	if p.options.Owner != 0 {
 		anchor = p.options.Owner
 	}
-	monitor, _, _ := pMonitorFromWindow.Call(uintptr(anchor), monitorNearest)
-	info := monitorInfo{Size: uint32(unsafe.Sizeof(monitorInfo{}))}
-	pGetMonitorInfo.Call(monitor, uintptr(unsafe.Pointer(&info)))
-	x := info.Work.Left + (info.Work.Right-info.Work.Left-width)/2
-	y := info.Work.Top + (info.Work.Bottom-info.Work.Top-height)/2
-	if p.options.Owner != 0 {
-		var owner rect
-		if ok, _, _ := pGetWindowRect.Call(uintptr(p.options.Owner), uintptr(unsafe.Pointer(&owner))); ok != 0 {
-			x = owner.Left + (owner.Right-owner.Left-width)/2
-			y = owner.Top + (owner.Bottom-owner.Top-height)/2
-		}
+	suggested := p.pendingSuggested
+	p.pendingSuggested = nil
+	_, err := nativeform.PlaceWindow(nativeform.WindowPlacement{
+		Window: p.hwnd, Anchor: anchor, Owner: p.options.Owner,
+		Style: p.style, ExStyle: p.exStyle,
+		ClientWidth: int(windowWidth*scale + 0.5), ClientHeight: int(windowHeight*scale + 0.5),
+		DPI: uint32(scale*96 + 0.5), Suggested: suggested, WorkArea: workArea,
+	})
+	if err != nil {
+		p.layoutErr = err
+		return
 	}
-	if x < info.Work.Left {
-		x = info.Work.Left
+	physicalWidth, physicalHeight, err := nativeform.ClientSize(p.hwnd)
+	if err != nil {
+		p.layoutErr = err
+		return
 	}
-	if y < info.Work.Top {
-		y = info.Work.Top
+	p.layoutErr = nil
+	p.viewportWidth = max(1, int(float64(physicalWidth)/scale))
+	p.viewportHeight = max(1, int(float64(physicalHeight)/scale))
+	maximum := max(0, windowHeight-p.viewportHeight)
+	p.contentOffset = max(0, min(p.contentOffset, maximum))
+	if p.contentScroll != nil {
+		p.contentScroll.SetScale(scale)
+		barWidth := max(1, int(float64(nativeform.ScrollbarWidth)*scale+0.5))
+		inset := max(1, int(2*scale+0.5))
+		p.contentScroll.SetBounds(physicalWidth-barWidth-inset, inset, barWidth, max(1, physicalHeight-2*inset))
+		p.contentScroll.SetMetrics(windowHeight, max(1, p.viewportHeight), p.contentOffset)
 	}
-	if maxX := info.Work.Right - width; x > maxX {
-		x = maxX
+	p.layout()
+}
+
+func (p *picker) layout() {
+	const pad, gap = nativeform.FormPadding, nativeform.ControlGap
+	layoutWidth := min(windowWidth, max(1, p.viewportWidth))
+	reserve := 0
+	if windowHeight > p.viewportHeight {
+		reserve = nativeform.ScrollbarWidth + 4
 	}
-	if maxY := info.Work.Bottom - height; y > maxY {
-		y = maxY
+	contentWidth := max(1, layoutWidth-2*pad-reserve)
+	refreshWidth, browseWidth := 132, 146
+	if contentWidth < 500 {
+		refreshWidth, browseWidth = 96, 112
 	}
-	pSetWindowPos.Call(uintptr(p.hwnd), 0, uintptr(x), uintptr(y), uintptr(width), uintptr(height), swpNoZOrder|swpNoActivate)
+	searchWidth := max(80, contentWidth-refreshWidth-browseWidth-2*gap)
+	if searchWidth+refreshWidth+browseWidth+2*gap > contentWidth {
+		remaining := max(2, contentWidth-searchWidth-2*gap)
+		refreshWidth = remaining / 2
+		browseWidth = remaining - refreshWidth
+	}
+
+	p.place(idHeading, pad, 16, contentWidth, 20)
+	p.place(idHelper, pad, 40, contentWidth, 30)
+	p.place(idSearchSurface, pad, 78, searchWidth, 34)
+	p.place(idSearch, pad+2, 85, max(1, searchWidth-4), 20)
+	p.place(idRefresh, pad+searchWidth+gap, 78, refreshWidth, 34)
+	p.place(idBrowse, pad+searchWidth+gap+refreshWidth+gap, 78, browseWidth, 34)
+	p.place(idListSurface, pad, 120, contentWidth, 180)
+	p.place(idList, pad+2, 122, max(1, contentWidth-4), 176)
+	p.place(idEmpty, pad+24, 180, max(1, contentWidth-48), 40)
+	p.place(idStatus, pad, 308, contentWidth, 20)
+	p.place(idPreviewTitle, pad, 336, contentWidth, 20)
+	p.place(idPreviewSurface, pad, 360, contentWidth, 58)
+	p.place(idPreview, pad+2, 362, max(1, contentWidth-4), 54)
+	p.place(idPrivacy, pad, 426, contentWidth, 22)
+	buttonGap := gap
+	buttonWidth := min(106, max(1, (contentWidth-buttonGap)/2))
+	p.place(idCancel, pad+contentWidth-2*buttonWidth-buttonGap, 456, buttonWidth, 36)
+	p.place(idConfirm, pad+contentWidth-buttonWidth, 456, buttonWidth, 36)
+	p.resizeColumns()
+	p.syncListScrollbarBounds()
+	p.syncListScrollbar()
+	p.syncPreviewScrollbarBounds()
+	if p.previewScroll != nil {
+		p.previewScroll.Sync()
+	}
+}
+
+func (p *picker) place(id uint16, x, y, width, height int) {
+	p.bounds[id] = logicalBounds{X: x, Y: y, Width: width, Height: height}
+	control := p.controls[id]
+	if control == 0 {
+		return
+	}
+	scale := p.scale()
+	pSetWindowPos.Call(uintptr(control), 0,
+		uintptr(int(float64(x)*scale)), uintptr(int(float64(y-p.contentOffset)*scale)),
+		uintptr(max(1, int(float64(width)*scale))), uintptr(max(1, int(float64(height)*scale))),
+		swpNoZOrder|swpNoActivate)
+}
+
+func (p *picker) scrollContentTo(position int) {
+	maximum := max(0, windowHeight-p.viewportHeight)
+	position = max(0, min(position, maximum))
+	if position == p.contentOffset {
+		return
+	}
+	p.contentOffset = position
+	p.layout()
+	if p.contentScroll != nil {
+		p.contentScroll.SetMetrics(windowHeight, max(1, p.viewportHeight), p.contentOffset)
+	}
+}
+
+func (p *picker) ensureControlVisible(id uint16) {
+	bounds, ok := p.bounds[id]
+	if !ok || windowHeight <= p.viewportHeight {
+		return
+	}
+	position := p.contentOffset
+	if bounds.Y < position {
+		position = bounds.Y
+	} else if bounds.Y+bounds.Height > position+p.viewportHeight {
+		position = bounds.Y + bounds.Height - p.viewportHeight
+	}
+	p.scrollContentTo(position)
+}
+
+func (p *picker) scrollWheel(wParam uintptr) bool {
+	if windowHeight <= p.viewportHeight {
+		return false
+	}
+	delta := int16(wParam >> 16)
+	if delta > 0 {
+		p.scrollContentTo(p.contentOffset - 48)
+	} else if delta < 0 {
+		p.scrollContentTo(p.contentOffset + 48)
+	}
+	return delta != 0
 }
 
 func (p *picker) applyTheme() {
@@ -1598,7 +1922,7 @@ func (p *picker) applyTheme() {
 		pInvalidateRect.Call(uintptr(control), 0, 0)
 	}
 	p.applyListTheme()
-	p.applyStateImages()
+	_ = p.applyStateImages()
 	if p.scrollbar != nil {
 		p.scrollbar.SetTheme(p.palette, p.palette.Surface)
 		p.syncListScrollbar()
@@ -1606,6 +1930,9 @@ func (p *picker) applyTheme() {
 	if p.previewScroll != nil {
 		p.previewScroll.SetTheme(p.palette, p.palette.Surface)
 		p.previewScroll.Sync()
+	}
+	if p.contentScroll != nil {
+		p.contentScroll.SetTheme(p.palette, p.palette.WindowBackground)
 	}
 	if p.searchCue != nil {
 		p.searchCue.SetTheme(p.palette.MutedText)
@@ -1632,8 +1959,7 @@ func (p *picker) applyListTheme() {
 }
 
 func processBrush(color uint32) windows.Handle {
-	brush, _, _ := pCreateBrush.Call(uintptr(color))
-	return windows.Handle(brush)
+	return createBrushForPicker(color)
 }
 
 func (p *picker) releaseBrushes() {
@@ -1647,22 +1973,17 @@ func (p *picker) releaseBrushes() {
 
 func (p *picker) rebuildForDPI() {
 	scale := p.scale()
-	newFont, _ := font.New(int32(14*scale+0.5), 400, p.options.Chinese)
+	newFont, _ := newFontForPicker(int32(14*scale+0.5), 400, p.options.Chinese)
 	if newFont == 0 {
 		return
 	}
 	oldFont := p.font
 	p.font = newFont
-	for id, control := range p.controls {
-		bounds := p.bounds[id]
-		pSetWindowPos.Call(uintptr(control), 0,
-			uintptr(int(float64(bounds.X)*scale)), uintptr(int(float64(bounds.Y)*scale)),
-			uintptr(int(float64(bounds.Width)*scale)), uintptr(int(float64(bounds.Height)*scale)),
-			swpNoZOrder|swpNoActivate)
+	for _, control := range p.controls {
 		pSendMessage.Call(uintptr(control), wmSetFont, uintptr(p.font), 1)
 	}
-	p.resizeColumns()
-	p.applyStateImages()
+	p.positionInWorkArea(nil)
+	_ = p.applyStateImages()
 	if p.scrollbar != nil {
 		p.scrollbar.SetScale(scale)
 		p.syncListScrollbarBounds()
@@ -1682,15 +2003,14 @@ func (p *picker) rebuildForDPI() {
 	if oldFont != 0 {
 		pDeleteObject.Call(uintptr(oldFont))
 	}
-	p.position()
 }
 
-func wndProc(hwnd windows.Handle, message uint32, wParam uintptr, lParam unsafe.Pointer) uintptr {
+func wndProc(hwnd windows.Handle, message uint32, wParam, lParam uintptr) uintptr {
 	activeMu.Lock()
 	p := active
 	activeMu.Unlock()
 	if p == nil || p.hwnd != hwnd {
-		result, _, _ := pDefWindowProc.Call(uintptr(hwnd), uintptr(message), wParam, uintptr(lParam))
+		result, _, _ := pDefWindowProc.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
 		return result
 	}
 	switch message {
@@ -1699,17 +2019,17 @@ func wndProc(hwnd windows.Handle, message uint32, wParam uintptr, lParam unsafe.
 			p.startLoad(true)
 		}
 	case wmClose:
-		pDestroyWindow.Call(uintptr(hwnd))
+		p.destroy()
 		return 0
 	case wmCommand:
 		p.handleCommand(uint16(wParam), uint16(wParam>>16))
 		return 0
 	case wmDrawItem:
-		if p.drawOwnerItem((*drawItem)(lParam)) {
+		if p.drawOwnerItem((*drawItem)(nativeform.MessagePointer(lParam))) {
 			return 1
 		}
 	case wmNotify:
-		p.handleNotify(lParam)
+		p.handleNotify(nativeform.MessagePointer(lParam))
 		return 0
 	case wmTimer:
 		if wParam == searchTimerID {
@@ -1717,6 +2037,10 @@ func wndProc(hwnd windows.Handle, message uint32, wParam uintptr, lParam unsafe.
 			p.applyFilter()
 		}
 		return 0
+	case wmMouseWheel:
+		if p.scrollWheel(wParam) {
+			return 0
+		}
 	case wmPaint:
 		nativeform.PaintWindowBackground(hwnd, p.windowBrush)
 		return 0
@@ -1727,14 +2051,14 @@ func wndProc(hwnd windows.Handle, message uint32, wParam uintptr, lParam unsafe.
 		return 1
 	case wmCtlColorStatic:
 		color := p.palette.PrimaryText
-		control := windows.Handle(uintptr(lParam))
+		control := windows.Handle(lParam)
 		if control == p.controls[idHelper] || control == p.controls[idStatus] || control == p.controls[idPrivacy] || control == p.controls[idPreviewTitle] {
 			color = p.palette.SecondaryText
 		}
 		pSetTextColor.Call(wParam, uintptr(color))
 		backgroundColor := p.palette.WindowBackground
 		brush := p.windowBrush
-		if uintptr(lParam) == uintptr(p.controls[idEmpty]) {
+		if lParam == uintptr(p.controls[idEmpty]) {
 			backgroundColor = p.palette.Surface
 			brush = p.surfaceBrush
 		}
@@ -1749,44 +2073,23 @@ func wndProc(hwnd windows.Handle, message uint32, wParam uintptr, lParam unsafe.
 		p.applyTheme()
 		return 0
 	case wmDpiChanged:
+		dpi := uint32(wParam & 0xffff)
+		if dpi == 0 {
+			dpi = 96
+		}
+		p.dpiScale = float64(dpi) / 96
+		if lParam != 0 {
+			suggested := nativeform.Rect(*(*rect)(nativeform.MessagePointer(lParam)))
+			p.pendingSuggested = &suggested
+		}
 		p.rebuildForDPI()
 		scale := p.scale()
 		p.icons.Apply(p.hwnd, p.themeDark, int(32*scale+0.5), int(16*scale+0.5), true)
 		return 0
 	case wmDestroy:
-		p.closed.Store(true)
-		p.interaction.Release()
-		if p.scrollbar != nil {
-			p.scrollbar.Close()
-			p.scrollbar = nil
-		}
-		if p.previewScroll != nil {
-			p.previewScroll.Close()
-			p.previewScroll = nil
-		}
-		if p.searchCue != nil {
-			p.searchCue.Close()
-			p.searchCue = nil
-		}
-		trayicon.ClearTabNavigationWindow(hwnd)
-		if p.options.Owner != 0 {
-			pEnableWindow.Call(uintptr(p.options.Owner), 1)
-			pSetForeground.Call(uintptr(p.options.Owner))
-			trayicon.SetTabNavigationWindow(p.options.Owner, nil)
-		}
-		if p.font != 0 {
-			pDeleteObject.Call(uintptr(p.font))
-		}
-		p.releaseBrushes()
-		p.releaseStateImages()
-		p.icons.Release()
-		activeMu.Lock()
-		if active == p {
-			active = nil
-		}
-		activeMu.Unlock()
+		p.releaseResources()
 		return 0
 	}
-	result, _, _ := pDefWindowProc.Call(uintptr(hwnd), uintptr(message), wParam, uintptr(lParam))
+	result, _, _ := pDefWindowProc.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
 	return result
 }

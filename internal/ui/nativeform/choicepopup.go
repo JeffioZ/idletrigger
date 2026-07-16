@@ -325,12 +325,12 @@ func (p *ChoicePopup) draw(target windows.Handle, bounds Rect) {
 	}
 }
 
-func choicePopupWndProc(hwnd windows.Handle, message uint32, wParam uintptr, lParam unsafe.Pointer) uintptr {
+func choicePopupWndProc(hwnd windows.Handle, message uint32, wParam, lParam uintptr) uintptr {
 	cpMu.Lock()
 	p := cpWindows[hwnd]
 	cpMu.Unlock()
 	if p == nil {
-		result, _, _ := cpDefWindowProc.Call(uintptr(hwnd), uintptr(message), wParam, uintptr(lParam))
+		result, _, _ := cpDefWindowProc.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
 		return result
 	}
 	switch message {
@@ -351,7 +351,7 @@ func choicePopupWndProc(hwnd windows.Handle, message uint32, wParam uintptr, lPa
 	case cpWMEraseBkgnd:
 		return 1
 	case cpWMMouseMove:
-		y := int32(int16(uintptr(lParam) >> 16))
+		y := int32(int16(lParam >> 16))
 		row := p.rowAt(y)
 		if row != p.hover {
 			p.hover, p.focus = row, row
@@ -365,13 +365,13 @@ func choicePopupWndProc(hwnd windows.Handle, message uint32, wParam uintptr, lPa
 		cpInvalidateRect.Call(uintptr(hwnd), 0, 0)
 		return 0
 	case cpWMLButtonDown:
-		y := int32(int16(uintptr(lParam) >> 16))
+		y := int32(int16(lParam >> 16))
 		p.pressed = p.rowAt(y)
 		cpSetCapture.Call(uintptr(hwnd))
 		cpInvalidateRect.Call(uintptr(hwnd), 0, 0)
 		return 0
 	case cpWMLButtonUp:
-		y := int32(int16(uintptr(lParam) >> 16))
+		y := int32(int16(lParam >> 16))
 		row := p.rowAt(y)
 		pressed := p.pressed
 		p.pressed = -1
@@ -426,6 +426,6 @@ func choicePopupWndProc(hwnd windows.Handle, message uint32, wParam uintptr, lPa
 		}
 		return 0
 	}
-	result, _, _ := cpDefWindowProc.Call(uintptr(hwnd), uintptr(message), wParam, uintptr(lParam))
+	result, _, _ := cpDefWindowProc.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
 	return result
 }

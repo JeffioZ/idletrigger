@@ -131,11 +131,11 @@ func (c *CueBanner) draw(dc windows.Handle) {
 	drawLabel(dc, Rect{Left: client.Left, Top: client.Top, Right: client.Right, Bottom: client.Bottom}, windows.Handle(font), c.text, c.color, true, left, left)
 }
 
-func cueBannerProc(hwnd windows.Handle, message uint32, wParam uintptr, lParam unsafe.Pointer, subclassID, refData uintptr) uintptr {
+func cueBannerProc(hwnd windows.Handle, message uint32, wParam, lParam uintptr, subclassID, refData uintptr) uintptr {
 	cueMu.Lock()
 	banner := cueBanners[hwnd]
 	cueMu.Unlock()
-	result, _, _ := cueDefSubclassProc.Call(uintptr(hwnd), uintptr(message), wParam, uintptr(lParam))
+	result, _, _ := cueDefSubclassProc.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
 	if banner == nil {
 		return result
 	}

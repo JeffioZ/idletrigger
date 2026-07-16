@@ -8,10 +8,10 @@ import (
 	"github.com/JeffioZ/idletrigger/internal/ui/nativeform"
 )
 
-func (p *picker) applyStateImages() {
+func (p *picker) applyStateImages() error {
 	list := p.controls[idList]
 	if list == 0 || p.hwnd == 0 {
-		return
+		return nil
 	}
 	scale := p.scale()
 	if scale <= 0 {
@@ -20,22 +20,29 @@ func (p *picker) applyStateImages() {
 	size := int32(22*scale + 0.5)
 	images, _, _ := pImageListCreate.Call(uintptr(size), uintptr(size), ilcColor32, 2, 0)
 	if images == 0 {
-		return
+		return fmt.Errorf("create process picker checkbox images")
 	}
 	if err := p.addStateImage(windows.Handle(images), size, scale, false); err != nil {
 		pImageListDestroy.Call(images)
-		return
+		return err
 	}
 	if err := p.addStateImage(windows.Handle(images), size, scale, true); err != nil {
 		pImageListDestroy.Call(images)
-		return
+		return err
 	}
 	previous := p.stateImages
-	pSendMessage.Call(uintptr(list), lvmSetImageList, lvsilState, images)
+	replaced, _, _ := pSendMessage.Call(uintptr(list), lvmSetImageList, lvsilState, images)
 	p.stateImages = windows.Handle(images)
-	if previous != 0 {
+	// LVS_EX_CHECKBOXES creates a default state image list. Replacing that list
+	// transfers ownership back to us just like replacing one of our own lists;
+	// ignoring the returned handle leaks its bitmaps on every picker open.
+	if replaced != 0 && replaced != images {
+		pImageListDestroy.Call(replaced)
+	}
+	if previous != 0 && uintptr(previous) != replaced && uintptr(previous) != images {
 		pImageListDestroy.Call(uintptr(previous))
 	}
+	return nil
 }
 
 func (p *picker) addStateImage(images windows.Handle, size int32, scale float64, checked bool) error {

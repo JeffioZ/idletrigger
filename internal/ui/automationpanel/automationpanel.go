@@ -49,11 +49,6 @@ type TextFunc func(string) string
 
 type rect struct{ Left, Top, Right, Bottom int32 }
 type point struct{ X, Y int32 }
-type monitorInfo struct {
-	Size          uint32
-	Monitor, Work rect
-	Flags         uint32
-}
 type wndClassEx struct {
 	Size, Style              uint32
 	WndProc                  uintptr
@@ -130,10 +125,19 @@ type panel struct {
 	interaction         nativeform.InteractionTracker
 	clientWidth         int
 	clientHeight        int
+	viewportWidth       int
+	viewportHeight      int
+	contentOffset       int
+	dpiScale            float64
+	pendingSuggested    *nativeform.Rect
+	layoutWorkArea      *nativeform.Rect
+	layoutErr           error
+	layoutingEditor     bool
 	managerReady        bool
 	editorReady         bool
 	rebuildSuspended    bool
 	managerScroll       *nativeform.ListboxScrollbar
+	contentScroll       *nativeform.Scrollbar
 	nameCue             *nativeform.CueBanner
 	pendingState        *State
 	managerNotice       string
@@ -219,6 +223,7 @@ const (
 	wmSetFont           = 0x0030
 	wmSetRedraw         = 0x000B
 	wmLButtonDown       = 0x0201
+	wmMouseWheel        = 0x020A
 	wmKeyDown           = 0x0100
 	wmNCDestroy         = 0x0082
 	wmOpenChoice        = 0x8001
@@ -263,7 +268,9 @@ const (
 	ttmSetMaxTipWidth   = 0x0418
 	ttsAlwaysTip        = 0x01
 	ttsNoPrefix         = 0x02
-	monitorNearest      = 2
+	bnSetFocus          = 6
+	enSetFocus          = 0x0100
+	lbnSetFocus         = 4
 	transparent         = 1
 	opaque              = 2
 	swpNoZOrder         = 0x0004
@@ -300,16 +307,12 @@ var (
 	pIsWindowVisible   = user32.NewProc("IsWindowVisible")
 	pSetForeground     = user32.NewProc("SetForegroundWindow")
 	pSetFocus          = user32.NewProc("SetFocus")
-	pAdjustWindowRect  = user32.NewProc("AdjustWindowRectEx")
-	pGetWindowRect     = user32.NewProc("GetWindowRect")
 	pGetClientRect     = user32.NewProc("GetClientRect")
 	pFillRect          = user32.NewProc("FillRect")
 	pInvalidateRect    = user32.NewProc("InvalidateRect")
 	pRedrawWindow      = user32.NewProc("RedrawWindow")
 	pGetDpiForWindow   = user32.NewProc("GetDpiForWindow")
 	pGetCursorPos      = user32.NewProc("GetCursorPos")
-	pMonitorFromWindow = user32.NewProc("MonitorFromWindow")
-	pGetMonitorInfo    = user32.NewProc("GetMonitorInfoW")
 	pSetTextColor      = gdi32.NewProc("SetTextColor")
 	pSetBkColor        = gdi32.NewProc("SetBkColor")
 	pSetBkMode         = gdi32.NewProc("SetBkMode")
@@ -459,6 +462,9 @@ func Capture(state State, text TextFunc, scale float64, dark, editor bool, captu
 			}
 		}
 	}
+	if capture == nil {
+		return nil
+	}
 	pInvalidateRect.Call(uintptr(p.hwnd), 0, 0)
 	pUpdateWindow.Call(uintptr(p.hwnd))
 	for _, control := range p.controls {
@@ -470,9 +476,6 @@ func Capture(state State, text TextFunc, scale float64, dark, editor bool, captu
 		pUpdateWindow.Call(uintptr(control))
 	}
 	pRedrawWindow.Call(uintptr(p.hwnd), 0, 0, 0x0001|0x0080|0x0100|0x0400)
-	if capture == nil {
-		return nil
-	}
 	return capture(p.hwnd)
 }
 
@@ -508,11 +511,26 @@ func (p *panel) create() error {
 	}
 	p.hwnd = windows.Handle(hwnd)
 	p.moveToCursorMonitor()
+	p.dpiScale = p.windowScale()
 	scale := p.scale()
 	p.font, _ = font.New(int32(14*scale+0.5), 400, p.state.Chinese)
 	p.sectionFont, _ = font.New(int32(14*scale+0.5), 600, p.state.Chinese)
 	p.applyTheme()
+	contentScroll, scrollErr := nativeform.NewScrollbar(nativeform.ScrollbarOptions{
+		Parent: p.hwnd, Palette: p.palette, Background: p.palette.WindowBackground, Scale: scale,
+		OnChange: p.scrollContentTo,
+	})
+	if scrollErr != nil {
+		pDestroyWindow.Call(hwnd)
+		return scrollErr
+	}
+	p.contentScroll = contentScroll
 	p.showManager()
+	if p.layoutErr != nil {
+		err := p.layoutErr
+		pDestroyWindow.Call(hwnd)
+		return err
+	}
 	if !p.captureHost && p.state.Owner != 0 {
 		if enabled, _, _ := pIsWindowEnabled.Call(uintptr(p.state.Owner)); enabled != 0 {
 			pEnableWindow.Call(uintptr(p.state.Owner), 0)
@@ -646,6 +664,9 @@ func (p *panel) showManager() {
 	defer p.endRebuild()
 	p.closeChoice(false)
 	p.hideControls(editorControlIDs())
+	if p.view != managerView {
+		p.contentOffset = 0
+	}
 	p.view = managerView
 	p.setCaption(p.t("automation_title"))
 	p.resize(managerWidth, managerHeight)
@@ -691,7 +712,7 @@ func (p *panel) syncManagerScrollbarBounds() {
 	width := int(float64(nativeform.ScrollbarWidth)*scale + 0.5)
 	inset := max(1, int(2*scale+0.5))
 	x := int(float64(bounds.X+bounds.Width)*scale+0.5) - width - inset
-	y := int(float64(bounds.Y)*scale+0.5) + inset
+	y := int(float64(bounds.Y-p.contentOffset)*scale+0.5) + inset
 	height := int(float64(bounds.Height)*scale+0.5) - 2*inset
 	p.managerScroll.SetBounds(x, y, width, max(1, height))
 }
@@ -774,6 +795,9 @@ func (p *panel) showEditorDraft(index int, draft automation.Rule) {
 	if p.managerScroll != nil {
 		p.managerScroll.SetActive(false)
 	}
+	if p.view != editorView {
+		p.contentOffset = 0
+	}
 	p.view = editorView
 	p.editing = index
 	p.draft = draft
@@ -784,7 +808,6 @@ func (p *panel) showEditorDraft(index int, draft automation.Rule) {
 	} else {
 		p.setCaption(p.t("automation_new_title"))
 	}
-	p.resize(editorWidth, editorHeight)
 	if !p.editorReady {
 		p.createEditorControls()
 	}
@@ -964,11 +987,40 @@ func (p *panel) triggerValue() automation.Trigger {
 }
 
 func (p *panel) layoutEditor() {
+	if p.layoutingEditor {
+		return
+	}
+	p.layoutingEditor = true
+	defer func() { p.layoutingEditor = false }()
+	suggested := p.pendingSuggested
+	p.pendingSuggested = nil
+	layoutWidth := min(editorWidth, max(1, p.viewportWidth))
+	for range 3 {
+		height := p.layoutEditorContent(layoutWidth)
+		p.resize(editorWidth, height)
+		nextWidth := min(editorWidth, max(1, p.viewportWidth))
+		if nextWidth == layoutWidth || p.layoutErr != nil {
+			break
+		}
+		layoutWidth = nextWidth
+	}
+	if suggested != nil && p.layoutErr == nil {
+		p.pendingSuggested = suggested
+		p.resize(editorWidth, p.clientHeight)
+	}
+	p.setText(idProcessSummary, p.processSummary())
+}
+
+func (p *panel) layoutEditorContent(layoutWidth int) int {
 	p.closeChoice(false)
 	action := actionAt(p.comboIndex(idAction))
 	trigger := p.triggerValue()
 	const pad, gap, fieldH, labelH = nativeform.FormPadding, nativeform.ControlGap, nativeform.FieldHeight, 18
-	contentW := editorWidth - 2*pad
+	reserve := 0
+	if p.clientHeight > p.viewportHeight {
+		reserve = nativeform.ScrollbarWidth + 4
+	}
+	contentW := max(1, layoutWidth-2*pad-reserve)
 	columnW := (contentW - gap) / 2
 	for _, id := range editorControlIDs() {
 		p.show(id, false)
@@ -1001,10 +1053,10 @@ func (p *panel) layoutEditor() {
 		p.place(idTimeLabel, pad, y, columnW, labelH, true)
 		p.place(idTime, pad, y+22, columnW, fieldH, true)
 		y += 64
-		y = p.layoutWeekdays(y)
+		y = p.layoutWeekdays(y, contentW)
 	case automation.TriggerTimeWindow:
 		rowFields(idTimeLabel, idTime, idEndTimeLabel, idEndTime)
-		y = p.layoutWeekdays(y)
+		y = p.layoutWeekdays(y, contentW)
 	}
 
 	processRequired := trigger == automation.TriggerProcessRunning || trigger == automation.TriggerProcessStarted || trigger == automation.TriggerProcessExited
@@ -1069,16 +1121,14 @@ func (p *panel) layoutEditor() {
 		p.place(idValidation, pad, y, contentW, 36, true)
 		y += 42
 	}
-	p.place(idCancel, editorWidth-pad-220, y, 102, nativeform.ButtonHeight, true)
-	p.place(idSave, editorWidth-pad-110, y, 110, nativeform.ButtonHeight, true)
+	p.place(idCancel, pad+contentW-220, y, 102, nativeform.ButtonHeight, true)
+	p.place(idSave, pad+contentW-110, y, 110, nativeform.ButtonHeight, true)
 	y += 52
-	p.resize(editorWidth, y)
-	p.setText(idProcessSummary, p.processSummary())
+	return y
 }
 
-func (p *panel) layoutWeekdays(y int) int {
+func (p *panel) layoutWeekdays(y, contentW int) int {
 	const pad, gap = nativeform.FormPadding, nativeform.ControlGap
-	contentW := editorWidth - 2*pad
 	buttonW := (contentW - gap*(len(editorWeekdays)-1)) / len(editorWeekdays)
 	const quickW, quickH = 88, 24
 	p.place(idDaysLabel, pad, y+3, contentW-2*(quickW+gap), 18, true)
@@ -1092,6 +1142,9 @@ func (p *panel) layoutWeekdays(y int) int {
 }
 
 func (p *panel) handleCommand(id, notification uint16) {
+	if notification == bnSetFocus || notification == enSetFocus || notification == lbnSetFocus {
+		p.ensureControlVisible(id)
+	}
 	if p.view == managerView {
 		p.handleManager(id, notification)
 	} else {
@@ -1434,7 +1487,7 @@ func (p *panel) positionControl(hwnd windows.Handle, x, y, width, height int) {
 	}
 	scale := p.scale()
 	pSetWindowPos.Call(uintptr(hwnd), 0,
-		uintptr(int(float64(x)*scale)), uintptr(int(float64(y)*scale)),
+		uintptr(int(float64(x)*scale)), uintptr(int(float64(y-p.contentOffset)*scale)),
 		uintptr(int(float64(width)*scale)), uintptr(int(float64(height)*scale)),
 		swpNoZOrder|swpNoActivate)
 }
@@ -1577,6 +1630,12 @@ func (p *panel) scale() float64 {
 	if p.captureScale > 0 {
 		return p.captureScale
 	}
+	if p.dpiScale > 0 {
+		return p.dpiScale
+	}
+	return p.windowScale()
+}
+func (p *panel) windowScale() float64 {
 	if p.hwnd == 0 {
 		return 1
 	}
@@ -1587,42 +1646,37 @@ func (p *panel) scale() float64 {
 	return float64(dpi) / 96
 }
 func (p *panel) resize(width, height int) {
+	p.resizeInWorkArea(width, height, p.layoutWorkArea)
+}
+
+func (p *panel) resizeInWorkArea(width, height int, workArea *nativeform.Rect) {
+	previousViewportWidth := p.viewportWidth
+	previousWorkArea := p.layoutWorkArea
+	p.layoutWorkArea = workArea
+	defer func() { p.layoutWorkArea = previousWorkArea }()
 	p.clientWidth, p.clientHeight = width, height
 	scale := p.scale()
-	dimensions := rect{Right: int32(float64(width) * scale), Bottom: int32(float64(height) * scale)}
-	pAdjustWindowRect.Call(uintptr(unsafe.Pointer(&dimensions)), p.style, 0, p.exStyle)
-	w := dimensions.Right - dimensions.Left
-	h := dimensions.Bottom - dimensions.Top
 	anchor := p.hwnd
 	if p.state.Owner != 0 {
 		anchor = p.state.Owner
 	}
-	monitor, _, _ := pMonitorFromWindow.Call(uintptr(anchor), monitorNearest)
-	info := monitorInfo{Size: uint32(unsafe.Sizeof(monitorInfo{}))}
-	pGetMonitorInfo.Call(monitor, uintptr(unsafe.Pointer(&info)))
-	x := info.Work.Left + (info.Work.Right-info.Work.Left-w)/2
-	y := info.Work.Top + (info.Work.Bottom-info.Work.Top-h)/2
-	if p.state.Owner != 0 {
-		var owner rect
-		if ok, _, _ := pGetWindowRect.Call(uintptr(p.state.Owner), uintptr(unsafe.Pointer(&owner))); ok != 0 {
-			x = owner.Left + (owner.Right-owner.Left-w)/2
-			y = owner.Top + (owner.Bottom-owner.Top-h)/2
-		}
+	suggested := p.pendingSuggested
+	p.pendingSuggested = nil
+	_, err := nativeform.PlaceWindow(nativeform.WindowPlacement{
+		Window: p.hwnd, Anchor: anchor, Owner: p.state.Owner,
+		Style: p.style, ExStyle: p.exStyle,
+		ClientWidth: int(float64(width)*scale + 0.5), ClientHeight: int(float64(height)*scale + 0.5),
+		DPI: uint32(scale*96 + 0.5), Suggested: suggested, WorkArea: workArea,
+	})
+	if err != nil {
+		p.layoutErr = err
+		return
 	}
-	if x < info.Work.Left {
-		x = info.Work.Left
+	p.layoutErr = nil
+	p.syncContentViewport()
+	if p.view == editorView && p.editorReady && !p.layoutingEditor && p.viewportWidth != previousViewportWidth {
+		p.layoutEditor()
 	}
-	if y < info.Work.Top {
-		y = info.Work.Top
-	}
-	if maxX := info.Work.Right - w; x > maxX {
-		x = maxX
-	}
-	if maxY := info.Work.Bottom - h; y > maxY {
-		y = maxY
-	}
-	flags := uintptr(swpNoZOrder | swpNoActivate)
-	pSetWindowPos.Call(uintptr(p.hwnd), 0, uintptr(x), uintptr(y), uintptr(w), uintptr(h), flags)
 }
 
 func (p *panel) moveToCursorMonitor() {
@@ -1631,8 +1685,94 @@ func (p *panel) moveToCursorMonitor() {
 	pSetWindowPos.Call(uintptr(p.hwnd), 0, uintptr(cursor.X), uintptr(cursor.Y), 1, 1, 0x0010)
 }
 
+func (p *panel) syncContentViewport() {
+	if p.hwnd == 0 {
+		return
+	}
+	physicalWidth, physicalHeight, err := nativeform.ClientSize(p.hwnd)
+	if err != nil {
+		p.layoutErr = err
+		return
+	}
+	scale := p.scale()
+	p.viewportWidth = max(1, int(float64(physicalWidth)/scale))
+	p.viewportHeight = max(1, int(float64(physicalHeight)/scale))
+	maximum := max(0, p.clientHeight-p.viewportHeight)
+	p.contentOffset = max(0, min(p.contentOffset, maximum))
+	if p.contentScroll != nil {
+		p.contentScroll.SetScale(scale)
+		barWidth := max(1, int(float64(nativeform.ScrollbarWidth)*scale+0.5))
+		inset := max(1, int(2*scale+0.5))
+		p.contentScroll.SetBounds(physicalWidth-barWidth-inset, inset, barWidth, max(1, physicalHeight-2*inset))
+		p.contentScroll.SetMetrics(max(1, p.clientHeight), max(1, p.viewportHeight), p.contentOffset)
+	}
+	p.repositionContent()
+}
+
+func (p *panel) scrollContentTo(position int) {
+	maximum := max(0, p.clientHeight-p.viewportHeight)
+	position = max(0, min(position, maximum))
+	if position == p.contentOffset {
+		return
+	}
+	p.closeChoice(false)
+	p.contentOffset = position
+	p.repositionContent()
+	if p.contentScroll != nil {
+		p.contentScroll.SetMetrics(max(1, p.clientHeight), max(1, p.viewportHeight), p.contentOffset)
+	}
+}
+
+func (p *panel) repositionContent() {
+	for id, bounds := range p.bounds {
+		if _, fieldSurface := p.surfaceFields[id]; fieldSurface {
+			continue
+		}
+		hwnd := p.controls[id]
+		if hwnd == 0 {
+			continue
+		}
+		if surfaceID, field := p.fieldSurfaces[id]; field {
+			p.positionControl(p.controls[surfaceID], bounds.X, bounds.Y, bounds.Width, bounds.Height)
+			innerHeight := min(20, bounds.Height-4)
+			p.positionControl(hwnd, bounds.X+2, bounds.Y+(bounds.Height-innerHeight)/2, bounds.Width-4, innerHeight)
+			continue
+		}
+		p.positionControl(hwnd, bounds.X, bounds.Y, bounds.Width, bounds.Height)
+	}
+	p.syncManagerScrollbarBounds()
+}
+
+func (p *panel) ensureControlVisible(id uint16) {
+	bounds, ok := p.bounds[id]
+	if !ok || p.clientHeight <= p.viewportHeight {
+		return
+	}
+	top, bottom := bounds.Y, bounds.Y+bounds.Height
+	position := p.contentOffset
+	if top < position {
+		position = top
+	} else if bottom > position+p.viewportHeight {
+		position = bottom - p.viewportHeight
+	}
+	p.scrollContentTo(position)
+}
+
+func (p *panel) scrollWheel(wParam uintptr) bool {
+	if p.clientHeight <= p.viewportHeight {
+		return false
+	}
+	delta := int16(wParam >> 16)
+	if delta > 0 {
+		p.scrollContentTo(p.contentOffset - 48)
+	} else if delta < 0 {
+		p.scrollContentTo(p.contentOffset + 48)
+	}
+	return delta != 0
+}
+
 func (p *panel) rebuildForDPI() {
-	view, editing, draft := p.view, p.editing, p.draft
+	view, editing, draft, contentOffset := p.view, p.editing, p.draft, p.contentOffset
 	if view == editorView {
 		p.syncDraft()
 		draft = p.draft
@@ -1652,6 +1792,7 @@ func (p *panel) rebuildForDPI() {
 	} else {
 		p.showManager()
 	}
+	p.scrollContentTo(contentOffset)
 }
 func (p *panel) applyTheme() {
 	p.themeDark = theme.Current() == theme.ModeDark
@@ -1679,6 +1820,9 @@ func (p *panel) applyTheme() {
 		p.managerScroll.SetTheme(p.palette, p.palette.Surface)
 		p.managerScroll.Sync()
 	}
+	if p.contentScroll != nil {
+		p.contentScroll.SetTheme(p.palette, p.palette.WindowBackground)
+	}
 	if p.nameCue != nil {
 		p.nameCue.SetTheme(p.palette.MutedText)
 	}
@@ -1705,7 +1849,7 @@ func (p *panel) releaseBrushes() {
 	p.windowBrush, p.surfaceBrush, p.disabledBrush = 0, 0, 0
 }
 
-func weekdayButtonProc(hwnd windows.Handle, message uint32, wParam uintptr, lParam unsafe.Pointer, subclassID, refData uintptr) uintptr {
+func weekdayButtonProc(hwnd windows.Handle, message uint32, wParam, lParam uintptr, subclassID, refData uintptr) uintptr {
 	if message == wmKeyDown && (wParam == vkLeft || wParam == vkRight || wParam == vkHome || wParam == vkEnd) {
 		activeMu.Lock()
 		p := active
@@ -1729,7 +1873,7 @@ func weekdayButtonProc(hwnd windows.Handle, message uint32, wParam uintptr, lPar
 			}
 		}
 	}
-	result, _, _ := pDefSubclassProc.Call(uintptr(hwnd), uintptr(message), wParam, uintptr(lParam))
+	result, _, _ := pDefSubclassProc.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
 	return result
 }
 
@@ -1741,12 +1885,12 @@ func (p *panel) confirm(title, body string) bool {
 	return result == 6
 }
 
-func wndProc(hwnd windows.Handle, message uint32, wParam uintptr, lParam unsafe.Pointer) uintptr {
+func wndProc(hwnd windows.Handle, message uint32, wParam, lParam uintptr) uintptr {
 	activeMu.Lock()
 	p := active
 	activeMu.Unlock()
 	if p == nil || p.hwnd != hwnd {
-		result, _, _ := pDefWindowProc.Call(uintptr(hwnd), uintptr(message), wParam, uintptr(lParam))
+		result, _, _ := pDefWindowProc.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
 		return result
 	}
 	switch message {
@@ -1760,6 +1904,10 @@ func wndProc(hwnd windows.Handle, message uint32, wParam uintptr, lParam unsafe.
 		return 0
 	case wmLButtonDown:
 		p.closeChoice(false)
+	case wmMouseWheel:
+		if p.scrollWheel(wParam) {
+			return 0
+		}
 	case wmOpenChoice:
 		if p.view == editorView {
 			p.toggleChoice(uint16(wParam))
@@ -1774,7 +1922,7 @@ func wndProc(hwnd windows.Handle, message uint32, wParam uintptr, lParam unsafe.
 		p.handleCommand(uint16(wParam), uint16(wParam>>16))
 		return 0
 	case wmDrawItem:
-		if p.drawOwnerItem((*drawItem)(lParam)) {
+		if p.drawOwnerItem((*drawItem)(nativeform.MessagePointer(lParam))) {
 			return 1
 		}
 	case wmPaint:
@@ -1787,7 +1935,7 @@ func wndProc(hwnd windows.Handle, message uint32, wParam uintptr, lParam unsafe.
 		return 1
 	case wmCtlColorStatic:
 		textColor := p.palette.PrimaryText
-		controlID := p.controlID(windows.Handle(uintptr(lParam)))
+		controlID := p.controlID(windows.Handle(lParam))
 		if isSecondaryLabel(controlID) {
 			textColor = p.palette.SecondaryText
 		} else if isMutedLabel(controlID) {
@@ -1818,7 +1966,7 @@ func wndProc(hwnd windows.Handle, message uint32, wParam uintptr, lParam unsafe.
 		brush := p.surfaceBrush
 		textColor := p.palette.PrimaryText
 		backgroundColor := p.palette.Surface
-		if enabled, _, _ := pIsWindowEnabled.Call(uintptr(lParam)); enabled == 0 {
+		if enabled, _, _ := pIsWindowEnabled.Call(lParam); enabled == 0 {
 			brush = p.disabledBrush
 			textColor = p.palette.DisabledText
 			backgroundColor = p.palette.DisabledSurface
@@ -1831,6 +1979,15 @@ func wndProc(hwnd windows.Handle, message uint32, wParam uintptr, lParam unsafe.
 		return 0
 	case wmDpiChanged:
 		if p.font != 0 {
+			dpi := uint32(wParam & 0xffff)
+			if dpi == 0 {
+				dpi = 96
+			}
+			p.dpiScale = float64(dpi) / 96
+			if lParam != 0 {
+				suggested := nativeform.Rect(*(*rect)(nativeform.MessagePointer(lParam)))
+				p.pendingSuggested = &suggested
+			}
 			p.rebuildForDPI()
 			scale := p.scale()
 			p.icons.Apply(p.hwnd, p.themeDark, int(32*scale+0.5), int(16*scale+0.5), true)
@@ -1838,6 +1995,10 @@ func wndProc(hwnd windows.Handle, message uint32, wParam uintptr, lParam unsafe.
 		return 0
 	case wmDestroy:
 		processpicker.Hide()
+		if p.contentScroll != nil {
+			p.contentScroll.Close()
+			p.contentScroll = nil
+		}
 		if p.nameCue != nil {
 			p.nameCue.Close()
 			p.nameCue = nil
@@ -1867,9 +2028,10 @@ func wndProc(hwnd windows.Handle, message uint32, wParam uintptr, lParam unsafe.
 			active = nil
 		}
 		activeMu.Unlock()
+		p.hwnd = 0
 		return 0
 	}
-	result, _, _ := pDefWindowProc.Call(uintptr(hwnd), uintptr(message), wParam, uintptr(lParam))
+	result, _, _ := pDefWindowProc.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
 	return result
 }
 

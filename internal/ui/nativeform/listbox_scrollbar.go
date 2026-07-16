@@ -163,11 +163,11 @@ func (s *ListboxScrollbar) Sync() {
 	s.scrollbar.SetMetrics(int(total), page, int(top))
 }
 
-func listboxScrollbarProc(hwnd windows.Handle, message uint32, wParam uintptr, lParam unsafe.Pointer, subclassID, refData uintptr) uintptr {
+func listboxScrollbarProc(hwnd windows.Handle, message uint32, wParam, lParam uintptr, subclassID, refData uintptr) uintptr {
 	listboxMu.Lock()
 	bar := listboxScrollbars[hwnd]
 	listboxMu.Unlock()
-	result, _, _ := lbDefSubclassProc.Call(uintptr(hwnd), uintptr(message), wParam, uintptr(lParam))
+	result, _, _ := lbDefSubclassProc.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
 	if bar == nil {
 		return result
 	}

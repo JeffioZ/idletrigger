@@ -1,6 +1,7 @@
 package processpicker
 
 import (
+	"fmt"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -64,29 +65,48 @@ const (
 var (
 	headerComctl32         = windows.NewLazySystemDLL("comctl32.dll")
 	pSetWindowSubclass     = headerComctl32.NewProc("SetWindowSubclass")
+	pRemoveWindowSubclass  = headerComctl32.NewProc("RemoveWindowSubclass")
 	pDefSubclassProc       = headerComctl32.NewProc("DefSubclassProc")
 	pHeaderTrackMouse      = windows.NewLazySystemDLL("user32.dll").NewProc("TrackMouseEvent")
 	headerSubclassCallback = windows.NewCallback(headerSubclassProc)
 )
 
-func (p *picker) installHeaderRenderer() {
+func (p *picker) installHeaderRenderer() error {
 	list := p.controls[idList]
 	if list == 0 {
-		return
+		return fmt.Errorf("process picker list is required")
 	}
-	pSetWindowSubclass.Call(uintptr(list), headerSubclassCallback, headerListSubclassID, 0)
+	if ok, _, callErr := pSetWindowSubclass.Call(uintptr(list), headerSubclassCallback, headerListSubclassID, 0); ok == 0 {
+		return fmt.Errorf("subclass process picker list: %w", callErr)
+	}
 	header, _, _ := pSendMessage.Call(uintptr(list), lvmGetHeader, 0, 0)
 	if header == 0 {
-		return
+		pRemoveWindowSubclass.Call(uintptr(list), headerSubclassCallback, headerListSubclassID)
+		return fmt.Errorf("resolve process picker header")
 	}
 	p.header = windows.Handle(header)
 	p.headerHover, p.headerPressed = -1, -1
-	pSetWindowSubclass.Call(header, headerSubclassCallback, headerSubclassID, 0)
+	if ok, _, callErr := pSetWindowSubclass.Call(header, headerSubclassCallback, headerSubclassID, 0); ok == 0 {
+		pRemoveWindowSubclass.Call(uintptr(list), headerSubclassCallback, headerListSubclassID)
+		p.header = 0
+		return fmt.Errorf("subclass process picker header: %w", callErr)
+	}
 	pInvalidateRect.Call(header, 0, 0)
+	return nil
 }
 
-func (p *picker) headerItemAt(hwnd windows.Handle, lParam unsafe.Pointer) int {
-	value := uintptr(lParam)
+func (p *picker) releaseHeaderRenderer() {
+	if p.header != 0 {
+		pRemoveWindowSubclass.Call(uintptr(p.header), headerSubclassCallback, headerSubclassID)
+	}
+	if p.controls != nil && p.controls[idList] != 0 {
+		pRemoveWindowSubclass.Call(uintptr(p.controls[idList]), headerSubclassCallback, headerListSubclassID)
+	}
+	p.header, p.headerHover, p.headerPressed = 0, -1, -1
+}
+
+func (p *picker) headerItemAt(hwnd windows.Handle, lParam uintptr) int {
+	value := lParam
 	hit := headerHitTest{Item: -1}
 	hit.Point.X = int32(int16(value))
 	hit.Point.Y = int32(int16(value >> 16))
@@ -103,16 +123,16 @@ func (p *picker) invalidateHeader() {
 	}
 }
 
-func headerSubclassProc(hwnd windows.Handle, message uint32, wParam uintptr, lParam unsafe.Pointer, subclassID, refData uintptr) uintptr {
+func headerSubclassProc(hwnd windows.Handle, message uint32, wParam, lParam uintptr, subclassID, refData uintptr) uintptr {
 	activeMu.Lock()
 	p := active
 	activeMu.Unlock()
 	if p == nil {
-		result, _, _ := pDefSubclassProc.Call(uintptr(hwnd), uintptr(message), wParam, uintptr(lParam))
+		result, _, _ := pDefSubclassProc.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
 		return result
 	}
-	if hwnd == p.controls[idList] && message == wmHeaderNotify && lParam != nil {
-		draw := (*nmCustomDraw)(lParam)
+	if hwnd == p.controls[idList] && message == wmHeaderNotify && lParam != 0 {
+		draw := (*nmCustomDraw)(nativeform.MessagePointer(lParam))
 		if draw.Header.Code == nmCustomDrawCode {
 			switch draw.DrawStage {
 			case cdStagePrePaint:
@@ -136,10 +156,9 @@ func headerSubclassProc(hwnd windows.Handle, message uint32, wParam uintptr, lPa
 				}
 				return cdResultSkipDefault
 			case cdStagePostPaint:
-				// Column fitting deliberately leaves a tiny safety inset so the
-				// report view never creates a horizontal scrollbar. Paint that
-				// non-item header remainder as part of the themed header; otherwise
-				// the native light header leaks through as a white strip in dark mode.
+				// Fill only an unavoidable common-control rounding remainder. Normal
+				// column fitting reaches the client edge, so this does not create a
+				// separate-looking strip beside the instance-count column.
 				var client rect
 				if ok, _, _ := pGetClientRect.Call(uintptr(p.header), uintptr(unsafe.Pointer(&client))); ok == 0 {
 					return 0
@@ -179,7 +198,7 @@ func headerSubclassProc(hwnd windows.Handle, message uint32, wParam uintptr, lPa
 			p.headerPressed = p.headerItemAt(hwnd, lParam)
 			p.invalidateHeader()
 		case wmHeaderLButtonUp:
-			result, _, _ := pDefSubclassProc.Call(uintptr(hwnd), uintptr(message), wParam, uintptr(lParam))
+			result, _, _ := pDefSubclassProc.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
 			p.headerPressed = -1
 			p.invalidateHeader()
 			return result
@@ -196,7 +215,7 @@ func headerSubclassProc(hwnd windows.Handle, message uint32, wParam uintptr, lPa
 		}
 	}
 
-	result, _, _ := pDefSubclassProc.Call(uintptr(hwnd), uintptr(message), wParam, uintptr(lParam))
+	result, _, _ := pDefSubclassProc.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
 	if hwnd == p.controls[idList] {
 		switch message {
 		case wmHeaderMouseWheel, wmHeaderVScroll, wmHeaderKeyDown:
