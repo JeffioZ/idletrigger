@@ -178,6 +178,7 @@ type picker struct {
 	visible          []item
 	selected         map[string]automation.ProcessTarget
 	descriptions     map[string]string
+	descriptionTried map[string]struct{}
 	sortColumn       int
 	sortAscending    bool
 	populating       bool
@@ -200,6 +201,7 @@ type picker struct {
 	contentScroll    *nativeform.Scrollbar
 	searchCue        *nativeform.CueBanner
 	lastSnapshot     time.Time
+	lastScanDuration time.Duration
 	anchorTopKey     string
 	anchorFocusKey   string
 	ownerDisabled    bool
@@ -356,7 +358,19 @@ const (
 	ofnDontAddToRecent    = 0x02000000
 )
 
-const processPickerRefreshAge = 5 * time.Second
+const (
+	processPickerAutoRefreshMinAge  = 15 * time.Second
+	processPickerAutoRefreshMaxAge  = 60 * time.Second
+	processPickerScanCostMultiplier = 250
+)
+
+type processLoadMode uint8
+
+const (
+	processLoadInitial processLoadMode = iota
+	processLoadAutomatic
+	processLoadManual
+)
 
 var (
 	user32                = windows.NewLazySystemDLL("user32.dll")
@@ -450,7 +464,7 @@ func Show(options Options) error {
 	p := &picker{
 		options: options, controls: make(map[uint16]windows.Handle), bounds: make(map[uint16]logicalBounds),
 		labels: make(map[uint16]string), surfaceFields: make(map[uint16]uint16),
-		selected: make(map[string]automation.ProcessTarget), descriptions: make(map[string]string), sortAscending: true,
+		selected: make(map[string]automation.ProcessTarget), descriptions: make(map[string]string), descriptionTried: make(map[string]struct{}), sortAscending: true,
 		headerHover: -1, headerPressed: -1,
 	}
 	for key, value := range options.Descriptions {
@@ -510,7 +524,7 @@ func Capture(options Options, groups []processcatalog.Group, scale float64, dark
 	p := &picker{
 		options: options, controls: make(map[uint16]windows.Handle), bounds: make(map[uint16]logicalBounds),
 		labels: make(map[uint16]string), surfaceFields: make(map[uint16]uint16),
-		selected: make(map[string]automation.ProcessTarget), descriptions: make(map[string]string), sortAscending: true,
+		selected: make(map[string]automation.ProcessTarget), descriptions: make(map[string]string), descriptionTried: make(map[string]struct{}), sortAscending: true,
 		headerHover: -1, headerPressed: -1,
 		captureHost: true, captureScale: scale, themeOverride: &dark,
 	}
@@ -801,7 +815,7 @@ func (p *picker) create() (err error) {
 	if !p.captureHost {
 		// Establish the loading state before the first visible frame so the
 		// picker never flashes an uninitialized empty list.
-		p.startLoad(true)
+		p.startLoad(processLoadInitial)
 	}
 	pShowWindow.Call(uintptr(hwnd), 5)
 	if p.captureHost {
@@ -1035,7 +1049,7 @@ func (p *picker) addTooltip(control windows.Handle, value string) error {
 	return nil
 }
 
-func (p *picker) startLoad(enrich bool) {
+func (p *picker) startLoad(mode processLoadMode) {
 	if p.closed.Load() || p.hwnd == 0 {
 		return
 	}
@@ -1060,46 +1074,112 @@ func (p *picker) startLoad(enrich bool) {
 	for key, value := range p.descriptions {
 		cachedDescriptions[key] = value
 	}
+	attemptedDescriptions := make(map[string]struct{}, len(p.descriptionTried))
+	for key := range p.descriptionTried {
+		attemptedDescriptions[key] = struct{}{}
+	}
 	p.workers.Add(1)
 	go func() {
 		defer p.workers.Done()
+		scanStarted := time.Now()
 		instances, err := snapshotNamesForPicker()
+		scanDuration := time.Since(scanStarted)
 		if err != nil {
-			postPickerUI(func() { p.finishLoad(generation, nil, err, true) })
+			postPickerUI(func() { p.finishLoad(generation, nil, err, true, scanDuration) })
 			return
 		}
 		for index := range instances {
 			key := (automation.ProcessTarget{Match: automation.MatchName, Executable: instances[index].Executable}).Key()
 			instances[index].Description = cachedDescriptions[key]
 		}
-		postPickerUI(func() { p.finishLoad(generation, instances, nil, !enrich) })
-		if enrich {
-			enriched := enrichDescriptionsForPicker(instances)
-			postPickerUI(func() { p.finishLoad(generation, enriched, nil, true) })
-		}
-		descriptions := make(map[string]string, len(exactTargets))
+		candidates, nameAttempts := descriptionCandidates(instances, cachedDescriptions, attemptedDescriptions, mode == processLoadManual)
+		exactAttempts := make([]automation.ProcessTarget, 0, len(exactTargets))
 		for _, target := range exactTargets {
-			if description := fileDescriptionForPicker(target.Path); description != "" {
-				descriptions[target.Key()] = description
+			key := target.Key()
+			if cachedDescriptions[key] != "" {
+				continue
+			}
+			if _, tried := attemptedDescriptions[key]; tried && mode != processLoadManual {
+				continue
+			}
+			exactAttempts = append(exactAttempts, target)
+		}
+		hasMetadataWork := len(nameAttempts) > 0 || len(exactAttempts) > 0
+		postPickerUI(func() { p.finishLoad(generation, instances, nil, !hasMetadataWork, scanDuration) })
+		nameDescriptions := make(map[string]string, len(nameAttempts))
+		if len(candidates) > 0 {
+			for _, instance := range enrichDescriptionsForPicker(candidates) {
+				if instance.Description == "" {
+					continue
+				}
+				key := (automation.ProcessTarget{Match: automation.MatchName, Executable: instance.Executable}).Key()
+				nameDescriptions[key] = instance.Description
 			}
 		}
-		if len(descriptions) > 0 {
-			postPickerUI(func() { p.finishTargetDescriptions(generation, descriptions) })
+		exactDescriptions := make(map[string]string, len(exactAttempts))
+		for _, target := range exactAttempts {
+			if description := fileDescriptionForPicker(target.Path); description != "" {
+				exactDescriptions[target.Key()] = description
+			}
+		}
+		if hasMetadataWork {
+			postPickerUI(func() {
+				p.finishDescriptionLoad(generation, instances, nameAttempts, nameDescriptions, exactAttempts, exactDescriptions)
+			})
 		}
 	}()
 }
 
-func (p *picker) finishTargetDescriptions(generation uint64, descriptions map[string]string) {
+func descriptionCandidates(instances []processcatalog.Instance, cached map[string]string, attempted map[string]struct{}, retry bool) ([]processcatalog.Instance, []string) {
+	wanted := make(map[string]struct{})
+	attempts := make([]string, 0)
+	for _, instance := range instances {
+		key := (automation.ProcessTarget{Match: automation.MatchName, Executable: instance.Executable}).Key()
+		if cached[key] != "" {
+			continue
+		}
+		if _, tried := attempted[key]; tried && !retry {
+			continue
+		}
+		if _, exists := wanted[key]; !exists {
+			wanted[key] = struct{}{}
+			attempts = append(attempts, key)
+		}
+	}
+	candidates := make([]processcatalog.Instance, 0, len(instances))
+	for _, instance := range instances {
+		key := (automation.ProcessTarget{Match: automation.MatchName, Executable: instance.Executable}).Key()
+		if _, ok := wanted[key]; ok {
+			candidates = append(candidates, instance)
+		}
+	}
+	return candidates, attempts
+}
+
+func (p *picker) finishDescriptionLoad(generation uint64, instances []processcatalog.Instance, nameAttempts []string, nameDescriptions map[string]string, exactAttempts []automation.ProcessTarget, exactDescriptions map[string]string) {
 	if p.closed.Load() || p.hwnd == 0 || p.generation != generation {
 		return
 	}
-	for key, value := range descriptions {
+	for _, key := range nameAttempts {
+		p.descriptionTried[key] = struct{}{}
+	}
+	for _, target := range exactAttempts {
+		p.descriptionTried[target.Key()] = struct{}{}
+	}
+	for key, value := range nameDescriptions {
 		p.descriptions[key] = value
 	}
-	p.updatePreview()
+	for key, value := range exactDescriptions {
+		p.descriptions[key] = value
+	}
+	for index := range instances {
+		key := (automation.ProcessTarget{Match: automation.MatchName, Executable: instances[index].Executable}).Key()
+		instances[index].Description = p.descriptions[key]
+	}
+	p.finishLoad(generation, instances, nil, true, 0)
 }
 
-func (p *picker) finishLoad(generation uint64, instances []processcatalog.Instance, err error, final bool) {
+func (p *picker) finishLoad(generation uint64, instances []processcatalog.Instance, err error, final bool, scanDuration time.Duration) {
 	if p.closed.Load() || p.hwnd == 0 || p.generation != generation {
 		return
 	}
@@ -1114,7 +1194,10 @@ func (p *picker) finishLoad(generation uint64, instances []processcatalog.Instan
 		p.anchorTopKey, p.anchorFocusKey = "", ""
 		return
 	}
-	p.lastSnapshot = time.Now()
+	if scanDuration > 0 {
+		p.lastSnapshot = time.Now()
+		p.lastScanDuration = scanDuration
+	}
 	groups := processcatalog.GroupInstances(instances)
 	for index := range groups {
 		key := (automation.ProcessTarget{Match: automation.MatchName, Executable: groups[index].Executable}).Key()
@@ -1178,8 +1261,19 @@ func (p *picker) restoreViewAnchors(clear bool) {
 	}
 }
 
-func shouldAutoRefreshProcessPicker(last, now time.Time, loading bool) bool {
-	return !loading && !last.IsZero() && now.Sub(last) >= processPickerRefreshAge
+func processPickerRefreshAge(scanDuration time.Duration) time.Duration {
+	age := scanDuration * processPickerScanCostMultiplier
+	if age < processPickerAutoRefreshMinAge {
+		return processPickerAutoRefreshMinAge
+	}
+	if age > processPickerAutoRefreshMaxAge {
+		return processPickerAutoRefreshMaxAge
+	}
+	return age
+}
+
+func shouldAutoRefreshProcessPicker(last, now time.Time, scanDuration time.Duration, loading bool) bool {
+	return !loading && !last.IsZero() && now.Sub(last) >= processPickerRefreshAge(scanDuration)
 }
 
 func buildItems(groups []processcatalog.Group, selected map[string]automation.ProcessTarget, text func(string) string) []item {
@@ -1570,14 +1664,14 @@ func (p *picker) browseExecutable() {
 	go func() {
 		defer p.workers.Done()
 		description := fileDescriptionForPicker(path)
-		if description == "" {
-			return
-		}
 		postPickerUI(func() {
 			if p.closed.Load() || p.hwnd == 0 {
 				return
 			}
-			p.descriptions[key] = description
+			p.descriptionTried[key] = struct{}{}
+			if description != "" {
+				p.descriptions[key] = description
+			}
 			p.updatePreview()
 		})
 	}()
@@ -1594,7 +1688,7 @@ func (p *picker) handleCommand(id, notification uint16) {
 			pSetTimer.Call(uintptr(p.hwnd), searchTimerID, 120, 0)
 		}
 	case idRefresh:
-		p.startLoad(true)
+		p.startLoad(processLoadManual)
 	case idBrowse:
 		p.browseExecutable()
 	case idCancel:
@@ -2015,8 +2109,8 @@ func wndProc(hwnd windows.Handle, message uint32, wParam, lParam uintptr) uintpt
 	}
 	switch message {
 	case wmActivate:
-		if uint16(wParam) != 0 && !p.captureHost && shouldAutoRefreshProcessPicker(p.lastSnapshot, time.Now(), p.loading) {
-			p.startLoad(true)
+		if uint16(wParam) != 0 && !p.captureHost && shouldAutoRefreshProcessPicker(p.lastSnapshot, time.Now(), p.lastScanDuration, p.loading) {
+			p.startLoad(processLoadAutomatic)
 		}
 	case wmClose:
 		p.destroy()

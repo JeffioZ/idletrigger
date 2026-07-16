@@ -43,17 +43,53 @@ func TestBuildItemsKeepsRunningListDeduplicatedByName(t *testing.T) {
 
 func TestProcessPickerAutoRefreshUsesStaleActivationOnly(t *testing.T) {
 	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.Local)
-	if shouldAutoRefreshProcessPicker(time.Time{}, now, false) {
+	scanDuration := 20 * time.Millisecond
+	refreshAge := processPickerRefreshAge(scanDuration)
+	if shouldAutoRefreshProcessPicker(time.Time{}, now, scanDuration, false) {
 		t.Fatal("an uninitialized picker should not start a second load")
 	}
-	if shouldAutoRefreshProcessPicker(now.Add(-processPickerRefreshAge), now, true) {
+	if shouldAutoRefreshProcessPicker(now.Add(-refreshAge), now, scanDuration, true) {
 		t.Fatal("an in-flight load should not be restarted")
 	}
-	if shouldAutoRefreshProcessPicker(now.Add(-processPickerRefreshAge+time.Millisecond), now, false) {
+	if shouldAutoRefreshProcessPicker(now.Add(-refreshAge+time.Millisecond), now, scanDuration, false) {
 		t.Fatal("a fresh snapshot was refreshed too early")
 	}
-	if !shouldAutoRefreshProcessPicker(now.Add(-processPickerRefreshAge), now, false) {
+	if !shouldAutoRefreshProcessPicker(now.Add(-refreshAge), now, scanDuration, false) {
 		t.Fatal("a stale snapshot was not refreshed after reactivation")
+	}
+}
+
+func TestProcessPickerRefreshAgeAdaptsToMeasuredScanCost(t *testing.T) {
+	if got := processPickerRefreshAge(0); got != processPickerAutoRefreshMinAge {
+		t.Fatalf("zero-cost refresh age = %v, want %v", got, processPickerAutoRefreshMinAge)
+	}
+	if got := processPickerRefreshAge(100 * time.Millisecond); got != 25*time.Second {
+		t.Fatalf("100 ms refresh age = %v, want 25s", got)
+	}
+	if got := processPickerRefreshAge(time.Second); got != processPickerAutoRefreshMaxAge {
+		t.Fatalf("slow refresh age = %v, want %v", got, processPickerAutoRefreshMaxAge)
+	}
+}
+
+func TestDescriptionCandidatesSkipPositiveAndNegativeCacheUnlessManual(t *testing.T) {
+	instances := []processcatalog.Instance{
+		{PID: 1, Executable: "cached.exe"},
+		{PID: 2, Executable: "missing.exe"},
+		{PID: 3, Executable: "new.exe"},
+		{PID: 4, Executable: "new.exe"},
+	}
+	key := func(name string) string {
+		return (automation.ProcessTarget{Match: automation.MatchName, Executable: name}).Key()
+	}
+	cached := map[string]string{key("cached.exe"): "Cached"}
+	attempted := map[string]struct{}{key("missing.exe"): {}}
+	candidates, attempts := descriptionCandidates(instances, cached, attempted, false)
+	if len(candidates) != 2 || len(attempts) != 1 || attempts[0] != key("new.exe") {
+		t.Fatalf("automatic candidates=%+v attempts=%+v", candidates, attempts)
+	}
+	candidates, attempts = descriptionCandidates(instances, cached, attempted, true)
+	if len(candidates) != 3 || len(attempts) != 2 {
+		t.Fatalf("manual candidates=%+v attempts=%+v", candidates, attempts)
 	}
 }
 
