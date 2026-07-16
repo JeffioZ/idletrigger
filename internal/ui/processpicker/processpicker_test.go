@@ -25,7 +25,6 @@ var (
 	pickerTestGetClientRect  = pickerTestUser32.NewProc("GetClientRect")
 	pickerTestClientToScreen = pickerTestUser32.NewProc("ClientToScreen")
 	pickerTestEnumMonitors   = pickerTestUser32.NewProc("EnumDisplayMonitors")
-	pickerTestMonitorFromWnd = pickerTestUser32.NewProc("MonitorFromWindow")
 	pickerTestGetMonitorInfo = pickerTestUser32.NewProc("GetMonitorInfoW")
 	pickerTestScrollBarInfo  = pickerTestUser32.NewProc("GetScrollBarInfo")
 )
@@ -499,24 +498,6 @@ func pickerClientScreenRect(t *testing.T, hwnd windows.Handle) nativeform.Rect {
 	pickerTestClientToScreen.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&topLeft)))
 	pickerTestClientToScreen.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&bottomRight)))
 	return nativeform.Rect{Left: topLeft.X, Top: topLeft.Y, Right: bottomRight.X, Bottom: bottomRight.Y}
-}
-
-func pickerMonitorWorkArea(t *testing.T, hwnd windows.Handle) nativeform.Rect {
-	t.Helper()
-	monitor, _, _ := pickerTestMonitorFromWnd.Call(uintptr(hwnd), 2)
-	if monitor == 0 {
-		t.Fatal("MonitorFromWindow returned zero")
-	}
-	type info struct {
-		Size          uint32
-		Monitor, Work nativeform.Rect
-		Flags         uint32
-	}
-	value := info{Size: uint32(unsafe.Sizeof(info{}))}
-	if ok, _, callErr := pickerTestGetMonitorInfo.Call(monitor, uintptr(unsafe.Pointer(&value))); ok == 0 {
-		t.Fatalf("GetMonitorInfo: %v", callErr)
-	}
-	return value.Work
 }
 
 func pickerMonitorWorkAreas(t *testing.T) []nativeform.Rect {

@@ -46,7 +46,6 @@ type ChoicePopup struct {
 }
 
 type popupRect struct{ Left, Top, Right, Bottom int32 }
-type popupPoint struct{ X, Y int32 }
 type popupMonitorInfo struct {
 	Size          uint32
 	Monitor, Work popupRect

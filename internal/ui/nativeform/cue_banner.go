@@ -128,7 +128,7 @@ func (c *CueBanner) draw(dc windows.Handle) {
 	if left <= 0 {
 		left = scaledPixels(6, c.scale)
 	}
-	drawLabel(dc, Rect{Left: client.Left, Top: client.Top, Right: client.Right, Bottom: client.Bottom}, windows.Handle(font), c.text, c.color, true, left, left)
+	drawLabel(dc, Rect(client), windows.Handle(font), c.text, c.color, true, left, left)
 }
 
 func cueBannerProc(hwnd windows.Handle, message uint32, wParam, lParam uintptr, subclassID, refData uintptr) uintptr {

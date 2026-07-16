@@ -29,10 +29,6 @@ func (p *picker) drawOwnerItemDirect(value *drawItem) bool {
 	}
 	id := uint16(value.CtlID)
 	bounds := nativeform.Rect{Left: value.Rect.Left, Top: value.Rect.Top, Right: value.Rect.Right, Bottom: value.Rect.Bottom}
-	scale := int32(p.scale() + 0.5)
-	if scale < 1 {
-		scale = 1
-	}
 	radius := int32(6*p.scale() + 0.5)
 	if radius < 3 {
 		radius = 3

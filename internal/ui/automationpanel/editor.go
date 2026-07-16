@@ -297,15 +297,16 @@ func (p *panel) layoutEditorContent(layoutWidth int) int {
 	}
 	p.place(idProcessLogicLabel, pad, y, contentW, labelH, true)
 	y += 22
-	if trigger == automation.TriggerProcessExited {
+	switch trigger {
+	case automation.TriggerProcessExited:
 		p.draft.ProcessLogic = automation.ProcessNone
 		p.selectCombo(idProcessLogic, processIndex(automation.ProcessNone))
 		p.place(idChooseProcesses, pad, y, contentW, fieldH, true)
-	} else if trigger == automation.TriggerProcessStarted {
+	case automation.TriggerProcessStarted:
 		p.draft.ProcessLogic = automation.ProcessAny
 		p.selectCombo(idProcessLogic, processIndex(automation.ProcessAny))
 		p.place(idChooseProcesses, pad, y, contentW, fieldH, true)
-	} else {
+	default:
 		p.placeCombo(idProcessLogic, pad, y, columnW, true)
 		p.place(idChooseProcesses, pad+columnW+gap, y, columnW, fieldH, true)
 	}

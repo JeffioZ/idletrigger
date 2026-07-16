@@ -19,7 +19,6 @@ var (
 	automationTestGetClientRect  = automationTestUser32.NewProc("GetClientRect")
 	automationTestClientToScreen = automationTestUser32.NewProc("ClientToScreen")
 	automationTestEnumMonitors   = automationTestUser32.NewProc("EnumDisplayMonitors")
-	automationTestMonitorFromWnd = automationTestUser32.NewProc("MonitorFromWindow")
 	automationTestGetMonitorInfo = automationTestUser32.NewProc("GetMonitorInfoW")
 )
 
@@ -303,24 +302,6 @@ func clientScreenRectForTest(t *testing.T, hwnd windows.Handle) nativeform.Rect 
 	automationTestClientToScreen.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&topLeft)))
 	automationTestClientToScreen.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&bottomRight)))
 	return nativeform.Rect{Left: topLeft.X, Top: topLeft.Y, Right: bottomRight.X, Bottom: bottomRight.Y}
-}
-
-func monitorWorkAreaForTest(t *testing.T, hwnd windows.Handle) nativeform.Rect {
-	t.Helper()
-	monitor, _, _ := automationTestMonitorFromWnd.Call(uintptr(hwnd), 2)
-	if monitor == 0 {
-		t.Fatal("MonitorFromWindow returned zero")
-	}
-	type info struct {
-		Size          uint32
-		Monitor, Work nativeform.Rect
-		Flags         uint32
-	}
-	value := info{Size: uint32(unsafe.Sizeof(info{}))}
-	if ok, _, callErr := automationTestGetMonitorInfo.Call(monitor, uintptr(unsafe.Pointer(&value))); ok == 0 {
-		t.Fatalf("GetMonitorInfo: %v", callErr)
-	}
-	return value.Work
 }
 
 func monitorWorkAreasForTest(t *testing.T) []nativeform.Rect {
