@@ -19,9 +19,14 @@ import (
 
 	"golang.org/x/sys/windows"
 
+	"github.com/JeffioZ/idletrigger/internal/automation"
 	"github.com/JeffioZ/idletrigger/internal/i18n"
+	"github.com/JeffioZ/idletrigger/internal/platform/windows/darkmode"
 	"github.com/JeffioZ/idletrigger/internal/platform/windows/dpi"
+	"github.com/JeffioZ/idletrigger/internal/platform/windows/processcatalog"
+	"github.com/JeffioZ/idletrigger/internal/ui/automationpanel"
 	"github.com/JeffioZ/idletrigger/internal/ui/controlpanel"
+	"github.com/JeffioZ/idletrigger/internal/ui/processpicker"
 )
 
 var pngSignature = []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a}
@@ -50,12 +55,14 @@ var screenshotShadows = [...]screenshotShadow{
 
 type options struct {
 	all      bool
+	surface  string
 	language string
 	theme    controlpanel.Theme
 	output   string
 }
 
 type job struct {
+	surface  string
 	language string
 	theme    controlpanel.Theme
 	path     string
@@ -117,8 +124,10 @@ func Run(args []string) error {
 		}
 		capturedSizes := make(map[string]image.Point)
 		for _, job := range jobs {
-			state := fixedSnapshot(job.language, job.theme)
-			err := controlpanel.Capture(state, func(key string) string { return i18n.T(job.language, key) }, readmeCaptureScale, func(hwnd windows.Handle) error {
+			if job.theme == controlpanel.ThemeDark {
+				darkmode.SetPreferredAppMode(true)
+			}
+			captureWindow := func(hwnd windows.Handle) error {
 				img, err := printWindow(hwnd)
 				if err != nil {
 					return err
@@ -128,15 +137,30 @@ func Run(args []string) error {
 					return err
 				}
 				size := client.Bounds().Size()
-				if previous, ok := capturedSizes[job.language]; ok && size != previous {
+				key := job.surface + "/" + job.language
+				if previous, ok := capturedSizes[key]; ok && size != previous {
 					return fmt.Errorf("inconsistent %s client capture size %dx%d; expected %dx%d", job.language, size.X, size.Y, previous.X, previous.Y)
 				}
-				capturedSizes[job.language] = size
+				capturedSizes[key] = size
 				if err := writePNG(job.path, framePanelScreenshot(client, job.theme)); err != nil {
 					return err
 				}
 				return nil
-			})
+			}
+			text := func(key string) string { return i18n.T(job.language, key) }
+			var err error
+			switch job.surface {
+			case "automation":
+				state := fixedAutomationSnapshot(job.language)
+				err = automationpanel.Capture(state, text, readmeCaptureScale, job.theme == controlpanel.ThemeDark, false, captureWindow)
+			case "automation-editor":
+				state := fixedAutomationEditorSnapshot(job.language)
+				err = automationpanel.Capture(state, text, readmeCaptureScale, job.theme == controlpanel.ThemeDark, true, captureWindow)
+			case "process-picker":
+				err = processpicker.Capture(fixedProcessPickerOptions(job.language, text), fixedProcessGroups(), readmeCaptureScale, job.theme == controlpanel.ThemeDark, captureWindow)
+			default:
+				err = controlpanel.Capture(fixedSnapshot(job.language, job.theme), text, readmeCaptureScale, captureWindow)
+			}
 			if err != nil {
 				return fmt.Errorf("capture %s: %w", filepath.Base(job.path), err)
 			}
@@ -289,12 +313,20 @@ func parse(args []string) (options, error) {
 				return options{}, fmt.Errorf("screenshot --all specified more than once")
 			}
 			opts.all = true
-		case "--language", "--theme", "--output":
+		case "--surface", "--language", "--theme", "--output":
 			if i+1 >= len(args) {
 				return options{}, fmt.Errorf("screenshot option %q needs a value", args[i])
 			}
 			value := args[i+1]
 			switch args[i] {
+			case "--surface":
+				if opts.surface != "" {
+					return options{}, fmt.Errorf("screenshot surface specified more than once")
+				}
+				if value != "control" && value != "automation" && value != "automation-editor" && value != "process-picker" {
+					return options{}, fmt.Errorf("screenshot surface must be control, automation, automation-editor, or process-picker")
+				}
+				opts.surface = value
 			case "--language":
 				if opts.language != "" {
 					return options{}, fmt.Errorf("screenshot language specified more than once")
@@ -327,8 +359,8 @@ func parse(args []string) (options, error) {
 		}
 	}
 	if opts.all {
-		if opts.language != "" || opts.theme != controlpanel.ThemeFollowSystem {
-			return options{}, fmt.Errorf("screenshot --all cannot be combined with --language or --theme")
+		if opts.surface != "" || opts.language != "" || opts.theme != controlpanel.ThemeFollowSystem {
+			return options{}, fmt.Errorf("screenshot --all cannot be combined with --surface, --language, or --theme")
 		}
 		if opts.output == "" {
 			return options{}, fmt.Errorf("screenshot --all requires --output DIRECTORY")
@@ -338,6 +370,9 @@ func parse(args []string) (options, error) {
 	if opts.language == "" || opts.theme == controlpanel.ThemeFollowSystem || opts.output == "" {
 		return options{}, fmt.Errorf("single screenshot requires --language, --theme, and --output FILE.png")
 	}
+	if opts.surface == "" {
+		opts.surface = "control"
+	}
 	if !strings.EqualFold(filepath.Ext(opts.output), ".png") {
 		return options{}, fmt.Errorf("single screenshot --output must be a .png file")
 	}
@@ -345,18 +380,18 @@ func parse(args []string) (options, error) {
 }
 
 func usage() string {
-	return "usage:\n  IdleTrigger.exe screenshot --all --output DIRECTORY\n  IdleTrigger.exe screenshot --language en|zh-CN --theme light|dark --output FILE.png"
+	return "usage:\n  IdleTrigger.exe screenshot --all --output DIRECTORY\n  IdleTrigger.exe screenshot [--surface control|automation|automation-editor|process-picker] --language en|zh-CN --theme light|dark --output FILE.png"
 }
 
 func (opts options) jobs() ([]job, error) {
 	if !opts.all {
-		return []job{{language: opts.language, theme: opts.theme, path: opts.output}}, nil
+		return []job{{surface: opts.surface, language: opts.language, theme: opts.theme, path: opts.output}}, nil
 	}
 	return []job{
-		{language: "en", theme: controlpanel.ThemeLight, path: filepath.Join(opts.output, "panel-en-light.png")},
-		{language: "en", theme: controlpanel.ThemeDark, path: filepath.Join(opts.output, "panel-en-dark.png")},
-		{language: "zh-CN", theme: controlpanel.ThemeLight, path: filepath.Join(opts.output, "panel-zh-light.png")},
-		{language: "zh-CN", theme: controlpanel.ThemeDark, path: filepath.Join(opts.output, "panel-zh-dark.png")},
+		{surface: "control", language: "en", theme: controlpanel.ThemeLight, path: filepath.Join(opts.output, "panel-en-light.png")},
+		{surface: "control", language: "en", theme: controlpanel.ThemeDark, path: filepath.Join(opts.output, "panel-en-dark.png")},
+		{surface: "control", language: "zh-CN", theme: controlpanel.ThemeLight, path: filepath.Join(opts.output, "panel-zh-light.png")},
+		{surface: "control", language: "zh-CN", theme: controlpanel.ThemeDark, path: filepath.Join(opts.output, "panel-zh-dark.png")},
 	}, nil
 }
 
@@ -364,7 +399,105 @@ func fixedSnapshot(language string, theme controlpanel.Theme) controlpanel.State
 	chinese := language == "zh-CN"
 	schedule := fmt.Sprintf(i18n.T(language, "theme_schedule_sunrise_format"), "07:00", "19:00")
 	schedule = fmt.Sprintf(i18n.T(language, "theme_schedule_source_format"), schedule, i18n.T(language, "theme_location_utc_offset"))
-	return controlpanel.State{NoSleepEnabled: true, ProcessWatchEnabled: false, IdleEnabled: true, IdleWarningEnabled: true, IdleEnhancedMonitor: false, IdleTimeout: 30, IdleWarningSeconds: 30, IdleAction: "lock", ThemeSwitchEnabled: true, DarkOnBattery: true, SkipFullscreen: true, IPLocationEnabled: false, HotkeysEnabled: false, AutostartEnabled: true, LoggingEnabled: true, IsChinese: chinese, ThemeSchedule: schedule, AppVersion: "dev", Theme: theme}
+	automationSummary := fmt.Sprintf(i18n.T(language, "automation_overview_next"), 2, "2026-07-15 23:00")
+	return controlpanel.State{
+		NoSleepEnabled:      true,
+		NoSleepStatus:       i18n.T(language, "status_enabled"),
+		AutomationEnabled:   true,
+		IdleEnabled:         false,
+		IdleStatus:          i18n.T(language, "status_disabled"),
+		AutomationCount:     2,
+		AutomationSummary:   automationSummary,
+		IdleWarningEnabled:  true,
+		IdleEnhancedMonitor: false,
+		IdleTimeout:         30,
+		IdleWarningSeconds:  30,
+		IdleAction:          "lock",
+		ThemeSwitchEnabled:  true,
+		DarkOnBattery:       true,
+		SkipFullscreen:      true,
+		IPLocationEnabled:   false,
+		HotkeysEnabled:      false,
+		AutostartEnabled:    true,
+		LoggingEnabled:      true,
+		IsChinese:           chinese,
+		ThemeSchedule:       schedule,
+		AppVersion:          "dev",
+		Theme:               theme,
+	}
+}
+
+func fixedAutomationSnapshot(language string) automationpanel.State {
+	state := automationpanel.State{
+		Chinese:  language == "zh-CN",
+		NextText: fmt.Sprintf(i18n.T(language, "automation_next_format"), "2026-07-15 23:00"),
+		Rules: []automation.Rule{
+			{
+				ID: "capture-awake", Name: "OBS", Enabled: true,
+				Action: automation.ActionStayAwake, Trigger: automation.TriggerProcessRunning,
+				ProcessLogic: automation.ProcessAny,
+				Processes:    []automation.ProcessTarget{{Match: automation.MatchName, Executable: "obs64.exe"}},
+			},
+			{
+				ID: "capture-shutdown", Name: "Night", Enabled: true,
+				Action: automation.ActionShutdown, Trigger: automation.TriggerDaily, Time: "23:00",
+				WarningSeconds: automation.DefaultWarningSeconds, BlockedPolicy: automation.BlockedSkip,
+			},
+		},
+	}
+	for index := 0; index < 12; index++ {
+		state.Rules = append(state.Rules, automation.Rule{
+			ID: fmt.Sprintf("capture-scheduled-%02d", index+1), Name: fmt.Sprintf("Task %02d", index+1), Enabled: index%3 != 0,
+			Action: automation.ActionLock, Trigger: automation.TriggerDaily, Time: fmt.Sprintf("%02d:30", (index+7)%24),
+			WarningSeconds: automation.DefaultWarningSeconds, BlockedPolicy: automation.BlockedSkip,
+		})
+	}
+	return state
+}
+
+func fixedAutomationEditorSnapshot(language string) automationpanel.State {
+	return automationpanel.State{
+		Chinese: language == "zh-CN",
+		Rules: []automation.Rule{{
+			ID: "capture-weekly", Enabled: true,
+			Action: automation.ActionShutdown, Trigger: automation.TriggerWeekly,
+			Time: "23:00", Days: []string{"mon", "tue", "wed", "thu", "fri"},
+			WarningSeconds: automation.DefaultWarningSeconds, BlockedPolicy: automation.BlockedSkip,
+		}},
+	}
+}
+
+func fixedProcessPickerOptions(language string, text func(string) string) processpicker.Options {
+	nameTarget := automation.ProcessTarget{Match: automation.MatchName, Executable: "obs64.exe"}
+	secondNameTarget := automation.ProcessTarget{Match: automation.MatchName, Executable: "Code.exe"}
+	thirdNameTarget := automation.ProcessTarget{Match: automation.MatchName, Executable: "msedge.exe"}
+	fourthNameTarget := automation.ProcessTarget{Match: automation.MatchName, Executable: "notepad.exe"}
+	pathTarget := automation.ProcessTarget{Match: automation.MatchPath, Executable: "player.exe", Path: `C:\Apps\Player\player.exe`}
+	return processpicker.Options{
+		Chinese:      language == "zh-CN",
+		Text:         text,
+		Selected:     []automation.ProcessTarget{nameTarget, secondNameTarget, thirdNameTarget, fourthNameTarget, pathTarget},
+		Descriptions: map[string]string{nameTarget.Key(): "OBS Studio", secondNameTarget.Key(): "Visual Studio Code", thirdNameTarget.Key(): "Microsoft Edge", fourthNameTarget.Key(): "Notepad", pathTarget.Key(): "Media Player"},
+	}
+}
+
+func fixedProcessGroups() []processcatalog.Group {
+	// Keep enough deterministic rows to exercise the themed list scrollbar in
+	// visual regression captures without reading the host process table.
+	return []processcatalog.Group{
+		{Executable: "audiodg.exe", Description: "Windows Audio Device Graph Isolation", Count: 1},
+		{Executable: "Code.exe", Description: "Visual Studio Code", Count: 4},
+		{Executable: "dwm.exe", Description: "Desktop Window Manager", Count: 1},
+		{Executable: "explorer.exe", Description: "Windows Explorer", Count: 1},
+		{Executable: "msedge.exe", Description: "Microsoft Edge", Count: 8},
+		{Executable: "notepad.exe", Description: "Notepad", Count: 1},
+		{Executable: "obs64.exe", Description: "OBS Studio", Count: 2},
+		{Executable: "player.exe", Description: "Media Player", Count: 3},
+		{Executable: "SearchHost.exe", Description: "Search", Count: 1},
+		{Executable: "ShellExperienceHost.exe", Description: "Windows Shell Experience Host", Count: 1},
+		{Executable: "StartMenuExperienceHost.exe", Description: "Start", Count: 1},
+		{Executable: "TextInputHost.exe", Description: "Windows Input Experience", Count: 1},
+	}
 }
 
 func printWindow(hwnd windows.Handle) (*image.NRGBA, error) {

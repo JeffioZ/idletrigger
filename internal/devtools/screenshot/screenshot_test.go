@@ -21,12 +21,16 @@ func TestParse(t *testing.T) {
 		wantErr bool
 	}{
 		{"single", []string{"screenshot", "--language", "en", "--theme", "dark", "--output", "out.png"}, false},
+		{"automation", []string{"screenshot", "--surface", "automation", "--language", "zh-CN", "--theme", "light", "--output", "out.png"}, false},
+		{"automation editor", []string{"screenshot", "--surface", "automation-editor", "--language", "en", "--theme", "dark", "--output", "out.png"}, false},
 		{"all", []string{"screenshot", "--all", "--output", "images"}, false},
 		{"missing language", []string{"screenshot", "--theme", "dark", "--output", "out.png"}, true},
 		{"missing theme", []string{"screenshot", "--language", "en", "--output", "out.png"}, true},
 		{"invalid language", []string{"screenshot", "--language", "fr", "--theme", "dark", "--output", "out.png"}, true},
 		{"invalid theme", []string{"screenshot", "--language", "en", "--theme", "blue", "--output", "out.png"}, true},
+		{"invalid surface", []string{"screenshot", "--surface", "picker", "--language", "en", "--theme", "dark", "--output", "out.png"}, true},
 		{"all conflict", []string{"screenshot", "--all", "--language", "en", "--output", "images"}, true},
+		{"all surface conflict", []string{"screenshot", "--all", "--surface", "automation", "--output", "images"}, true},
 		{"single png", []string{"screenshot", "--language", "en", "--theme", "light", "--output", "out.jpg"}, true},
 		{"all output", []string{"screenshot", "--all"}, true},
 	}
@@ -37,6 +41,23 @@ func TestParse(t *testing.T) {
 				t.Fatalf("parse() error = %v, want error %v", err, test.wantErr)
 			}
 		})
+	}
+}
+
+func TestSingleScreenshotSurfaceDefaultsAndOverrides(t *testing.T) {
+	base, err := parse([]string{"screenshot", "--language", "en", "--theme", "light", "--output", "out.png"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if base.surface != "control" {
+		t.Fatalf("default surface = %q", base.surface)
+	}
+	automation, err := parse([]string{"screenshot", "--surface", "automation-editor", "--language", "zh-CN", "--theme", "dark", "--output", "out.png"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if automation.surface != "automation-editor" {
+		t.Fatalf("explicit surface = %q", automation.surface)
 	}
 }
 
@@ -62,8 +83,11 @@ func TestAllJobsUseStableReadmeOrder(t *testing.T) {
 
 func TestFixedSnapshotIsExplicit(t *testing.T) {
 	state := fixedSnapshot("zh-CN", controlpanel.ThemeDark)
-	if !state.IsChinese || state.Theme != controlpanel.ThemeDark || !state.NoSleepEnabled || !state.IdleEnabled || !state.ThemeSwitchEnabled {
+	if !state.IsChinese || state.Theme != controlpanel.ThemeDark || !state.NoSleepEnabled || state.IdleEnabled || !state.ThemeSwitchEnabled {
 		t.Fatalf("fixture is not explicit: %#v", state)
+	}
+	if state.NoSleepStatus != "已启用" || state.IdleStatus != "已禁用" {
+		t.Fatalf("fixture runtime status is not explicit: %#v", state)
 	}
 	if state.IPLocationEnabled || state.HotkeysEnabled || state.Theme == controlpanel.ThemeFollowSystem {
 		t.Fatalf("fixture permits external state: %#v", state)
@@ -84,6 +108,24 @@ func TestFixedSnapshotUsesSunriseSchedule(t *testing.T) {
 				t.Fatalf("ThemeSchedule = %q, want %q", got, test.want)
 			}
 		})
+	}
+}
+
+func TestFixedAutomationSnapshotIsExplicit(t *testing.T) {
+	state := fixedAutomationSnapshot("zh-CN")
+	if !state.Chinese || len(state.Rules) < 12 || state.NextText == "" {
+		t.Fatalf("automation fixture is not explicit: %#v", state)
+	}
+}
+
+func TestFixedAutomationEditorSnapshotCoversNameCueAndWeekdays(t *testing.T) {
+	state := fixedAutomationEditorSnapshot("zh-CN")
+	if !state.Chinese || len(state.Rules) != 1 {
+		t.Fatalf("automation editor fixture is not explicit: %#v", state)
+	}
+	rule := state.Rules[0]
+	if rule.Name != "" || rule.Trigger != "weekly" || len(rule.Days) != 5 {
+		t.Fatalf("automation editor fixture does not cover cue and weekdays: %#v", rule)
 	}
 }
 

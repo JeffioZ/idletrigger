@@ -88,12 +88,67 @@ Use the relevant row before considering a change complete:
   keep format verbs identical and check tooltip, CLI, and screenshot consumers.
 - **Windows integration:** keep business policy outside `internal/platform/windows`,
   verify error and cleanup paths, then compile both 386 and amd64 targets.
+- **Theme presentation guard:** preserve `theme_skip_fullscreen` as the persisted
+  compatibility key. Check Windows notification state and visible DWM bounds
+  before sampling GPU activity; GPU sampling must target only the foreground
+  process's rendering engines, require consecutive samples, run only while a
+  switch is pending, remain cancelable, and fail open. Do not request elevation,
+  open the foreground process, or add a global GPU monitor.
 - **Developer-only capability:** keep it behind `devtools`, update dependency
   boundary expectations, and verify the normal build excludes it.
+- **Automatic task:** update `internal/automation`, scheduler behavior and tests,
+  TOML output, both locales and tooltips, the manager/picker UI, and app runtime
+  reconciliation. State actions are temporary runtime requests and must not
+  rewrite manual toggles; pause wins over enable for the same feature. Event
+  actions must retain a cancellable countdown. Process-start events establish a
+  baseline first and fire only when all selected targets change from absent to
+  at least one running target. Process-exit events continue to wait for every
+  matching instance plus the 5-second grace period, preventing startup and
+  brief-restart false positives.
+- **Native form window:** automatic-task, task-editor, process-picker, and action-
+  countdown windows should share `internal/ui/nativeform` caption, theme-aware
+  icons, control theming, rounded field surfaces, and hover/press/focus/disabled
+  states. Owner-drawn choices and checkboxes should follow the control panel's
+  visual language instead of falling back to unthemed native dropdowns.
+  Long choice popups and report lists should share the same menu spacing,
+  corner radius, and themed scrollbar. Complete owner-drawn backgrounds,
+  borders, and text in an off-screen buffer and commit once so hover and view
+  transitions never expose intermediate paint passes. Empty edit cues must use
+  theme-aware muted text instead of the fixed native cue color, which can become
+  unreadable in dark mode.
+  Convert the intended client size through `AdjustWindowRectEx` before
+  `CreateWindowEx`; handle background erase, full invalidation after theme changes,
+  DPI changes, and owner enable/disable while preserving nested modality. Forms
+  need visible labels, progressive disclosure, inline validation with first-error
+  focus, and confirmation before discarding an edited task.
+- **Process picker:** use a native report list with checkboxes as the multi-choice
+  mechanism and a single focused row. The Process, Description, and Instances columns
+  must fit without a horizontal scrollbar. The running list contains one row per
+  executable name; exact-file targets come only from Browse and stay in the
+  selection preview. Search, staged asynchronous loading, empty results, refresh
+  disabling, header sorting, and selection preview must remain recoverable.
+  Commit the first repaint after async rows are inserted; sortable headers need
+  hover/press states, and the themed vertical scrollbar must not reintroduce a
+  horizontal scrollbar. Choice popups, the task list, the process list, and the
+  current-selection preview should reuse the shared scrollbar. A stale snapshot
+  may refresh when the picker becomes active again, but filtering, sorting,
+  checks, focus, and the visible anchor must be preserved without re-reading
+  descriptions that are already known.
+  Clearly distinguish name and exact-file matching in the preview; never persist
+  a PID or use a description as identity.
+- **Process metadata:** use Toolhelp names first. Resolve a representative
+  description from at most one accessible instance per executable name, with a
+  bounded worker count, and request `PROCESS_QUERY_LIMITED_INFORMATION` only when
+  a path is required. Browsed EXEs may be validated and read for description but
+  must never be launched. Do not add debug privilege, process-memory access,
+  injection, process termination,
+  arbitrary launch, a service, or Task Scheduler integration.
 
 The automated checks enforce locale-key coverage, configuration/example parity,
 control-panel action paths, build-tag dependency boundaries, and direct package
-layering. They complement, rather than replace, behavior-specific tests.
+layering. The process-automation boundary also rejects debug-privilege,
+process-memory, injection, and forced-termination APIs. These checks complement,
+rather than replace, behavior-specific tests.
 
 ## Regenerate Resources
 
@@ -172,4 +227,5 @@ EXEs can return before output is attached.
 Maintenance capabilities such as `diagnostics`, screenshots, and local test
 environment variables exist only in devtools builds.
 
-Code signing is an optional release step. Do not pack debug builds with UPX: it complicates diagnostics and can increase antivirus scrutiny.
+Release builds stay unpacked and self-contained. Do not use UPX or similar
+packers: they complicate diagnostics and can increase antivirus scrutiny.
