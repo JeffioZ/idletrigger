@@ -87,7 +87,7 @@ type panel struct {
 	controls            map[uint16]windows.Handle
 	anonymous           []windows.Handle
 	tooltip             windows.Handle
-	tooltipText         [][]uint16
+	tooltipText         map[uint16][]uint16
 	font                windows.Handle
 	sectionFont         windows.Handle
 	windowBrush         windows.Handle

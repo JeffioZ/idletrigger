@@ -245,6 +245,7 @@ func (p *panel) layoutEditorContent(layoutWidth int) int {
 	p.closeChoice(false)
 	action := actionAt(p.comboIndex(idAction))
 	trigger := p.triggerValue()
+	p.setText(idTimeLabel, p.t(automationTimeLabelKey(trigger)))
 	const pad, gap, fieldH, labelH = nativeform.FormPadding, nativeform.ControlGap, nativeform.FieldHeight, 18
 	reserve := 0
 	if p.clientHeight > p.viewportHeight {
@@ -663,13 +664,52 @@ func (p *panel) ruleSummary(rule automation.Rule) string {
 	case automation.TriggerProcessExited:
 		return fmt.Sprintf(p.t("automation_summary_process_exited"), action, len(rule.Processes))
 	case automation.TriggerTimeWindow:
-		return fmt.Sprintf(p.t("automation_summary_time_window"), action, rule.Time, rule.EndTime)
+		return fmt.Sprintf(p.t("automation_summary_time_window"), action, rule.Time, rule.EndTime, p.daySummary(rule.Days))
 	case automation.TriggerOnce:
 		return fmt.Sprintf(p.t("automation_summary_once"), action, rule.Date, rule.Time)
 	case automation.TriggerDaily:
 		return fmt.Sprintf(p.t("automation_summary_daily"), action, rule.Time)
 	case automation.TriggerWeekly:
-		return fmt.Sprintf(p.t("automation_summary_weekly"), action, rule.Time)
+		return fmt.Sprintf(p.t("automation_summary_weekly"), action, p.daySummary(rule.Days), rule.Time)
 	}
 	return action
+}
+
+func automationTimeLabelKey(trigger automation.Trigger) string {
+	if trigger == automation.TriggerTimeWindow {
+		return "automation_time"
+	}
+	return "automation_execution_time"
+}
+
+func (p *panel) daySummary(days []string) string {
+	all := true
+	for _, day := range editorWeekdays {
+		if !containsDay(days, day) {
+			all = false
+			break
+		}
+	}
+	if all {
+		return p.t("automation_days_everyday")
+	}
+	workdays := !containsDay(days, "sat") && !containsDay(days, "sun")
+	for _, day := range editorWeekdays[:5] {
+		workdays = workdays && containsDay(days, day)
+	}
+	if workdays {
+		return p.t("automation_days_workdays")
+	}
+	labels := make([]string, 0, len(days))
+	for _, day := range editorWeekdays {
+		if !containsDay(days, day) {
+			continue
+		}
+		label := p.t("automation_day_" + day)
+		if p.state.Chinese {
+			label = "周" + label
+		}
+		labels = append(labels, label)
+	}
+	return strings.Join(labels, p.t("automation_days_separator"))
 }

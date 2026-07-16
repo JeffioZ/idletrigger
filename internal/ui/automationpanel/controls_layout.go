@@ -104,10 +104,17 @@ func (p *panel) addTooltipValue(id uint16, value string) {
 		pSendMessage.Call(tip, ttmSetMaxTipWidth, 0, uintptr(int(360*p.scale())))
 		nativeform.ApplyTooltip(p.tooltip, p.themeDark, p.palette)
 	}
-	text, _ := windows.UTF16FromString(value)
-	p.tooltipText = append(p.tooltipText, text)
-	info := toolInfo{Size: uint32(unsafe.Sizeof(toolInfo{})), Flags: ttfIDIsHwnd | ttfSubclass, Hwnd: p.hwnd, ID: uintptr(control), Text: &p.tooltipText[len(p.tooltipText)-1][0]}
+	info := toolInfo{Size: uint32(unsafe.Sizeof(toolInfo{})), Flags: ttfIDIsHwnd | ttfSubclass, Hwnd: p.hwnd, ID: uintptr(control)}
 	pSendMessage.Call(uintptr(p.tooltip), ttmDelTool, 0, uintptr(unsafe.Pointer(&info)))
+	text, err := windows.UTF16FromString(value)
+	if err != nil || len(text) == 0 {
+		return
+	}
+	if p.tooltipText == nil {
+		p.tooltipText = make(map[uint16][]uint16)
+	}
+	p.tooltipText[id] = text
+	info.Text = &text[0]
 	pSendMessage.Call(uintptr(p.tooltip), ttmAddTool, 0, uintptr(unsafe.Pointer(&info)))
 }
 func (p *panel) setText(id uint16, value string) {

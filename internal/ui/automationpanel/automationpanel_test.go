@@ -8,6 +8,7 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/JeffioZ/idletrigger/internal/automation"
+	"github.com/JeffioZ/idletrigger/internal/i18n"
 	"github.com/JeffioZ/idletrigger/internal/ui/nativeform"
 	"github.com/JeffioZ/idletrigger/internal/ui/wintest"
 )
@@ -58,6 +59,55 @@ func TestSystemActionOffersProcessLifecycleTriggers(t *testing.T) {
 		if p.triggerOptions[index] != want[index] {
 			t.Fatalf("trigger[%d] = %q, want %q", index, p.triggerOptions[index], want[index])
 		}
+	}
+}
+
+func TestAutomationTimeLabelDistinguishesExecutionAndWindowStart(t *testing.T) {
+	for _, trigger := range []automation.Trigger{automation.TriggerOnce, automation.TriggerDaily, automation.TriggerWeekly} {
+		if got := automationTimeLabelKey(trigger); got != "automation_execution_time" {
+			t.Fatalf("%s time label = %q", trigger, got)
+		}
+	}
+	if got := automationTimeLabelKey(automation.TriggerTimeWindow); got != "automation_time" {
+		t.Fatalf("time-window label = %q", got)
+	}
+}
+
+func TestRuleSummaryIncludesEffectiveDays(t *testing.T) {
+	english := &panel{text: func(key string) string { return i18n.T("en", key) }}
+	weekly := automation.Rule{Action: automation.ActionShutdown, Trigger: automation.TriggerWeekly, Time: "23:00", Days: []string{"wed", "mon"}}
+	if got, want := english.ruleSummary(weekly), "Shut Down · Mon, Wed at 23:00"; got != want {
+		t.Fatalf("weekly summary = %q, want %q", got, want)
+	}
+	chinese := &panel{state: State{Chinese: true}, text: func(key string) string { return i18n.T("zh-CN", key) }}
+	window := automation.Rule{Action: automation.ActionStayAwake, Trigger: automation.TriggerTimeWindow, Time: "08:00", EndTime: "18:00", Days: []string{"mon", "tue", "wed", "thu", "fri"}}
+	if got, want := chinese.ruleSummary(window), "启用保持唤醒 · 08:00–18:00 · 工作日"; got != want {
+		t.Fatalf("time-window summary = %q, want %q", got, want)
+	}
+}
+
+func TestProcessTooltipBufferRemainsBoundedAcrossRefreshes(t *testing.T) {
+	err := Capture(State{}, func(key string) string { return key }, 1, false, true, func(hwnd windows.Handle) error {
+		p := activePanelForTest(t, hwnd)
+		p.draft.Processes = []automation.ProcessTarget{{Match: automation.MatchName, Executable: "player.exe"}}
+		p.refreshProcessInfoTooltip()
+		before := len(p.tooltipText)
+		if before == 0 {
+			t.Fatal("editor created no tooltip buffers")
+		}
+		for range 100 {
+			p.refreshProcessInfoTooltip()
+		}
+		if after := len(p.tooltipText); after != before {
+			t.Fatalf("tooltip buffers grew across refreshes: before=%d after=%d", before, after)
+		}
+		if len(p.tooltipText[idProcessInfo]) == 0 {
+			t.Fatal("process tooltip buffer was not retained")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

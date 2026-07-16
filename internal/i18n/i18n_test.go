@@ -107,7 +107,7 @@ func literalLocaleKey(call *ast.CallExpr) (string, bool) {
 		switch function.Sel.Name {
 		case "T":
 			argument = 1
-		case "text":
+		case "text", "t":
 			argument = 0
 		}
 	}
@@ -120,6 +120,20 @@ func literalLocaleKey(call *ast.CallExpr) (string, bool) {
 	}
 	key, err := strconv.Unquote(literal.Value)
 	return key, err == nil
+}
+
+func TestLiteralLocaleKeyRecognizesPanelTranslator(t *testing.T) {
+	expression, err := parser.ParseExpr(`panel.t("automation_title")`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, ok := expression.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("expression type = %T", expression)
+	}
+	if key, ok := literalLocaleKey(call); !ok || key != "automation_title" {
+		t.Fatalf("literalLocaleKey() = %q, %v", key, ok)
+	}
 }
 
 func TestVersionPlaceholder(t *testing.T) {
