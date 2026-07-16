@@ -71,10 +71,16 @@ type message struct {
 	Pt           point
 }
 
+type tabNavigationEntry struct {
+	hwnd        windows.Handle
+	onNavigated func()
+}
+
 var tabNavigation struct {
 	sync.RWMutex
 	hwnd        windows.Handle
 	onNavigated func()
+	stack       []tabNavigationEntry
 }
 
 var themeChangePending atomic.Bool
@@ -100,25 +106,54 @@ func notifyThemeChange() {
 	}()
 }
 
-// SetTabNavigationWindow restricts standard dialog Tab navigation to one
-// modeless window. Only WM_KEYDOWN/VK_TAB messages addressed to that window or
-// one of its children are passed to IsDialogMessageW; all other messages stay
-// on the normal tray message path.
+// SetTabNavigationWindow activates standard dialog Tab navigation for one
+// modeless window. Nested owned dialogs temporarily stack the previous window.
+// Only WM_KEYDOWN/VK_TAB messages addressed to the active window or one of its
+// children are passed to IsDialogMessageW.
 func SetTabNavigationWindow(hwnd windows.Handle, onNavigated func()) {
 	tabNavigation.Lock()
+	if tabNavigation.hwnd == hwnd {
+		tabNavigation.onNavigated = onNavigated
+		tabNavigation.Unlock()
+		return
+	}
+	filtered := tabNavigation.stack[:0]
+	for _, entry := range tabNavigation.stack {
+		if entry.hwnd != hwnd {
+			filtered = append(filtered, entry)
+		}
+	}
+	tabNavigation.stack = filtered
+	if tabNavigation.hwnd != 0 {
+		tabNavigation.stack = append(tabNavigation.stack, tabNavigationEntry{hwnd: tabNavigation.hwnd, onNavigated: tabNavigation.onNavigated})
+	}
 	tabNavigation.hwnd = hwnd
 	tabNavigation.onNavigated = onNavigated
 	tabNavigation.Unlock()
 }
 
-// ClearTabNavigationWindow removes a window's Tab-navigation registration.
-// The handle check prevents an older popup's destruction from clearing a newer
-// popup registration.
+// ClearTabNavigationWindow removes a window's registration and restores the
+// previous owned window when the active dialog closes.
 func ClearTabNavigationWindow(hwnd windows.Handle) {
 	tabNavigation.Lock()
 	if tabNavigation.hwnd == hwnd {
-		tabNavigation.hwnd = 0
-		tabNavigation.onNavigated = nil
+		if last := len(tabNavigation.stack) - 1; last >= 0 {
+			entry := tabNavigation.stack[last]
+			tabNavigation.stack = tabNavigation.stack[:last]
+			tabNavigation.hwnd = entry.hwnd
+			tabNavigation.onNavigated = entry.onNavigated
+		} else {
+			tabNavigation.hwnd = 0
+			tabNavigation.onNavigated = nil
+		}
+	} else {
+		filtered := tabNavigation.stack[:0]
+		for _, entry := range tabNavigation.stack {
+			if entry.hwnd != hwnd {
+				filtered = append(filtered, entry)
+			}
+		}
+		tabNavigation.stack = filtered
 	}
 	tabNavigation.Unlock()
 }

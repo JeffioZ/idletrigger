@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/JeffioZ/idletrigger/internal/automation"
 )
 
 func TestCoordinatesRejectNonFiniteValues(t *testing.T) {
@@ -163,7 +165,13 @@ func TestSaveToWritesAnnotatedConfigThatParses(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "IdleTrigger.toml")
 	cfg := DefaultConfig()
 	cfg.Language = "zh-CN"
-	cfg.ProcessWatchList = []string{"chrome.exe", "powerpnt.exe"}
+	cfg.AutomationRules = []automation.Rule{{
+		ID: "presentation-awake", Name: "Presentation", Enabled: true,
+		Action: automation.ActionStayAwake, Trigger: automation.TriggerProcessRunning,
+		ProcessLogic: automation.ProcessAny,
+		Processes:    []automation.ProcessTarget{{Match: automation.MatchName, Executable: "powerpnt.exe"}},
+		IdleMinutes:  automation.DefaultIdleMinutes,
+	}}
 	cfg.ThemeLatitude = 31.2304
 	cfg.ThemeLongitude = 121.4737
 	if err := saveTo(path, cfg); err != nil {
@@ -177,10 +185,12 @@ func TestSaveToWritesAnnotatedConfigThatParses(t *testing.T) {
 	for _, want := range []string{
 		configTemplateVersionMarker(),
 		"# -- 保持唤醒 / Stay Awake --",
+		"# -- 自动任务 / Automatic Tasks --",
 		"# -- 空闲监测 / Idle Monitor --",
 		"# -- 昼夜主题 / Day/Night Theme --",
 		"# -- 设置 / Settings --",
-		"process_watch_list = [\"chrome.exe\", \"powerpnt.exe\"]",
+		"[[automation_rules]]",
+		"executable = \"powerpnt.exe\"",
 		"theme_latitude = 31.2304",
 		"theme_longitude = 121.4737",
 	} {
@@ -198,7 +208,7 @@ func TestSaveToWritesAnnotatedConfigThatParses(t *testing.T) {
 	if err := parsed.Validate(); err != nil {
 		t.Fatalf("validate saved config: %v", err)
 	}
-	if len(parsed.ProcessWatchList) != 2 || parsed.ProcessWatchList[0] != "chrome.exe" || parsed.ThemeLatitude != 31.2304 {
+	if len(parsed.AutomationRules) != 1 || parsed.AutomationRules[0].ID != "presentation-awake" || parsed.ThemeLatitude != 31.2304 {
 		t.Fatalf("parsed config mismatch: %+v", parsed)
 	}
 }
@@ -210,7 +220,6 @@ func TestLoadFromRefreshesExistingPlainConfig(t *testing.T) {
 		"idle_timeout_minutes = 5",
 		"idle_action = \"lock\"",
 		"nosleep_enabled = true",
-		"process_watch_list = [\"obs64.exe\"]",
 		"theme_mode = \"fixed\"",
 		"theme_light_time = \"08:30\"",
 		"theme_dark_time = \"20:45\"",
@@ -227,8 +236,7 @@ func TestLoadFromRefreshesExistingPlainConfig(t *testing.T) {
 		cfg.IdleTimeoutMinutes != 5 ||
 		cfg.IdleAction != ActionLock ||
 		!cfg.NoSleepEnabled ||
-		len(cfg.ProcessWatchList) != 1 ||
-		cfg.ProcessWatchList[0] != "obs64.exe" ||
+		len(cfg.AutomationRules) != 0 ||
 		cfg.ThemeLightTime != "08:30" ||
 		cfg.ThemeDarkTime != "20:45" {
 		t.Fatalf("loaded config mismatch: %+v", cfg)
@@ -258,7 +266,7 @@ func TestLoadFromRefreshesExistingPlainConfig(t *testing.T) {
 		"idle_timeout_minutes = 5",
 		"idle_action = \"lock\"",
 		"nosleep_enabled = true",
-		"process_watch_list = [\"obs64.exe\"]",
+		"automation_enabled = true",
 		"theme_light_time = \"08:30\"",
 		"theme_dark_time = \"20:45\"",
 		"language = \"zh-CN\"",
@@ -357,8 +365,7 @@ func assertConfigFieldsPresent(t *testing.T, text string) {
 		"keep_screen_on =",
 		"nosleep_on_battery =",
 		"nosleep_battery_threshold =",
-		"process_watch_enabled =",
-		"process_watch_list =",
+		"automation_enabled =",
 		"idle_timeout_minutes =",
 		"idle_action =",
 		"idle_warning_seconds =",
@@ -390,7 +397,8 @@ func assertConfigOrder(t *testing.T, text string) {
 	needles := []string{
 		"# -- 保持唤醒 / Stay Awake --",
 		"nosleep_enabled =",
-		"process_watch_list =",
+		"# -- 自动任务 / Automatic Tasks --",
+		"automation_enabled =",
 		"# -- 空闲监测 / Idle Monitor --",
 		"idle_timeout_minutes =",
 		"# -- 昼夜主题 / Day/Night Theme --",

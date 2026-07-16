@@ -15,6 +15,7 @@ import (
 	"github.com/JeffioZ/idletrigger/internal/ui/controlpanel"
 	"github.com/JeffioZ/idletrigger/internal/ui/trayicon"
 	"strings"
+	"time"
 )
 
 func (s *runtimeState) reloadConfig() error {
@@ -34,7 +35,7 @@ func (s *runtimeState) reloadConfig() error {
 	}
 	s.stopMonitor()
 	s.stopHotkeys()
-	s.stopProcessWatcher()
+	s.stopAutomation()
 	s.stopThemeScheduler()
 	keepawake.Disable()
 	// Config compatibility: if both NoSleep and idle monitor are enabled,
@@ -49,7 +50,7 @@ func (s *runtimeState) reloadConfig() error {
 	if s.cfg.HotkeysEnabled {
 		s.startHotkeys()
 	}
-	s.syncProcessWatcher()
+	s.startAutomation()
 	if s.cfg.ThemeSwitchEnabled {
 		s.startThemeScheduler()
 	}
@@ -57,29 +58,19 @@ func (s *runtimeState) reloadConfig() error {
 	s.reconcileRuntime()
 	s.updateIcon()
 	s.rememberConfigModTime()
-	trayicon.Post(controlpanel.Hide)
+	trayicon.Post(func() {
+		hideAutomationUI()
+		controlpanel.Hide()
+	})
 	return nil
 }
 
 func (s *runtimeState) fmtNoSleepStatus() string {
-	if keepawake.IsEnabled() {
-		value := i18n.T(s.lang, "status_enabled")
-		if keepawake.IsKeepingScreenOn() {
-			value = i18n.T(s.lang, "status_enabled_keep_screen")
-		}
-		return s.statusLine("status_nosleep", value)
-	}
-	return s.statusLine("status_nosleep", i18n.T(s.lang, "status_disabled"))
+	return s.statusLine("status_nosleep", s.noSleepStatusText())
 }
 
 func (s *runtimeState) fmtStatus() string {
-	ns := i18n.T(s.lang, "status_disabled")
-	if keepawake.IsEnabled() {
-		ns = i18n.T(s.lang, "status_enabled")
-		if keepawake.IsKeepingScreenOn() {
-			ns = i18n.T(s.lang, "status_enabled_keep_screen")
-		}
-	}
+	ns := s.noSleepStatusText()
 	mon := s.monitorStatusText()
 	ps := powerstate.GetStatus()
 	pow := i18n.T(s.lang, "status_unknown")
@@ -98,11 +89,16 @@ func (s *runtimeState) fmtStatus() string {
 	if s.cfg.HotkeysEnabled {
 		hk = i18n.T(s.lang, "status_enabled")
 	}
+	automationStatus := i18n.T(s.lang, "status_disabled")
+	if s.cfg.AutomationEnabled {
+		automationStatus = fmt.Sprintf(i18n.T(s.lang, "status_automation_count"), s.enabledAutomationCount())
+	}
 
 	return strings.Join([]string{
 		s.statusLine("status_tray", i18n.T(s.lang, "status_running")),
 		s.statusLine("status_nosleep", ns),
 		s.statusLine("status_monitor", mon),
+		s.statusLine("status_automation", automationStatus),
 		s.statusLine("status_power", pow),
 		s.statusLine("status_idle_time", idleText),
 		s.statusLine("status_hotkeys", hk),
@@ -118,14 +114,34 @@ func (s *runtimeState) monitorStatusText() string {
 		if s.devtools.IdleMonitorEnabled() {
 			return s.developerIdleMonitorStatus()
 		}
+		threshold, _, action, _ := s.effectiveIdleMonitorSettings()
 		return fmt.Sprintf(
 			i18n.T(s.lang, "status_monitor_active"),
-			s.cfg.IdleTimeoutMinutes,
-			i18n.T(s.lang, actionTranslationKey(s.cfg.IdleAction)),
+			int(threshold/time.Minute),
+			i18n.T(s.lang, actionTranslationKey(action)),
 		)
 	}
 	if s.idleSuspended() {
 		return i18n.T(s.lang, "status_paused_by_nosleep")
+	}
+	if s.idleAutomationPaused() {
+		return i18n.T(s.lang, "status_paused_by_automation")
+	}
+	return i18n.T(s.lang, "status_disabled")
+}
+
+func (s *runtimeState) noSleepStatusText() string {
+	if s.noSleepAutomationPaused() {
+		return i18n.T(s.lang, "status_paused_by_automation")
+	}
+	if s.noSleepRequested() && s.batteryBlocked {
+		return i18n.T(s.lang, "status_paused_by_battery")
+	}
+	if keepawake.IsKeepingScreenOn() {
+		return i18n.T(s.lang, "status_enabled_keep_screen")
+	}
+	if keepawake.IsEnabled() {
+		return i18n.T(s.lang, "status_enabled")
 	}
 	return i18n.T(s.lang, "status_disabled")
 }
@@ -177,6 +193,7 @@ func actionTranslationKey(a config.Action) string {
 // switchLanguage updates the active language, refreshes all menu text,
 // and persists the choice.
 func (s *runtimeState) switchLanguage(lang string) {
+	trayicon.Post(hideAutomationUI)
 	s.lang = lang
 	s.cfg.Language = lang
 	s.applyLanguage()

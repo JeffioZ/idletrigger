@@ -45,6 +45,32 @@ func TestTabNavigationMessageScope(t *testing.T) {
 	}
 }
 
+func TestNestedTabNavigationRestoresOwner(t *testing.T) {
+	tabNavigation.Lock()
+	tabNavigation.hwnd = 0
+	tabNavigation.onNavigated = nil
+	tabNavigation.stack = nil
+	tabNavigation.Unlock()
+	t.Cleanup(func() {
+		tabNavigation.Lock()
+		tabNavigation.hwnd = 0
+		tabNavigation.onNavigated = nil
+		tabNavigation.stack = nil
+		tabNavigation.Unlock()
+	})
+
+	owner, child, warning := windows.Handle(100), windows.Handle(200), windows.Handle(300)
+	SetTabNavigationWindow(owner, nil)
+	SetTabNavigationWindow(child, nil)
+	SetTabNavigationWindow(warning, nil)
+	ClearTabNavigationWindow(child)
+	ClearTabNavigationWindow(warning)
+	if tabNavigation.hwnd != owner || len(tabNavigation.stack) != 0 {
+		t.Fatalf("active=%d stack=%+v", tabNavigation.hwnd, tabNavigation.stack)
+	}
+	ClearTabNavigationWindow(owner)
+}
+
 func TestThemeChangeMessageScope(t *testing.T) {
 	for _, message := range []uint32{wmSettingChange, wmSysColorChange, wmThemeChanged} {
 		if !isThemeChangeMessage(message) {

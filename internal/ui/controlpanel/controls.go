@@ -76,30 +76,22 @@ func (p *panel) build() error {
 		return height, nil
 	}
 	y := pad
-	if err := section(p.text("menu_nosleep"), y); err != nil {
+	if err := section(p.text("menu_power_management"), y); err != nil {
 		return err
 	}
 	y += sectionH + labelGap
-	height, err := choiceRow(pad, y, baseW-2*pad, []string{p.text("menu_nosleep_enable"), p.text("menu_process_watch")}, []uint16{idNoSleep, idProcess})
+	height, err := choiceRow(pad, y, baseW-2*pad, []string{p.text("menu_nosleep_enable"), p.text("menu_idle_enable")}, []uint16{idNoSleep, idIdle})
 	if err != nil {
 		return err
 	}
-	y += height + sectionGap
-	if err := section(p.text("menu_idle_enable"), y); err != nil {
-		return err
-	}
-	y += sectionH + labelGap
-	childX := pad
-	childW := baseW - 2*pad
-	idleLabel := p.text("menu_idle_enable_short")
-	if p.idlePaused {
-		idleLabel = p.text("menu_idle_paused")
-	}
-	height, err = choiceRow(childX, y, childW, []string{idleLabel, p.text("menu_idle_warning"), p.text("menu_idle_enhanced")}, []uint16{idIdle, idIdleWarning, idIdleEnhanced})
+	y += height + 4
+	height, err = choiceRow(pad, y, baseW-2*pad, []string{p.text("menu_idle_warning"), p.text("menu_idle_enhanced")}, []uint16{idIdleWarning, idIdleEnhanced})
 	if err != nil {
 		return err
 	}
 	y += height + gap
+	childX := pad
+	childW := baseW - 2*pad
 	fieldW := (childW - gap) / 2
 	if p.developerWarningPreview {
 		if err := button(p.text("msg_idle_warning_test"), childX, y, fieldW, buttonH, idTestWarning); err != nil {
@@ -119,6 +111,20 @@ func (p *panel) build() error {
 		return err
 	}
 	if err := choice(idIdleAction, secondX, y, fieldW, buttonH, actionLabels(p), actionIndex(p.idleAction)); err != nil {
+		return err
+	}
+	y += buttonH + sectionGap
+	if err := section(p.text("menu_automation_section"), y); err != nil {
+		return err
+	}
+	y += sectionH + labelGap
+	automationSummaryID := p.staticID(staticSubtitle)
+	p.automationSummaryID = automationSummaryID
+	if _, err := p.child("STATIC", p.automationSummary, wsChild|wsVisible|ssOwnerDraw, pad, y, baseW-2*pad, subtitleH, automationSummaryID, 0); err != nil {
+		return err
+	}
+	y += subtitleH + labelGap
+	if _, err = choiceRow(pad, y, baseW-2*pad, []string{p.text("automation_master"), p.text("menu_automation_manage")}, []uint16{idAutomationEnabled, idAutomation}); err != nil {
 		return err
 	}
 	y += buttonH + sectionGap
@@ -324,7 +330,7 @@ func (p *panel) projectHomeTextVerticalOffset() int {
 
 func roleForButton(id uint16) buttonRole {
 	switch id {
-	case idNoSleep, idProcess, idIdle, idIdleWarning, idIdleEnhanced,
+	case idNoSleep, idAutomationEnabled, idIdle, idIdleWarning, idIdleEnhanced,
 		idTheme, idBattery, idFullscreen, idIPLocation, idHotkeys, idAutostart, idLogging:
 		return buttonToggle
 	case idLangEN, idLangZH:

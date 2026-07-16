@@ -69,7 +69,8 @@ const (
 	ActLock
 	ActRestart
 	ActNoSleepToggle
-	ActProcessWatchToggle
+	ActAutomationOpen
+	ActAutomationToggle
 	ActIdleToggle
 	ActIdleTimeout Action = 100 + iota
 	ActIdleAction
@@ -91,24 +92,26 @@ const (
 )
 
 type State struct {
-	NoSleepEnabled, ProcessWatchEnabled, IdleEnabled, IdlePaused bool
-	IdleWarningEnabled                                           bool
-	IdleEnhancedMonitor                                          bool
-	IdleTimeout                                                  int
-	IdleWarningSeconds                                           int
-	IdleAction                                                   string
-	ProcessWatchList                                             []string
-	ProcessWatchActive                                           bool
-	ThemeSwitchEnabled, DarkOnBattery, SkipFullscreen            bool
-	IPLocationEnabled                                            bool
-	HotkeysEnabled, AutostartEnabled, LoggingEnabled             bool
-	IsChinese                                                    bool
-	ThemeSchedule                                                string
-	IPLocationLabel                                              string
-	AppVersion                                                   string
-	Theme                                                        Theme
-	Owner                                                        windows.Handle
-	DeveloperCapturePanel, DeveloperWarningPreview               bool
+	NoSleepEnabled, IdleEnabled                       bool
+	NoSleepStatus, IdleStatus                         string
+	AutomationEnabled                                 bool
+	AutomationCount                                   int
+	AutomationSummary                                 string
+	IdleWarningEnabled                                bool
+	IdleEnhancedMonitor                               bool
+	IdleTimeout                                       int
+	IdleWarningSeconds                                int
+	IdleAction                                        string
+	ThemeSwitchEnabled, DarkOnBattery, SkipFullscreen bool
+	IPLocationEnabled                                 bool
+	HotkeysEnabled, AutostartEnabled, LoggingEnabled  bool
+	IsChinese                                         bool
+	ThemeSchedule                                     string
+	IPLocationLabel                                   string
+	AppVersion                                        string
+	Theme                                             Theme
+	Owner                                             windows.Handle
+	DeveloperCapturePanel, DeveloperWarningPreview    bool
 }
 
 type LangFunc func(key string) string
@@ -229,7 +232,8 @@ const (
 	idQuickActions      = 6
 	idQuickMenu         = 7
 	idNoSleep           = 10
-	idProcess           = 11
+	idAutomation        = 11
+	idAutomationEnabled = 12
 	idIdle              = 20
 	idIdleWarning       = 21
 	idIdleEnhanced      = 22
@@ -384,9 +388,11 @@ type panel struct {
 	keyboardNavigation      bool
 	nextStaticID            uint16
 	themeScheduleID         uint16
-	idlePaused              bool
-	processWatchList        []string
-	processWatchActive      bool
+	automationSummaryID     uint16
+	noSleepStatus           string
+	idleStatus              string
+	automationCount         int
+	automationSummary       string
 	developerCapturePanel   bool
 	developerWarningPreview bool
 	quickMenuOpen           bool

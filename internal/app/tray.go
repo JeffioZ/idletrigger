@@ -42,8 +42,8 @@ func (s *runtimeState) buildTooltip() string {
 		lines = append(lines, s.statusLine("tooltip_idle", shortStatus(s.lang, false)))
 	}
 	lines = append(lines, s.statusLine("tooltip_theme", s.themeTooltipValueShort()))
-	if s.cfg.ProcessWatchEnabled || len(s.cfg.ProcessWatchList) > 0 {
-		lines = append(lines, s.statusLine("tooltip_process", s.processTooltipValueShort()))
+	if count := s.enabledAutomationCount(); count > 0 {
+		lines = append(lines, s.statusLine("tooltip_automation", fmt.Sprintf(i18n.T(s.lang, "status_automation_count"), count)))
 	}
 	return tooltipText(lines)
 }
@@ -77,19 +77,6 @@ func (s *runtimeState) themeTooltipValueShort() string {
 		return i18n.T(s.lang, "status_short_on") + " " + compactThemeSchedule(schedule)
 	}
 	return i18n.T(s.lang, "status_short_on")
-}
-
-func (s *runtimeState) processTooltipValueShort() string {
-	if len(effectiveProcessWatchList(s.cfg)) == 0 {
-		return i18n.T(s.lang, "status_process_not_configured")
-	}
-	if !s.cfg.ProcessWatchEnabled {
-		return shortStatus(s.lang, false)
-	}
-	if s.processNoSleep {
-		return i18n.T(s.lang, "status_process_matched")
-	}
-	return i18n.T(s.lang, "status_process_waiting")
 }
 
 func compactThemeSchedule(schedule string) string {

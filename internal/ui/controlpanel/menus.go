@@ -126,7 +126,6 @@ func (p *panel) setDisabled(id uint16, value bool) {
 }
 
 func (p *panel) applyDependentStates() {
-	p.setDisabled(idProcess, !p.toggles[idNoSleep])
 	monitorEnabled := p.toggles[idIdle]
 	p.setDisabled(idIdleWarning, !monitorEnabled)
 	p.setDisabled(idIdleEnhanced, !monitorEnabled)

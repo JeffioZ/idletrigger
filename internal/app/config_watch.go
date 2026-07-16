@@ -18,9 +18,9 @@ func (s *runtimeState) applyLogging() {
 		mylog.Info("Debug logging enabled from control panel")
 		ps := powerstate.GetStatus()
 		s.logPowerState("logging-enabled", ps)
-		mylog.Info("Runtime snapshot: nosleep_configured=%v process_watch_enabled=%v process_list_count=%d process_match=%v wants_nosleep=%v battery_blocked=%v keepawake_enabled=%v keep_screen_on=%v idle_timeout_min=%d monitor_running=%v",
-			s.cfg.NoSleepEnabled, s.cfg.ProcessWatchEnabled, len(effectiveProcessWatchList(s.cfg)), s.processNoSleep,
-			noSleepRequested(s.cfg, s.processNoSleep), batteryPolicyBlocks(s.cfg, ps), keepawake.IsEnabled(),
+		mylog.Info("Runtime snapshot: nosleep_configured=%v automation_enabled=%v automation_rules=%d automation_active=%d wants_nosleep=%v battery_blocked=%v keepawake_enabled=%v keep_screen_on=%v idle_timeout_min=%d monitor_running=%v",
+			s.cfg.NoSleepEnabled, s.cfg.AutomationEnabled, s.enabledAutomationCount(), len(s.autoState.ActiveRuleIDs),
+			s.noSleepRequested(), batteryPolicyBlocks(s.cfg, ps), keepawake.IsEnabled(),
 			keepawake.IsKeepingScreenOn(), s.cfg.IdleTimeoutMinutes, s.mon != nil)
 		return
 	}

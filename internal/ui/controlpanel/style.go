@@ -1,6 +1,9 @@
 package controlpanel
 
-import "github.com/JeffioZ/idletrigger/internal/feature/theme"
+import (
+	"github.com/JeffioZ/idletrigger/internal/feature/theme"
+	"github.com/JeffioZ/idletrigger/internal/ui/nativeform"
+)
 
 // Theme selects the visual source for one panel. ThemeFollowSystem preserves
 // normal application behavior; explicit values are reserved for deterministic
@@ -44,19 +47,19 @@ type panelStyle struct {
 
 var defaultPanelStyle = panelStyle{
 	Layout: layoutTokens{
-		PanelWidth: 472, Padding: 18, Gap: 8, SectionGap: 14, LabelGap: 2,
-		ButtonHeight: 36, SectionHeight: 22, SubtitleHeight: 18,
-		QuickMenuRowHeight: 34, QuickMenuRowGap: 1,
+		PanelWidth: 472, Padding: nativeform.FormPadding, Gap: nativeform.ControlGap, SectionGap: nativeform.SectionGap, LabelGap: nativeform.LabelGap,
+		ButtonHeight: nativeform.ButtonHeight, SectionHeight: 22, SubtitleHeight: 18,
+		QuickMenuRowHeight: nativeform.MenuRowHeight, QuickMenuRowGap: nativeform.MenuRowGap,
 	},
 	Fonts: fontTokens{
 		BodySize: 14, SectionSize: 14, SubtitleSize: 12,
 		BodyWeight: 400, SectionWeight: 700, SubtitleWeight: 600,
 	},
 	Control: controlTokens{
-		CornerRadius: 6, ToggleBoxSize: 16, ButtonTextInset: 8, ToggleTextGap: 8, ToggleLeftInset: 2,
+		CornerRadius: nativeform.CornerRadius, ToggleBoxSize: 16, ButtonTextInset: 8, ToggleTextGap: 8, ToggleLeftInset: 2,
 		FocusInset: 2, FocusRingWidth: 2, MenuFocusInset: 3,
 		ArrowWidth: 8, ArrowHeight: 4, SelectedMarkerWidth: 3,
-		MenuHintWidth: 28, MenuHintHeight: 1, MenuSurfaceInset: 4,
+		MenuHintWidth: 28, MenuHintHeight: 1, MenuSurfaceInset: nativeform.MenuSurfaceInset,
 		MenuSurfaceWidthCompensation: 1,
 		IconLarge:                    32, IconSmall: 16,
 	},

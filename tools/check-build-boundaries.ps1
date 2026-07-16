@@ -94,4 +94,32 @@ Test-LayerBoundary $packages ($module + 'logging') @(
     $module + 'i18n', $module + 'platform', $module + 'ui'
 )
 
+# Process-triggered automation is metadata-only. Keep this boundary explicit
+# so future changes cannot quietly add injection, memory access, or forced
+# process termination behavior.
+$processSafetyRoots = @(
+    (Join-Path $PSScriptRoot '..\internal\platform\windows\processcatalog'),
+    (Join-Path $PSScriptRoot '..\internal\feature\autorules')
+)
+$forbiddenProcessAPIs = @(
+    'PROCESS_ALL_ACCESS',
+    'SeDebugPrivilege',
+    'AdjustTokenPrivileges',
+    'ReadProcessMemory',
+    'WriteProcessMemory',
+    'VirtualAllocEx',
+    'CreateRemoteThread',
+    'TerminateProcess'
+)
+foreach ($root in $processSafetyRoots) {
+    foreach ($source in Get-ChildItem -LiteralPath $root -Filter '*.go' -File) {
+        $text = Get-Content -Raw -Encoding UTF8 -LiteralPath $source.FullName
+        foreach ($api in $forbiddenProcessAPIs) {
+            if ($text.Contains($api, [StringComparison]::OrdinalIgnoreCase)) {
+                throw "process automation safety boundary violated: $($source.FullName) contains $api"
+            }
+        }
+    }
+}
+
 Write-Output 'Build dependency boundaries: OK'

@@ -7,8 +7,11 @@ import (
 
 	"golang.org/x/sys/windows"
 
+	"github.com/JeffioZ/idletrigger/internal/automation"
 	"github.com/JeffioZ/idletrigger/internal/config"
 	"github.com/JeffioZ/idletrigger/internal/devtools"
+	"github.com/JeffioZ/idletrigger/internal/feature/autorules"
+	idlefeature "github.com/JeffioZ/idletrigger/internal/feature/idle"
 	"github.com/JeffioZ/idletrigger/internal/platform/windows/powerstate"
 )
 
@@ -36,26 +39,27 @@ func TestOpenWithShellBuildsNativeArguments(t *testing.T) {
 
 func TestNoSleepRequestSources(t *testing.T) {
 	cfg := config.DefaultConfig()
-	if noSleepRequested(cfg, false) {
+	state := runtimeState{cfg: cfg}
+	if state.noSleepRequested() {
 		t.Fatal("unexpected request")
 	}
-	if noSleepRequested(cfg, true) {
-		t.Fatal("process request should not enable Stay Awake by itself")
+	state.autoState.StayAwake = true
+	if !state.noSleepRequested() {
+		t.Fatal("automatic task request was ignored")
 	}
-	cfg.NoSleepEnabled = true
-	if !noSleepRequested(cfg, false) {
+	state.autoState.StayAwake = false
+	state.cfg.NoSleepEnabled = true
+	if !state.noSleepRequested() {
 		t.Fatal("user request was ignored")
 	}
-	cfg.ProcessWatchEnabled = true
-	if !noSleepRequested(cfg, false) {
-		t.Fatal("empty process list should not block Stay Awake")
+	state.autoState.PauseStayAwake = true
+	if state.noSleepRequested() {
+		t.Fatal("automatic pause did not override the user request")
 	}
-	cfg.ProcessWatchList = []string{"obs64.exe"}
-	if noSleepRequested(cfg, false) {
-		t.Fatal("configured process watch should wait for a matching process")
-	}
-	if !noSleepRequested(cfg, true) {
-		t.Fatal("matching process should allow enabled Stay Awake")
+	state.autoState.PauseStayAwake = false
+	state.cfg.NoSleepEnabled = false
+	if state.noSleepRequested() {
+		t.Fatal("cleared sources still requested Stay Awake")
 	}
 }
 
@@ -188,15 +192,13 @@ func TestPowerEventClassification(t *testing.T) {
 
 func TestRuntimeModeConfigTransitions(t *testing.T) {
 	cfg := config.DefaultConfig()
-	cfg.ProcessWatchEnabled = true
-	cfg.ProcessWatchList = []string{"obs64.exe"}
 	setNoSleepConfig(&cfg, true, true)
-	if !cfg.NoSleepEnabled || !cfg.KeepScreenOn || cfg.IdleTimeoutMinutes != 0 || !shouldRunProcessWatcher(cfg) {
+	if !cfg.NoSleepEnabled || !cfg.KeepScreenOn || cfg.IdleTimeoutMinutes != 0 {
 		t.Fatalf("Stay Awake transition = %+v", cfg)
 	}
 
 	setIdleTimeoutConfig(&cfg, 90)
-	if cfg.NoSleepEnabled || cfg.IdleTimeoutMinutes != 90 || shouldRunProcessWatcher(cfg) {
+	if cfg.NoSleepEnabled || cfg.IdleTimeoutMinutes != 90 {
 		t.Fatalf("idle-monitor transition = %+v", cfg)
 	}
 }
@@ -351,18 +353,16 @@ func TestTooltipTitleAddsReleaseVersion(t *testing.T) {
 	}
 }
 
-func TestProcessMatchDoesNotSuspendIdleWhenStayAwakeIsOff(t *testing.T) {
+func TestAutomationTaskDoesNotSuspendIdleWithoutAwakeRequest(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Language = "zh-CN"
 	cfg.IdleTimeoutMinutes = 30
-	cfg.ProcessWatchEnabled = true
-	cfg.ProcessWatchList = []string{"obs64.exe"}
-	state := runtimeState{cfg: cfg, lang: "zh-CN", processNoSleep: true}
+	state := runtimeState{cfg: cfg, lang: "zh-CN", autoState: autorules.EffectiveState{EnableIdle: true}}
 	if state.idleSuspended() {
-		t.Fatal("process match should not suspend idle monitoring when Stay Awake is off")
+		t.Fatal("non-awake automatic task should not suspend idle monitoring")
 	}
-	if got := state.monitorStatusText(); got != "已禁用" {
-		t.Fatalf("monitor status = %q, want disabled", got)
+	if !state.idleMonitorRequested() {
+		t.Fatal("automatic idle task should request idle monitoring")
 	}
 }
 
@@ -383,21 +383,83 @@ func TestIdleSuspendedByEffectiveKeepAwake(t *testing.T) {
 	}
 }
 
-func TestProcessWatchHelpersTreatEmptyListAsNormal(t *testing.T) {
+func TestAutomaticIdleStatusUsesEffectiveDuration(t *testing.T) {
 	cfg := config.DefaultConfig()
+	cfg.Language = "zh-CN"
+	cfg.IdleTimeoutMinutes = 0
+	cfg.IdleAction = config.ActionLock
+	state := runtimeState{
+		cfg:       cfg,
+		lang:      "zh-CN",
+		autoState: autorules.EffectiveState{EnableIdle: true, IdleMinutes: 45},
+		mon:       &idlefeature.Monitor{},
+	}
+	if got := state.monitorStatusText(); got != "45 分钟 → 锁定" {
+		t.Fatalf("automatic idle status = %q", got)
+	}
+}
+
+func TestStayAwakeStatusExplainsBatteryPause(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Language = "zh-CN"
 	cfg.NoSleepEnabled = true
-	cfg.ProcessWatchEnabled = true
-	cfg.ProcessWatchList = []string{"", " OBS64.exe ", "obs64.exe", "Code.exe"}
-	got := effectiveProcessWatchList(cfg)
-	if strings.Join(got, ",") != "OBS64.exe,Code.exe" {
-		t.Fatalf("effective list = %v", got)
+	state := runtimeState{cfg: cfg, lang: "zh-CN", batteryBlocked: true}
+	if got := state.noSleepStatusText(); got != "已由电池策略暂停" {
+		t.Fatalf("Stay Awake status = %q", got)
 	}
-	cfg.ProcessWatchList = nil
-	if !noSleepRequested(cfg, false) {
-		t.Fatal("empty process list should not disable Stay Awake")
+}
+
+func TestAutomationKeepScreenRequestIsIndependent(t *testing.T) {
+	state := runtimeState{cfg: config.DefaultConfig()}
+	state.autoState = autorules.EffectiveState{StayAwake: true, KeepScreenOn: true}
+	if !state.noSleepRequested() || !state.effectiveKeepScreenOn() {
+		t.Fatal("automatic Stay Awake screen request was ignored")
 	}
-	if shouldRunProcessWatcher(cfg) {
-		t.Fatal("empty process list should not start watcher")
+	state.cfg.NoSleepEnabled = true
+	state.cfg.KeepScreenOn = false
+	if !state.effectiveKeepScreenOn() {
+		t.Fatal("manual source must not clear an automatic screen request")
+	}
+	state.autoState = autorules.EffectiveState{}
+	if state.effectiveKeepScreenOn() {
+		t.Fatal("screen-on request remained after the automatic source ended")
+	}
+}
+
+func TestStayAwakeStatusExplainsAutomationPause(t *testing.T) {
+	state := runtimeState{cfg: config.DefaultConfig(), lang: "zh-CN"}
+	state.cfg.NoSleepEnabled = true
+	state.autoState.PauseStayAwake = true
+	if got := state.noSleepStatusText(); got != "已由自动任务暂停" {
+		t.Fatalf("status = %q", got)
+	}
+}
+
+func TestAutomationOverviewText(t *testing.T) {
+	now := time.Date(2026, 7, 15, 23, 0, 0, 0, time.Local)
+	tests := []struct {
+		name    string
+		enabled bool
+		rules   []automation.Rule
+		next    time.Time
+		want    string
+	}{
+		{name: "empty", enabled: true, want: "尚未创建任务"},
+		{name: "paused", rules: []automation.Rule{{Enabled: true}, {Enabled: false}}, want: "自动任务已暂停 · 已配置 2 条"},
+		{name: "enabled", enabled: true, rules: []automation.Rule{{Enabled: true}, {Enabled: false}}, want: "已启用 1 条 · 暂无计划执行的系统操作"},
+		{name: "next", enabled: true, rules: []automation.Rule{{Enabled: true}}, next: now, want: "已启用 1 条 · 下次：2026-07-15 23:00"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			state := runtimeState{
+				cfg:       config.Config{AutomationEnabled: test.enabled, AutomationRules: test.rules},
+				lang:      "zh-CN",
+				autoState: autorules.EffectiveState{NextOccurrence: test.next},
+			}
+			if got := state.automationOverviewText(); got != test.want {
+				t.Fatalf("automationOverviewText() = %q, want %q", got, test.want)
+			}
+		})
 	}
 }
 

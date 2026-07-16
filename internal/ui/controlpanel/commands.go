@@ -40,6 +40,8 @@ func (p *panel) commandAction(id uint16) (Action, int, bool) {
 		return ActLock, 0, true
 	case idRestart:
 		return ActRestart, 0, true
+	case idAutomation:
+		return ActAutomationOpen, 0, true
 	case idThemeSwitch:
 		return ActSwitchTheme, 0, true
 	case idThemeRepair:
@@ -91,8 +93,8 @@ func (p *panel) toggleCommand(id uint16) (Action, bool) {
 	switch id {
 	case idNoSleep:
 		action = ActNoSleepToggle
-	case idProcess:
-		action = ActProcessWatchToggle
+	case idAutomationEnabled:
+		action = ActAutomationToggle
 	case idIdle:
 		action = ActIdleToggle
 	case idIdleWarning:

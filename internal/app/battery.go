@@ -14,7 +14,7 @@ import (
 // battery-aware feature is enabled. Windows power broadcasts still deliver
 // immediate changes; this loop catches battery-percentage threshold crossings.
 func (s *runtimeState) syncBatteryLoop() {
-	if s.cfg.NoSleepEnabled || s.cfg.ThemeSwitchEnabled {
+	if s.noSleepRequested() || s.cfg.ThemeSwitchEnabled {
 		if s.batteryStop != nil {
 			return
 		}
@@ -88,7 +88,7 @@ func (s *runtimeState) handlePowerEvent(event uint32) {
 	s.logPowerState(fmt.Sprintf("event:%s(0x%04x)", powerEventName(event), event), ps)
 	changed := s.refreshBatteryPolicyWithStatus(ps)
 	if isResumePowerEvent(event) && !changed {
-		if noSleepRequested(s.cfg, s.processNoSleep) && !s.batteryBlocked {
+		if s.noSleepRequested() && !s.batteryBlocked {
 			mylog.Info("Power resume: reasserting effective Stay Awake request")
 		}
 		s.reconcileRuntime()
@@ -98,7 +98,7 @@ func (s *runtimeState) handlePowerEvent(event uint32) {
 func (s *runtimeState) logPowerState(source string, ps powerstate.Status) {
 	mylog.Info("Power state: source=%s ac_line=%v battery=%v percent=%d charging=%v valid=%v nosleep_configured=%v wants_nosleep=%v nosleep_blocked=%v keepawake_enabled=%v keep_screen_on=%v reason=%s",
 		source, ps.ACLine, ps.Battery, ps.Percent, ps.Charging, ps.Valid,
-		s.cfg.NoSleepEnabled, noSleepRequested(s.cfg, s.processNoSleep), batteryPolicyBlocks(s.cfg, ps),
+		s.cfg.NoSleepEnabled, s.noSleepRequested(), batteryPolicyBlocks(s.cfg, ps),
 		keepawake.IsEnabled(), keepawake.IsKeepingScreenOn(), batteryPolicyReason(s.cfg, ps))
 }
 

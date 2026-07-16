@@ -1,11 +1,48 @@
 package controlpanel
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/JeffioZ/idletrigger/internal/ui/colors"
 	"golang.org/x/sys/windows"
 )
+
+func TestAutomationTooltipFormatsCountSummaryAndExplanation(t *testing.T) {
+	texts := map[string]string{
+		"tip_automation_status": "%d enabled\n%s\n%s",
+		"tip_automation":        "Built-in tasks only.",
+	}
+	p := panel{automationCount: 2, automationSummary: "Next: 23:00", lang: func(key string) string { return texts[key] }}
+	got := p.tooltipText(idAutomation)
+	if got != "2 enabled\nNext: 23:00\nBuilt-in tasks only." || strings.Contains(got, "%!") {
+		t.Fatalf("automation tooltip = %q", got)
+	}
+}
+
+func TestPowerManagementTooltipSeparatesManualAndRuntimeState(t *testing.T) {
+	texts := map[string]string{
+		"tip_power_setting_status": "Manual setting: %s.\nRuntime status: %s.\n%s",
+		"tip_state_enabled":        "on",
+		"tip_state_disabled":       "off",
+		"tip_nosleep":              "Stay Awake help.",
+		"tip_idle":                 "Idle help.",
+		"status_unknown":           "Unknown",
+	}
+	p := panel{
+		lang:          func(key string) string { return texts[key] },
+		noSleepStatus: "Enabled by an automatic task",
+		idleStatus:    "Paused by Stay Awake",
+		toggles:       map[uint16]bool{idNoSleep: false, idIdle: true},
+		disabled:      map[uint16]bool{},
+	}
+	if got := p.tooltipText(idNoSleep); got != "Manual setting: off.\nRuntime status: Enabled by an automatic task.\nStay Awake help." {
+		t.Fatalf("Stay Awake tooltip = %q", got)
+	}
+	if got := p.tooltipText(idIdle); got != "Manual setting: on.\nRuntime status: Paused by Stay Awake.\nIdle help." {
+		t.Fatalf("idle tooltip = %q", got)
+	}
+}
 
 func TestProjectHomeLinkColorUsesASeparateLightHoverRamp(t *testing.T) {
 	light := colors.ForTheme(false)
@@ -216,12 +253,12 @@ func TestSharedMenuRowsFitExactAvailableHeight(t *testing.T) {
 }
 
 func TestButtonRoleMappingCoversEveryPanelAction(t *testing.T) {
-	for _, id := range []uint16{idNoSleep, idProcess, idIdle, idIdleWarning, idIdleEnhanced, idTheme, idBattery, idFullscreen, idIPLocation, idHotkeys, idAutostart, idLogging} {
+	for _, id := range []uint16{idNoSleep, idAutomationEnabled, idIdle, idIdleWarning, idIdleEnhanced, idTheme, idBattery, idFullscreen, idIPLocation, idHotkeys, idAutostart, idLogging} {
 		if got := roleForButton(id); got != buttonToggle {
 			t.Fatalf("toggle id %d has role %d", id, got)
 		}
 	}
-	for _, id := range []uint16{idQuickActions, idLock, idSleep, idHibernate, idShutdown, idRestart, idThemeSwitch, idThemeRepair, idConfig, idProjectHome, idExit, idTestWarning} {
+	for _, id := range []uint16{idQuickActions, idAutomation, idLock, idSleep, idHibernate, idShutdown, idRestart, idThemeSwitch, idThemeRepair, idConfig, idProjectHome, idExit, idTestWarning} {
 		if got := roleForButton(id); got != buttonCommand {
 			t.Fatalf("command id %d has role %d", id, got)
 		}
@@ -550,7 +587,7 @@ func TestEveryControlPanelActionHasAUICommandPath(t *testing.T) {
 		ActLanguage:    true,
 	}
 	for _, id := range []uint16{
-		idSleep, idHibernate, idShutdown, idLock, idRestart,
+		idAutomation, idSleep, idHibernate, idShutdown, idLock, idRestart,
 		idThemeSwitch, idThemeRepair, idConfig, idProjectHome, idExit,
 	} {
 		action, _, ok := p.commandAction(id)
@@ -560,7 +597,7 @@ func TestEveryControlPanelActionHasAUICommandPath(t *testing.T) {
 		mapped[action] = true
 	}
 	for _, id := range []uint16{
-		idNoSleep, idProcess, idIdle, idIdleWarning, idIdleEnhanced,
+		idNoSleep, idAutomationEnabled, idIdle, idIdleWarning, idIdleEnhanced,
 		idTheme, idBattery, idFullscreen, idIPLocation,
 		idHotkeys, idAutostart, idLogging,
 	} {

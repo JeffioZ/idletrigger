@@ -2,7 +2,6 @@ package controlpanel
 
 import (
 	"fmt"
-	"strings"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -80,11 +79,16 @@ func (p *panel) tooltipText(id uint16) string {
 	case idRestart:
 		key = "tip_restart"
 	case idNoSleep:
-		key = "tip_nosleep"
-	case idProcess:
-		return p.withStateTooltip(id, p.processWatchTooltip())
+		return p.withPowerStatusTooltip(id, p.noSleepStatus, p.text("tip_nosleep"))
+	case idAutomation:
+		if p.automationSummary != "" {
+			return fmt.Sprintf(p.text("tip_automation_status"), p.automationCount, p.automationSummary, p.text("tip_automation"))
+		}
+		key = "tip_automation"
+	case idAutomationEnabled:
+		key = "tip_automation_master"
 	case idIdle:
-		key = "tip_idle"
+		return p.withPowerStatusTooltip(id, p.idleStatus, p.text("tip_idle"))
 	case idIdleWarning:
 		key = "tip_idle_warning"
 	case idIdleEnhanced:
@@ -130,6 +134,17 @@ func (p *panel) tooltipText(id uint16) string {
 	return p.withStateTooltip(id, p.text(key))
 }
 
+func (p *panel) withPowerStatusTooltip(id uint16, runtimeStatus, body string) string {
+	manualKey := "tip_state_disabled"
+	if p.visualState(id).Active {
+		manualKey = "tip_state_enabled"
+	}
+	if runtimeStatus == "" {
+		runtimeStatus = p.text("status_unknown")
+	}
+	return fmt.Sprintf(p.text("tip_power_setting_status"), p.text(manualKey), runtimeStatus, body)
+}
+
 func (p *panel) withStateTooltip(id uint16, body string) string {
 	state := p.visualState(id)
 	switch state.Role {
@@ -148,15 +163,4 @@ func (p *panel) withStateTooltip(id uint16, body string) string {
 	default:
 		return body
 	}
-}
-
-func (p *panel) processWatchTooltip() string {
-	if len(p.processWatchList) == 0 {
-		return p.text("tip_process_watch_empty")
-	}
-	status := p.text("tip_process_watch_waiting")
-	if p.processWatchActive {
-		status = p.text("tip_process_watch_active")
-	}
-	return fmt.Sprintf(p.text("tip_process_watch_configured"), status, strings.Join(p.processWatchList, ", "))
 }

@@ -3,6 +3,8 @@
 // plain-text TOML — users can edit it directly.
 package config
 
+import "github.com/JeffioZ/idletrigger/internal/automation"
+
 // Action is a system power action.
 type Action string
 
@@ -40,7 +42,7 @@ func IdleActionIndex(action Action) int {
 	return -1
 }
 
-const configTemplateVersion = 8
+const configTemplateVersion = 11
 
 // Config holds all user-configurable settings.
 type Config struct {
@@ -79,14 +81,12 @@ type Config struct {
 	// HotkeysEnabled enables global keyboard shortcuts.
 	HotkeysEnabled bool `toml:"hotkeys_enabled"`
 
-	// ProcessWatchEnabled limits Stay Awake to applicable processes when Stay
-	// Awake is enabled. If no listed process is running, no keep-awake request
-	// is made. It does not activate Stay Awake by itself.
-	ProcessWatchEnabled bool `toml:"process_watch_enabled"`
+	// AutomationEnabled is the master switch for built-in automatic tasks.
+	AutomationEnabled bool `toml:"automation_enabled"`
 
-	// ProcessWatchList is a list of applicable case-insensitive .exe names.
-	// Empty means Stay Awake is not process-limited.
-	ProcessWatchList []string `toml:"process_watch_list"`
+	// AutomationRules contains only built-in actions. It cannot launch custom
+	// commands, scripts, services, or arbitrary executables.
+	AutomationRules []automation.Rule `toml:"automation_rules"`
 
 	// LoggingEnabled writes debug logs to IdleTrigger.log.
 	LoggingEnabled bool `toml:"logging_enabled"`
@@ -114,7 +114,8 @@ type Config struct {
 	// ThemeDarkOnBattery switches to dark mode when on battery.
 	ThemeDarkOnBattery bool `toml:"theme_dark_on_battery"`
 
-	// ThemeSkipFullscreen prevents switching during fullscreen apps/games.
+	// ThemeSkipFullscreen prevents switching during fullscreen apps,
+	// presentation mode, or sustained foreground 3D activity.
 	ThemeSkipFullscreen bool `toml:"theme_skip_fullscreen"`
 
 	// AutostartEnabled mirrors the current user's registry Run entry. It is
@@ -135,8 +136,8 @@ func DefaultConfig() Config {
 		NoSleepOnBattery:        false,
 		NoSleepBatteryThreshold: 20,
 		HotkeysEnabled:          false,
-		ProcessWatchEnabled:     false,
-		ProcessWatchList:        nil,
+		AutomationEnabled:       true,
+		AutomationRules:         nil,
 		LoggingEnabled:          false,
 		ThemeSwitchEnabled:      false,
 		ThemeLightTime:          "07:00",

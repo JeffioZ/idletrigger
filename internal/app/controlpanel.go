@@ -3,6 +3,7 @@ package app
 import (
 	"github.com/JeffioZ/idletrigger/internal/i18n"
 	mylog "github.com/JeffioZ/idletrigger/internal/logging"
+	"github.com/JeffioZ/idletrigger/internal/ui/automationpanel"
 	"github.com/JeffioZ/idletrigger/internal/ui/controlpanel"
 	"github.com/JeffioZ/idletrigger/internal/ui/trayicon"
 	"github.com/JeffioZ/idletrigger/internal/version"
@@ -14,6 +15,9 @@ type controlPanelSnapshot struct {
 }
 
 func (s *runtimeState) showControlPanel() {
+	if automationpanel.Focus() {
+		return
+	}
 	s.openControlPanel(false)
 }
 
@@ -34,16 +38,17 @@ func (s *runtimeState) prepareControlPanel(refresh bool) {
 		result <- controlPanelSnapshot{
 			state: controlpanel.State{
 				NoSleepEnabled:          s.cfg.NoSleepEnabled,
-				ProcessWatchEnabled:     s.cfg.ProcessWatchEnabled,
-				IdleEnabled:             s.idleMonitorRequested(),
-				IdlePaused:              s.idleSuspended(),
+				NoSleepStatus:           s.noSleepStatusText(),
+				AutomationEnabled:       s.cfg.AutomationEnabled,
+				AutomationCount:         s.enabledAutomationCount(),
+				AutomationSummary:       s.automationOverviewText(),
+				IdleEnabled:             s.cfg.IdleTimeoutMinutes > 0,
+				IdleStatus:              s.monitorStatusText(),
 				IdleWarningEnabled:      s.cfg.IdleWarningSeconds > 0,
 				IdleEnhancedMonitor:     s.cfg.IdleEnhancedMonitor,
 				IdleTimeout:             s.cfg.IdleTimeoutMinutes,
 				IdleWarningSeconds:      s.cfg.IdleWarningSeconds,
 				IdleAction:              string(s.cfg.IdleAction),
-				ProcessWatchList:        effectiveProcessWatchList(s.cfg),
-				ProcessWatchActive:      s.processNoSleep,
 				ThemeSwitchEnabled:      s.cfg.ThemeSwitchEnabled,
 				DarkOnBattery:           s.cfg.ThemeDarkOnBattery,
 				SkipFullscreen:          s.cfg.ThemeSkipFullscreen,
@@ -79,4 +84,17 @@ func (s *runtimeState) prepareControlPanel(refresh bool) {
 			mylog.Info("Control panel open failed: %v", err)
 		}
 	})
+}
+
+func (s *runtimeState) refreshControlPanelAutomationStatus() {
+	count := s.enabledAutomationCount()
+	summary := s.automationOverviewText()
+	enabled := s.cfg.AutomationEnabled
+	trayicon.Post(func() { controlpanel.UpdateAutomationStatus(enabled, count, summary) })
+}
+
+func (s *runtimeState) refreshControlPanelPowerStatus() {
+	noSleepStatus := s.noSleepStatusText()
+	idleStatus := s.monitorStatusText()
+	trayicon.Post(func() { controlpanel.UpdatePowerManagementStatus(noSleepStatus, idleStatus) })
 }

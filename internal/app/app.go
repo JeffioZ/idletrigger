@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"github.com/JeffioZ/idletrigger/internal/config"
 	"github.com/JeffioZ/idletrigger/internal/devtools"
+	"github.com/JeffioZ/idletrigger/internal/feature/autorules"
 	"github.com/JeffioZ/idletrigger/internal/feature/idle"
 	"github.com/JeffioZ/idletrigger/internal/feature/keepawake"
-	"github.com/JeffioZ/idletrigger/internal/feature/processwatch"
 	"github.com/JeffioZ/idletrigger/internal/feature/theme"
 	"github.com/JeffioZ/idletrigger/internal/i18n"
 	mylog "github.com/JeffioZ/idletrigger/internal/logging"
@@ -62,22 +62,25 @@ type runtimeState struct {
 
 	mon *idle.Monitor
 
-	hotkeyMgr            *hotkey.Manager
-	procWatch            *processwatch.Watcher
-	themeSched           *theme.Scheduler
-	batteryStop          chan struct{}
-	batteryDone          chan struct{}
-	ipLocationRetry      *time.Timer
-	ipLocationGeneration uint64
-	ipLocationRetried    bool
-	processNoSleep       bool
-	batteryBlocked       bool
-	trayThemeDark        bool
-	menuOpen             *trayicon.MenuItem
-	menuExit             *trayicon.MenuItem
-	selfConfigMod        atomic.Int64
-	selfConfigWrite      atomic.Bool
-	exiting              atomic.Bool
+	hotkeyMgr             *hotkey.Manager
+	autoRunner            *autorules.Runner
+	autoState             autorules.EffectiveState
+	automationStatePath   string
+	automationEvents      []autorules.Event
+	automationWarningOpen bool
+	themeSched            *theme.Scheduler
+	batteryStop           chan struct{}
+	batteryDone           chan struct{}
+	ipLocationRetry       *time.Timer
+	ipLocationGeneration  uint64
+	ipLocationRetried     bool
+	batteryBlocked        bool
+	trayThemeDark         bool
+	menuOpen              *trayicon.MenuItem
+	menuExit              *trayicon.MenuItem
+	selfConfigMod         atomic.Int64
+	selfConfigWrite       atomic.Bool
+	exiting               atomic.Bool
 }
 
 type runtimeRequest struct {
@@ -125,6 +128,7 @@ func Run(cfg config.Config, cbs Callbacks) {
 		go func() {
 			for range s.menuExit.ClickedCh {
 				trayicon.Post(func() {
+					hideAutomationUI()
 					controlpanel.Destroy()
 					trayicon.Quit()
 				})
@@ -157,8 +161,7 @@ func Run(cfg config.Config, cbs Callbacks) {
 			s.startHotkeys()
 		}
 
-		// Process watcher
-		s.syncProcessWatcher()
+		s.startAutomation()
 		if s.cfg.ThemeSwitchEnabled {
 			s.startThemeScheduler()
 		}
@@ -186,6 +189,7 @@ func Run(cfg config.Config, cbs Callbacks) {
 
 	onExit := func() {
 		s.exiting.Store(true)
+		hideAutomationUI()
 		lifecycleMu.Lock()
 		defer lifecycleMu.Unlock()
 		shuttingDown = true
@@ -194,7 +198,7 @@ func Run(cfg config.Config, cbs Callbacks) {
 			s.stopIPLocationCycle()
 			s.stopMonitor()
 			s.stopHotkeys()
-			s.stopProcessWatcher()
+			s.stopAutomation()
 			s.stopThemeScheduler()
 			s.stopBatteryLoop()
 			keepawake.Disable()

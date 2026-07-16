@@ -3,6 +3,7 @@
 package theme
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -61,12 +62,16 @@ type Scheduler struct {
 	darkOnBattery  bool
 	stopCh         chan struct{}
 	doneCh         chan struct{}
+	wakeCh         chan struct{}
 	running        bool
 	mu             sync.Mutex
 	checkMu        sync.Mutex
 	manualUntil    atomic.Int64
 	logMu          sync.Mutex
 	lastSwitchErr  string
+	lastPauseKey   string
+	lastPauseErr   string
+	pauseCheck     func(<-chan struct{}) (ThemeSwitchPauseReason, error)
 }
 
 // NewScheduler creates a Scheduler.
@@ -79,6 +84,7 @@ func NewScheduler(mode, lightTime, darkTime string, lat, lon float64, skipFullsc
 		longitude:      lon,
 		skipFullscreen: skipFullscreen,
 		darkOnBattery:  darkOnBattery,
+		pauseCheck:     DetectThemeSwitchPause,
 	}
 }
 
@@ -91,8 +97,9 @@ func (s *Scheduler) Start() {
 	}
 	s.stopCh = make(chan struct{})
 	s.doneCh = make(chan struct{})
+	s.wakeCh = make(chan struct{}, 1)
 	s.running = true
-	go s.loop(s.stopCh, s.doneCh)
+	go s.loop(s.stopCh, s.doneCh, s.wakeCh)
 }
 
 // Stop signals the loop to exit.
@@ -110,29 +117,42 @@ func (s *Scheduler) Stop() {
 	<-doneCh
 }
 
-func (s *Scheduler) loop(stopCh <-chan struct{}, doneCh chan<- struct{}) {
+func (s *Scheduler) loop(stopCh <-chan struct{}, doneCh chan<- struct{}, wakeCh <-chan struct{}) {
 	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
 	defer close(doneCh)
-	s.check(time.Now())
+	s.check(time.Now(), stopCh)
 	for {
 		select {
 		case <-stopCh:
 			return
+		case <-wakeCh:
+			s.check(time.Now(), stopCh)
 		case now := <-ticker.C:
-			s.check(now)
+			s.check(now, stopCh)
 		}
 	}
 }
 
-// CheckNow evaluates the current power/time policy immediately. It is used
-// when Windows power state changes so dark-on-battery does not wait for the
-// regular scheduler tick.
+// CheckNow queues an immediate power/time policy evaluation. It is used when
+// Windows power state changes so dark-on-battery does not wait for the regular
+// scheduler tick. The evaluation stays on the scheduler goroutine because its
+// optional foreground-GPU sampling must never block the application state loop.
 func (s *Scheduler) CheckNow() {
 	if s == nil {
 		return
 	}
-	s.check(time.Now())
+	s.mu.Lock()
+	if !s.running {
+		s.mu.Unlock()
+		return
+	}
+	wakeCh := s.wakeCh
+	s.mu.Unlock()
+	select {
+	case wakeCh <- struct{}{}:
+	default:
+	}
 }
 
 // HoldManualOverride keeps a user-selected theme until the next scheduled
@@ -162,17 +182,13 @@ func (s *Scheduler) HoldManualOverride(now time.Time) {
 	s.manualUntil.Store(next.UnixNano())
 }
 
-func (s *Scheduler) check(now time.Time) {
+func (s *Scheduler) check(now time.Time, cancel <-chan struct{}) {
 	s.checkMu.Lock()
 	defer s.checkMu.Unlock()
 	// If dark-on-battery is enabled and running on battery, force dark.
 	if s.darkOnBattery && onBattery() {
-		if Current() != ModeDark && (!s.skipFullscreen || !IsFullscreen()) {
-			if err := Switch(ModeDark); err != nil {
-				s.logSwitchFailure("battery", ModeDark, err)
-			} else {
-				s.clearSwitchFailure()
-			}
+		if Current() != ModeDark {
+			s.switchIfAllowed("battery", ModeDark, cancel)
 		}
 		return
 	}
@@ -205,15 +221,32 @@ func (s *Scheduler) check(now time.Time) {
 	}
 
 	if Current() != target {
-		// Skip switch during fullscreen apps/games if configured.
-		if s.skipFullscreen && IsFullscreen() {
+		s.switchIfAllowed("schedule", target, cancel)
+	}
+}
+
+func (s *Scheduler) switchIfAllowed(source string, target Mode, cancel <-chan struct{}) {
+	if s.skipFullscreen && s.pauseCheck != nil {
+		reason, err := s.pauseCheck(cancel)
+		if errors.Is(err, errThemeEnvironmentCheckCanceled) {
 			return
 		}
-		if err := Switch(target); err != nil {
-			s.logSwitchFailure("schedule", target, err)
+		if err != nil {
+			s.logPauseCheckFailure(err)
 		} else {
-			s.clearSwitchFailure()
+			s.clearPauseCheckFailure()
 		}
+		if reason != ThemeSwitchPauseNone {
+			s.logThemeSwitchPause(source, target, reason)
+			return
+		}
+		s.clearThemeSwitchPause()
+	}
+
+	if err := Switch(target); err != nil {
+		s.logSwitchFailure(source, target, err)
+	} else {
+		s.clearSwitchFailure()
 	}
 }
 
@@ -232,6 +265,42 @@ func (s *Scheduler) logSwitchFailure(reason string, target Mode, err error) {
 func (s *Scheduler) clearSwitchFailure() {
 	s.logMu.Lock()
 	s.lastSwitchErr = ""
+	s.logMu.Unlock()
+}
+
+func (s *Scheduler) logThemeSwitchPause(source string, target Mode, reason ThemeSwitchPauseReason) {
+	key := fmt.Sprintf("%s|%s|%s", source, themeModeName(target), reason)
+	s.logMu.Lock()
+	if s.lastPauseKey == key {
+		s.logMu.Unlock()
+		return
+	}
+	s.lastPauseKey = key
+	s.logMu.Unlock()
+	mylog.Info("Theme switch paused: source=%s target=%s reason=%s", source, themeModeName(target), reason)
+}
+
+func (s *Scheduler) clearThemeSwitchPause() {
+	s.logMu.Lock()
+	s.lastPauseKey = ""
+	s.logMu.Unlock()
+}
+
+func (s *Scheduler) logPauseCheckFailure(err error) {
+	key := err.Error()
+	s.logMu.Lock()
+	if s.lastPauseErr == key {
+		s.logMu.Unlock()
+		return
+	}
+	s.lastPauseErr = key
+	s.logMu.Unlock()
+	mylog.Info("Theme presentation-state detection unavailable; continuing with the scheduled switch: error=%v", err)
+}
+
+func (s *Scheduler) clearPauseCheckFailure() {
+	s.logMu.Lock()
+	s.lastPauseErr = ""
 	s.logMu.Unlock()
 }
 

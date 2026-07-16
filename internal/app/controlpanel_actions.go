@@ -53,12 +53,6 @@ func (s *runtimeState) handleIdleControlAction(action controlpanel.Action, value
 	switch action {
 	case controlpanel.ActNoSleepToggle:
 		s.toggleNoSleep()
-	case controlpanel.ActProcessWatchToggle:
-		s.cfg.ProcessWatchEnabled = !s.cfg.ProcessWatchEnabled
-		s.syncProcessWatcher()
-		s.reconcileRuntime()
-		s.updateIcon()
-		s.saveConfig()
 	case controlpanel.ActIdleToggle:
 		if s.cfg.IdleTimeoutMinutes > 0 {
 			s.setIdleTimeout(0)
@@ -152,6 +146,13 @@ func (s *runtimeState) handleThemeControlAction(action controlpanel.Action) bool
 
 func (s *runtimeState) handleGeneralControlAction(action controlpanel.Action, value int) {
 	switch action {
+	case controlpanel.ActAutomationToggle:
+		s.cfg.AutomationEnabled = !s.cfg.AutomationEnabled
+		s.restartAutomation()
+		s.saveConfig()
+		s.refreshControlPanelAutomationStatus()
+	case controlpanel.ActAutomationOpen:
+		s.showAutomationManager()
 	case controlpanel.ActHotkeyToggle:
 		s.cfg.HotkeysEnabled = !s.cfg.HotkeysEnabled
 		if s.cfg.HotkeysEnabled {
@@ -205,6 +206,7 @@ func (s *runtimeState) handleGeneralControlAction(action controlpanel.Action, va
 		}
 	case controlpanel.ActExit:
 		trayicon.Post(func() {
+			hideAutomationUI()
 			controlpanel.Destroy()
 			trayicon.Quit()
 		})

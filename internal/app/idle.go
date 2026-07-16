@@ -33,10 +33,9 @@ func (s *runtimeState) startMonitor() {
 		s.cfg.IdleEnhancedMonitor, 20*time.Second, 2*time.Minute, 5*time.Second, 3)
 	lang := s.lang
 	warningSeconds := int(warnOffset / time.Second)
-	processWatchEnabled := s.cfg.ProcessWatchEnabled
-	processListCount := len(effectiveProcessWatchList(s.cfg))
-	noSleepEnabled := s.cfg.NoSleepEnabled
-	keepScreenOn := s.cfg.KeepScreenOn
+	noSleepEnabled := s.noSleepRequested()
+	keepScreenOn := s.effectiveKeepScreenOn()
+	automationActiveCount := len(s.autoState.ActiveRuleIDs)
 	enhancedIdleMonitor := s.cfg.IdleEnhancedMonitor
 	sampleLogInterval := 5 * time.Second
 	if developerTest {
@@ -113,11 +112,11 @@ func (s *runtimeState) startMonitor() {
 		}
 		lastSampleLog = now
 		if snap, err := idle.Snapshot(); err == nil {
-			mylog.Info("Idle monitor sample: effective_idle=%s raw_idle=%s raw_delta_ms=%d threshold=%s warn_at=%s last_input=%d tick_now=%d clamped_to_start=%v warned=%v triggered=%v input_timestamp=%v enhanced_idle_monitor=%v nosleep_enabled=%v keep_screen_on=%v process_watch_enabled=%v process_list_count=%d",
+			mylog.Info("Idle monitor sample: effective_idle=%s raw_idle=%s raw_delta_ms=%d threshold=%s warn_at=%s last_input=%d tick_now=%d clamped_to_start=%v warned=%v triggered=%v input_timestamp=%v enhanced_idle_monitor=%v nosleep_requested=%v keep_screen_on=%v automation_rules_active=%d",
 				sample.Idle.Round(time.Millisecond), snap.Idle.Round(time.Millisecond), snap.RawDeltaMS,
 				sample.Threshold, sample.WarnAt, sample.LastInputTick, snap.NowTick64,
 				sample.StartWindowClamped, sample.Warned, sample.Triggered, sample.InputTimestampAvailable,
-				enhancedIdleMonitor, noSleepEnabled, keepScreenOn, processWatchEnabled, processListCount)
+				enhancedIdleMonitor, noSleepEnabled, keepScreenOn, automationActiveCount)
 		} else {
 			mylog.Info("Idle monitor sample: effective_idle=%s threshold=%s warn_at=%s last_input=%d clamped_to_start=%v warned=%v triggered=%v input_timestamp=%v snapshot_error=%v",
 				sample.Idle.Round(time.Millisecond), sample.Threshold, sample.WarnAt, sample.LastInputTick,
@@ -138,20 +137,22 @@ func (s *runtimeState) stopMonitor() {
 }
 
 func (s *runtimeState) reconcileRuntime() {
+	defer s.refreshControlPanelPowerStatus()
 	s.syncBatteryLoop()
-	wantsNoSleep := noSleepRequested(s.cfg, s.processNoSleep)
-	mylog.Info("Runtime reconcile: nosleep_enabled=%v process_watch_enabled=%v process_list_count=%d process_match=%v wants_nosleep=%v battery_blocked=%v idle_timeout_min=%d monitor_running=%v",
-		s.cfg.NoSleepEnabled, s.cfg.ProcessWatchEnabled, len(effectiveProcessWatchList(s.cfg)), s.processNoSleep, wantsNoSleep, s.batteryBlocked, s.cfg.IdleTimeoutMinutes, s.mon != nil)
+	wantsNoSleep := s.noSleepRequested()
+	keepScreenOn := s.effectiveKeepScreenOn()
+	mylog.Info("Runtime reconcile: nosleep_manual=%v nosleep_automation=%v automation_pause_nosleep=%v wants_nosleep=%v keep_screen_on=%v battery_blocked=%v idle_timeout_min=%d automation_idle=%v automation_pause_idle=%v monitor_running=%v",
+		s.cfg.NoSleepEnabled, s.autoState.StayAwake, s.autoState.PauseStayAwake, wantsNoSleep, keepScreenOn, s.batteryBlocked, s.cfg.IdleTimeoutMinutes, s.autoState.EnableIdle, s.autoState.PauseIdle, s.mon != nil)
 	if wantsNoSleep && !s.batteryBlocked {
 		if s.devtools.IdleMonitorEnabled() {
 			mylog.Info("Developer tools idle-monitor test suppressed: Stay Awake remains mutually exclusive; config_unchanged=true")
 		}
 		s.stopMonitor()
-		if err := keepawake.Enable(s.cfg.KeepScreenOn); err != nil {
-			mylog.Info("Stay Awake enable failed: api=SetThreadExecutionState continuous=true system_required=true display_required=%v error=%v", s.cfg.KeepScreenOn, err)
+		if err := keepawake.Enable(keepScreenOn); err != nil {
+			mylog.Info("Stay Awake enable failed: api=SetThreadExecutionState continuous=true system_required=true display_required=%v error=%v", keepScreenOn, err)
 			s.showError("menu_nosleep", err)
 		} else {
-			mylog.Info("Stay Awake enabled: api=SetThreadExecutionState continuous=true system_required=true display_required=%v", s.cfg.KeepScreenOn)
+			mylog.Info("Stay Awake enabled: api=SetThreadExecutionState continuous=true system_required=true display_required=%v", keepScreenOn)
 		}
 		return
 	}
@@ -164,31 +165,45 @@ func (s *runtimeState) reconcileRuntime() {
 	}
 }
 
-func noSleepRequested(cfg config.Config, processRequested bool) bool {
-	if !cfg.NoSleepEnabled {
-		return false
-	}
-	if !cfg.ProcessWatchEnabled || len(effectiveProcessWatchList(cfg)) == 0 {
-		return true
-	}
-	return processRequested
+func (s *runtimeState) noSleepRequested() bool {
+	return (s.cfg.NoSleepEnabled || s.autoState.StayAwake) && !s.autoState.PauseStayAwake
+}
+
+func (s *runtimeState) effectiveKeepScreenOn() bool {
+	return !s.autoState.PauseStayAwake && ((s.cfg.NoSleepEnabled && s.cfg.KeepScreenOn) || (s.autoState.StayAwake && s.autoState.KeepScreenOn))
+}
+
+func (s *runtimeState) noSleepAutomationPaused() bool {
+	return s.autoState.PauseStayAwake && (s.cfg.NoSleepEnabled || s.autoState.StayAwake)
 }
 
 // idleSuspended reports the intentional conflict resolution between effective
 // keep-awake and the idle action.
 func (s *runtimeState) idleSuspended() bool {
-	return s.idleMonitorRequested() && noSleepRequested(s.cfg, s.processNoSleep) && s.mon == nil
+	return s.idleMonitorDemanded() && s.noSleepRequested() && s.mon == nil
 }
 
 func (s *runtimeState) idleMonitorRequested() bool {
-	return s.cfg.IdleTimeoutMinutes > 0 || s.devtools.IdleMonitorEnabled()
+	return s.idleMonitorDemanded() && !s.autoState.PauseIdle
+}
+
+func (s *runtimeState) idleMonitorDemanded() bool {
+	return s.cfg.IdleTimeoutMinutes > 0 || s.autoState.EnableIdle || s.devtools.IdleMonitorEnabled()
+}
+
+func (s *runtimeState) idleAutomationPaused() bool {
+	return s.idleMonitorDemanded() && s.autoState.PauseIdle && !s.noSleepRequested() && s.mon == nil
 }
 
 func (s *runtimeState) effectiveIdleMonitorSettings() (time.Duration, time.Duration, config.Action, bool) {
 	if s.devtools.IdleMonitorEnabled() {
 		return time.Duration(s.devtools.IdleMonitorSeconds) * time.Second, 5 * time.Second, config.ActionLock, true
 	}
-	return time.Duration(s.cfg.IdleTimeoutMinutes) * time.Minute, time.Duration(s.cfg.IdleWarningSeconds) * time.Second, s.cfg.IdleAction, false
+	minutes := s.cfg.IdleTimeoutMinutes
+	if minutes <= 0 && s.autoState.EnableIdle {
+		minutes = s.autoState.IdleMinutes
+	}
+	return time.Duration(minutes) * time.Minute, time.Duration(s.cfg.IdleWarningSeconds) * time.Second, s.cfg.IdleAction, false
 }
 
 func (s *runtimeState) developerIdleMonitorStatus() string {

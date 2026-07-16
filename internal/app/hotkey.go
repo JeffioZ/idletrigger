@@ -63,14 +63,12 @@ func (s *runtimeState) toggleNoSleep() {
 
 func (s *runtimeState) setNoSleep(enabled, keepScreenOn bool) {
 	setNoSleepConfig(&s.cfg, enabled, keepScreenOn)
-	s.syncProcessWatcher()
 	s.reconcileRuntime()
 	s.updateIcon()
 }
 
 func (s *runtimeState) setIdleTimeout(minutes int) {
 	setIdleTimeoutConfig(&s.cfg, minutes)
-	s.syncProcessWatcher()
 	s.reconcileRuntime()
 	s.updateIcon()
 }
@@ -89,5 +87,3 @@ func setIdleTimeoutConfig(cfg *config.Config, minutes int) {
 		cfg.NoSleepEnabled = false
 	}
 }
-
-// ---- process watcher --------------------------------------------------

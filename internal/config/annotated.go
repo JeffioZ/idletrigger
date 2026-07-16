@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/JeffioZ/idletrigger/internal/automation"
 	"github.com/JeffioZ/idletrigger/internal/i18n"
 )
 
@@ -23,10 +24,15 @@ func renderAnnotatedTOML(cfg Config) string {
 	fmt.Fprintf(&b, "nosleep_on_battery = %t\n", cfg.NoSleepOnBattery)
 	b.WriteString("# 电池电量低于此百分比时强制关闭保持唤醒 / Force-disable Stay Awake below this battery percentage\n")
 	fmt.Fprintf(&b, "nosleep_battery_threshold = %d\n", cfg.NoSleepBatteryThreshold)
-	b.WriteString("# 保持唤醒已开启时，仅在下方任一 exe 运行时保活；没有匹配进程时不保活，也不会单独启用保持唤醒 / When Stay Awake is enabled, keep awake only while any listed exe is running; no match means no keep-awake request, and this does not enable Stay Awake by itself\n")
-	fmt.Fprintf(&b, "process_watch_enabled = %t\n", cfg.ProcessWatchEnabled)
-	b.WriteString("# 适用进程的 .exe 文件名，不区分大小写；空列表是正常状态，表示不按进程限制保持唤醒，也不影响空闲监测 / Applicable .exe names, case-insensitive; an empty list is valid, means Stay Awake is not process-limited, and does not affect idle monitoring\n")
-	fmt.Fprintf(&b, "process_watch_list = %s\n\n", tomlStringList(cfg.ProcessWatchList))
+	b.WriteString("\n")
+
+	b.WriteString("# -- 自动任务 / Automatic Tasks --\n")
+	b.WriteString("# 自动任务仅在 IdleTrigger 运行时生效；状态操作只临时覆盖运行状态，且只能执行内置操作，不会启动命令或脚本 / Automatic tasks work only while IdleTrigger is running; state actions are temporary runtime overrides, and only built-in actions are available—commands and scripts are never launched\n")
+	fmt.Fprintf(&b, "automation_enabled = %t\n", cfg.AutomationEnabled)
+	b.WriteString("# 任务建议通过控制界面创建；列表按进程名匹配全部同名实例，也可浏览选择指定 EXE，PID 和说明不会写入规则 / Create tasks from the control UI; list choices match all same-name instances, or Browse can select a specific EXE; PIDs and descriptions are not stored in rules\n")
+	b.WriteString("# 进程启动任务只在所选进程由无到有时触发；退出任务需所有同名实例退出并经过 5 秒宽限 / Process-start tasks fire only when selected processes change from none to any; exit tasks wait for all same-name instances plus a 5-second grace period\n")
+	b.WriteString("# 自动系统操作始终显示至少 10 秒的可取消倒计时 / Automatic system actions always show a cancellable countdown of at least 10 seconds\n")
+	b.WriteString("\n")
 
 	b.WriteString("# -- 空闲监测 / Idle Monitor --\n")
 	b.WriteString("# 空闲时长：无键鼠操作多少分钟后触发动作，设为 0 禁用 / Idle time in minutes before triggering after no keyboard or mouse input, 0 = disabled\n")
@@ -55,7 +61,7 @@ func renderAnnotatedTOML(cfg Config) string {
 	fmt.Fprintf(&b, "theme_ip_location_enabled = %t\n", cfg.ThemeIPLocationEnabled)
 	b.WriteString("# 电池供电时自动切换深色，接入电源后按当前计划恢复 / Switch to dark on battery, then restore by schedule on AC power\n")
 	fmt.Fprintf(&b, "theme_dark_on_battery = %t\n", cfg.ThemeDarkOnBattery)
-	b.WriteString("# 全屏应用或游戏运行时暂不自动切换主题 / Pause automatic theme switching during fullscreen apps/games\n")
+	b.WriteString("# 检测到全屏应用、演示模式或前台游戏活动时暂不自动切换主题 / Pause automatic theme switching during fullscreen apps, presentations, or foreground game activity\n")
 	fmt.Fprintf(&b, "theme_skip_fullscreen = %t\n\n", cfg.ThemeSkipFullscreen)
 
 	b.WriteString("# -- 设置 / Settings --\n")
@@ -65,6 +71,12 @@ func renderAnnotatedTOML(cfg Config) string {
 	fmt.Fprintf(&b, "logging_enabled = %t\n", cfg.LoggingEnabled)
 	b.WriteString("# 界面语言：\"auto\" 跟随系统，\"en\" 英文，\"zh-CN\" 简体中文 / UI language: \"auto\" follows OS, \"en\" English, \"zh-CN\" Simplified Chinese\n")
 	fmt.Fprintf(&b, "language = %s\n", tomlString(cfg.Language))
+
+	// TOML array-table entries remain active until another table begins, so
+	// rules must be written after every top-level setting.
+	for _, rule := range cfg.AutomationRules {
+		writeAutomationRule(&b, rule)
+	}
 
 	return b.String()
 }
@@ -82,6 +94,57 @@ func tomlStringList(values []string) string {
 		quoted = append(quoted, tomlString(value))
 	}
 	return "[" + strings.Join(quoted, ", ") + "]"
+}
+
+func writeAutomationRule(b *strings.Builder, rule automation.Rule) {
+	b.WriteString("\n[[automation_rules]]\n")
+	fmt.Fprintf(b, "id = %s\n", tomlString(rule.ID))
+	fmt.Fprintf(b, "name = %s\n", tomlString(rule.Name))
+	fmt.Fprintf(b, "enabled = %t\n", rule.Enabled)
+	fmt.Fprintf(b, "action = %s\n", tomlString(string(rule.Action)))
+	fmt.Fprintf(b, "trigger = %s\n", tomlString(string(rule.Trigger)))
+	if rule.Time != "" {
+		fmt.Fprintf(b, "time = %s\n", tomlString(rule.Time))
+	}
+	if rule.EndTime != "" {
+		fmt.Fprintf(b, "end_time = %s\n", tomlString(rule.EndTime))
+	}
+	if rule.Date != "" {
+		fmt.Fprintf(b, "date = %s\n", tomlString(rule.Date))
+	}
+	if len(rule.Days) > 0 {
+		fmt.Fprintf(b, "days = %s\n", tomlStringList(rule.Days))
+	}
+	if len(rule.Processes) > 0 {
+		fmt.Fprintf(b, "process_logic = %s\n", tomlString(string(rule.ProcessLogic)))
+		b.WriteString("processes = [")
+		for index, target := range rule.Processes {
+			if index > 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(b, "{ match = %s, executable = %s", tomlString(string(target.Match)), tomlString(target.Executable))
+			if target.Match == automation.MatchPath {
+				fmt.Fprintf(b, ", path = %s", tomlString(target.Path))
+			}
+			b.WriteString(" }")
+		}
+		b.WriteString("]\n")
+	}
+	if rule.KeepScreenOn {
+		b.WriteString("keep_screen_on = true\n")
+	}
+	if rule.Action == automation.ActionEnableIdle {
+		fmt.Fprintf(b, "idle_minutes = %d\n", rule.IdleMinutes)
+	}
+	if automation.IsEventAction(rule.Action) {
+		fmt.Fprintf(b, "warning_seconds = %d\n", rule.WarningSeconds)
+	}
+	if rule.BlockedPolicy != "" {
+		fmt.Fprintf(b, "blocked_policy = %s\n", tomlString(string(rule.BlockedPolicy)))
+	}
+	if rule.BlockedPolicy == automation.BlockedWait && rule.MaxWaitMinutes > 0 {
+		fmt.Fprintf(b, "max_wait_minutes = %d\n", rule.MaxWaitMinutes)
+	}
 }
 
 func tomlFloat(value float64) string {

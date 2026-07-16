@@ -72,14 +72,15 @@ func createPanelForHost(state State, onAction OnAction, langFn LangFunc, capture
 		themeSchedule:           state.ThemeSchedule,
 		ipLocationLabel:         state.IPLocationLabel,
 		appVersion:              state.AppVersion,
-		idlePaused:              state.IdlePaused,
+		noSleepStatus:           state.NoSleepStatus,
+		idleStatus:              state.IdleStatus,
 		idleTimeout:             state.IdleTimeout,
 		idleWarningSeconds:      state.IdleWarningSeconds,
 		idleAction:              state.IdleAction,
 		isChinese:               state.IsChinese,
 		owner:                   state.Owner,
-		processWatchList:        append([]string(nil), state.ProcessWatchList...),
-		processWatchActive:      state.ProcessWatchActive,
+		automationCount:         state.AutomationCount,
+		automationSummary:       state.AutomationSummary,
 		developerCapturePanel:   state.DeveloperCapturePanel,
 		developerWarningPreview: state.DeveloperWarningPreview,
 		controls:                make(map[uint16]windows.Handle),
@@ -88,8 +89,8 @@ func createPanelForHost(state State, onAction OnAction, langFn LangFunc, capture
 		nextStaticID:            700,
 		tooltips:                make(map[uint16][]uint16),
 		toggles: map[uint16]bool{
-			idNoSleep: state.NoSleepEnabled, idProcess: state.ProcessWatchEnabled,
-			idIdle: state.IdleEnabled && !state.IdlePaused, idIdleWarning: state.IdleWarningEnabled,
+			idNoSleep: state.NoSleepEnabled, idAutomationEnabled: state.AutomationEnabled,
+			idIdle: state.IdleEnabled, idIdleWarning: state.IdleWarningEnabled,
 			idIdleEnhanced: state.IdleEnhancedMonitor,
 			idTheme:        state.ThemeSwitchEnabled,
 			idBattery:      state.DarkOnBattery,
@@ -141,6 +142,62 @@ func Hide() {
 	if p != nil && p.hwnd != 0 {
 		pDestroyWindow.Call(uintptr(p.hwnd))
 	}
+}
+
+// WindowHandle returns the visible main panel HWND. Automatic-task dialogs use
+// it as their owner so Windows can enforce a real modal parent relationship.
+func WindowHandle() windows.Handle {
+	panelMu.Lock()
+	defer panelMu.Unlock()
+	if active == nil {
+		return 0
+	}
+	return active.hwnd
+}
+
+// UpdateAutomationStatus refreshes the independent automatic-task section
+// without rebuilding the main panel or disturbing keyboard focus.
+func UpdateAutomationStatus(enabled bool, count int, summary string) {
+	panelMu.Lock()
+	p := active
+	if p == nil || p.automationSummaryID == 0 {
+		panelMu.Unlock()
+		return
+	}
+	id := p.automationSummaryID
+	hwnd := p.controls[id]
+	p.automationCount = count
+	p.automationSummary = summary
+	p.toggles[idAutomationEnabled] = enabled
+	p.labels[id] = summary
+	panelMu.Unlock()
+
+	if hwnd != 0 {
+		pInvalidateRect.Call(uintptr(hwnd), 0, 1)
+	}
+	if toggle := p.controls[idAutomationEnabled]; toggle != 0 {
+		pInvalidateRect.Call(uintptr(toggle), 0, 1)
+	}
+	p.refreshTooltip(idAutomation)
+	p.refreshTooltip(idAutomationEnabled)
+}
+
+// UpdatePowerManagementStatus refreshes the effective runtime state shown in
+// the two power-management tooltips. The toggle visuals remain the user's
+// manual configuration even while an automatic task temporarily takes over.
+func UpdatePowerManagementStatus(noSleepStatus, idleStatus string) {
+	panelMu.Lock()
+	p := active
+	if p == nil {
+		panelMu.Unlock()
+		return
+	}
+	p.noSleepStatus = noSleepStatus
+	p.idleStatus = idleStatus
+	panelMu.Unlock()
+
+	p.refreshTooltip(idNoSleep)
+	p.refreshTooltip(idIdle)
 }
 
 // UpdateThemeSchedule refreshes the already visible Day/Night schedule line.
