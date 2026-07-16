@@ -249,8 +249,12 @@ func (p *panel) resizeInWorkArea(width, height int, workArea *nativeform.Rect) {
 	}
 	p.layoutErr = nil
 	p.syncContentViewport()
-	if p.view == editorView && p.editorReady && !p.layoutingEditor && p.viewportWidth != previousViewportWidth {
-		p.layoutEditor()
+	if p.viewportWidth != previousViewportWidth {
+		if p.view == editorView && p.editorReady && !p.layoutingEditor {
+			p.layoutEditor()
+		} else if p.view == managerView && p.managerReady {
+			p.layoutManager()
+		}
 	}
 }
 

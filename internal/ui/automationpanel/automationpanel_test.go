@@ -176,6 +176,25 @@ func TestAutomationWindowsRemainOperableAcrossDPIAndSmallWorkArea(t *testing.T) 
 	}
 }
 
+func TestManagerLayoutFitsCICompactViewport(t *testing.T) {
+	const viewportWidth = 514
+	contentWidth, standardWidth, toggleWidth := managerLayoutWidths(viewportWidth, true)
+	right := managerPad + 3*standardWidth + 3*managerButtonGap + toggleWidth
+	wantRight := managerPad + contentWidth
+	if right != wantRight {
+		t.Fatalf("compact button row right edge = %d, want content edge %d", right, wantRight)
+	}
+	limit := viewportWidth - managerPad - nativeform.ScrollbarWidth - 4
+	if right > limit {
+		t.Fatalf("compact button row right edge = %d, viewport limit %d", right, limit)
+	}
+
+	contentWidth, standardWidth, toggleWidth = managerLayoutWidths(managerWidth, false)
+	if contentWidth != 564 || standardWidth != 116 || toggleWidth != 192 {
+		t.Fatalf("normal manager layout = content %d standard %d toggle %d", contentWidth, standardWidth, toggleWidth)
+	}
+}
+
 func TestAutomationWindowsApplySuggestedRectAcrossDPIChanges(t *testing.T) {
 	for _, editor := range []bool{false, true} {
 		t.Run(map[bool]string{false: "manager", true: "editor"}[editor], func(t *testing.T) {

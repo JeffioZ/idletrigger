@@ -9,6 +9,12 @@ import (
 	"github.com/JeffioZ/idletrigger/internal/ui/nativeform"
 )
 
+const (
+	managerPad               = 18
+	managerButtonGap         = 8
+	managerCompactButtonBase = 116*3 + 192
+)
+
 func (p *panel) showManager() {
 	p.beginRebuild()
 	defer p.endRebuild()
@@ -47,10 +53,52 @@ func (p *panel) showManager() {
 		p.showControls(managerControlIDs())
 		p.setText(idNext, p.managerStatusText())
 	}
+	p.layoutManager()
 	if p.managerScroll != nil {
 		p.managerScroll.SetActive(true)
 	}
 	p.populateRules()
+}
+
+func (p *panel) layoutManager() {
+	if !p.managerReady {
+		return
+	}
+	contentWidth, standardWidth, toggleWidth := managerLayoutWidths(p.viewportWidth, p.clientHeight > p.viewportHeight)
+	p.setManagerBounds(idTitle, managerPad, 16, contentWidth, 24)
+	p.setManagerBounds(idListSurface, managerPad, 48, contentWidth, 240)
+	p.setManagerBounds(idList, managerPad+2, 50, max(1, contentWidth-4), 236)
+	p.setManagerBounds(idEmptyTitle, managerPad+24, 136, max(1, contentWidth-48), 24)
+	p.setManagerBounds(idEmptyBody, managerPad+24, 168, max(1, contentWidth-48), 44)
+	p.setManagerBounds(idNext, managerPad, 296, contentWidth, 24)
+
+	x := managerPad
+	for _, button := range []struct {
+		id    uint16
+		width int
+	}{{idNew, standardWidth}, {idEdit, standardWidth}, {idDelete, standardWidth}, {idToggle, toggleWidth}} {
+		p.setManagerBounds(button.id, x, 328, button.width, 36)
+		x += button.width + managerButtonGap
+	}
+	p.syncManagerScrollbarBounds()
+}
+
+func managerLayoutWidths(viewportWidth int, needsScrollbar bool) (contentWidth, standardWidth, toggleWidth int) {
+	layoutWidth := min(managerWidth, max(1, viewportWidth))
+	reserve := 0
+	if needsScrollbar {
+		reserve = nativeform.ScrollbarWidth + 4
+	}
+	contentWidth = max(1, layoutWidth-2*managerPad-reserve)
+	buttonSpace := max(4, contentWidth-3*managerButtonGap)
+	standardWidth = max(1, buttonSpace*116/managerCompactButtonBase)
+	toggleWidth = max(1, buttonSpace-3*standardWidth)
+	return contentWidth, standardWidth, toggleWidth
+}
+
+func (p *panel) setManagerBounds(id uint16, x, y, width, height int) {
+	p.bounds[id] = logicalBounds{X: x, Y: y, Width: width, Height: height}
+	p.positionControl(p.controls[id], x, y, width, height)
 }
 
 func (p *panel) syncManagerScrollbarBounds() {
