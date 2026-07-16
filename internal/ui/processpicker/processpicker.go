@@ -158,7 +158,7 @@ type picker struct {
 	controls         map[uint16]windows.Handle
 	bounds           map[uint16]logicalBounds
 	labels           map[uint16]string
-	surfaceFields    map[uint16]uint16
+	surfaces         nativeform.ControlSurfaceSet
 	font             windows.Handle
 	windowBrush      windows.Handle
 	surfaceBrush     windows.Handle
@@ -181,22 +181,20 @@ type picker struct {
 	captureScale     float64
 	themeOverride    *bool
 	generation       uint64
-	loading          bool
-	enriching        bool
+	viewPhase        pickerViewPhase
 	closed           atomic.Bool
 	cleanupOnce      sync.Once
 	workers          sync.WaitGroup
 	interaction      nativeform.InteractionTracker
 	stateImages      windows.Handle
 	header           windows.Handle
-	headerHover      int
-	headerPressed    int
 	scrollbar        *nativeform.Scrollbar
 	previewScroll    *nativeform.ListboxScrollbar
 	contentScroll    *nativeform.Scrollbar
-	searchCue        *nativeform.CueBanner
 	lastSnapshot     time.Time
 	lastScanDuration time.Duration
+	statusHoldUntil  time.Time
+	pendingStatus    string
 	anchorTopKey     string
 	anchorFocusKey   string
 	ownerDisabled    bool
@@ -263,7 +261,6 @@ const (
 	wsVScroll             = 0x00200000
 	wsExTopmost           = 0x00000008
 	wsExAppWindow         = 0x00040000
-	wsExComposited        = 0x02000000
 	esAutoHScroll         = 0x0080
 	lbsNoSelection        = 0x4000
 	lbsNoIntegralHeight   = 0x0100
@@ -273,6 +270,7 @@ const (
 	bsOwnerDraw           = 0x0000000B
 	ssLeft                = 0
 	ssOwnerDraw           = 0x0000000D
+	formSurfaceStyle      = wsChild | wsClipSiblings | ssOwnerDraw
 	lbAddString           = 0x0180
 	lbResetContent        = 0x0184
 	lvmFirst              = 0x1000
@@ -280,6 +278,7 @@ const (
 	lvmSetImageList       = lvmFirst + 3
 	lvmDeleteItem         = lvmFirst + 8
 	lvmDeleteAllItems     = lvmFirst + 9
+	lvmRedrawItems        = lvmFirst + 21
 	lvmGetHeader          = lvmFirst + 31
 	lvmGetColumnWidth     = lvmFirst + 29
 	lvmGetTopIndex        = lvmFirst + 39
@@ -329,11 +328,6 @@ const (
 	opaque                = 2
 	sbHorz                = 0
 	sbVert                = 1
-	rdwInvalidate         = 0x0001
-	rdwErase              = 0x0004
-	rdwAllChildren        = 0x0080
-	rdwUpdateNow          = 0x0100
-	rdwFrame              = 0x0400
 	odsSelected           = 0x0001
 	odsFocus              = 0x0010
 	odsDisabled           = 0x0004
@@ -343,8 +337,8 @@ const (
 	swpNoMove             = 0x0002
 	swpNoSize             = 0x0001
 	swpNoActivate         = 0x0010
-	swpShowWindow         = 0x0040
 	searchTimerID         = 1
+	statusTimerID         = 2
 	ofnHideReadOnly       = 0x00000004
 	ofnNoChangeDir        = 0x00000008
 	ofnPathMustExist      = 0x00000800
@@ -357,6 +351,7 @@ const (
 	processPickerAutoRefreshMinAge  = 15 * time.Second
 	processPickerAutoRefreshMaxAge  = 60 * time.Second
 	processPickerScanCostMultiplier = 250
+	processPickerManualStatusHold   = 1500 * time.Millisecond
 )
 
 type processLoadMode uint8
@@ -365,6 +360,16 @@ const (
 	processLoadInitial processLoadMode = iota
 	processLoadAutomatic
 	processLoadManual
+)
+
+type pickerViewPhase uint8
+
+const (
+	pickerViewInitial pickerViewPhase = iota
+	pickerViewLoading
+	pickerViewEnriching
+	pickerViewReady
+	pickerViewError
 )
 
 var (
@@ -378,8 +383,6 @@ var (
 	pSetWindowText        = user32.NewProc("SetWindowTextW")
 	pSetWindowPos         = user32.NewProc("SetWindowPos")
 	pShowWindow           = user32.NewProc("ShowWindow")
-	pUpdateWindow         = user32.NewProc("UpdateWindow")
-	pRedrawWindow         = user32.NewProc("RedrawWindow")
 	pSetForeground        = user32.NewProc("SetForegroundWindow")
 	pEnableWindow         = user32.NewProc("EnableWindow")
 	pIsWindow             = user32.NewProc("IsWindow")
@@ -458,9 +461,8 @@ func Show(options Options) error {
 	}
 	p := &picker{
 		options: options, controls: make(map[uint16]windows.Handle), bounds: make(map[uint16]logicalBounds),
-		labels: make(map[uint16]string), surfaceFields: make(map[uint16]uint16),
+		labels:   make(map[uint16]string),
 		selected: make(map[string]automation.ProcessTarget), descriptions: make(map[string]string), descriptionTried: make(map[string]struct{}), sortAscending: true,
-		headerHover: -1, headerPressed: -1,
 	}
 	for key, value := range options.Descriptions {
 		p.descriptions[key] = value
@@ -518,9 +520,8 @@ func Capture(options Options, groups []processcatalog.Group, scale float64, dark
 	options.Owner = 0
 	p := &picker{
 		options: options, controls: make(map[uint16]windows.Handle), bounds: make(map[uint16]logicalBounds),
-		labels: make(map[uint16]string), surfaceFields: make(map[uint16]uint16),
+		labels:   make(map[uint16]string),
 		selected: make(map[string]automation.ProcessTarget), descriptions: make(map[string]string), descriptionTried: make(map[string]struct{}), sortAscending: true,
-		headerHover: -1, headerPressed: -1,
 		captureHost: true, captureScale: scale, themeOverride: &dark,
 	}
 	for key, value := range options.Descriptions {
@@ -550,7 +551,7 @@ func Capture(options Options, groups []processcatalog.Group, scale float64, dark
 		}
 	}()
 	p.items = buildItems(groups, p.selected, options.Text)
-	p.loading = false
+	p.viewPhase = pickerViewReady
 	p.applyFilter()
 	if capture == nil {
 		return nil
@@ -563,13 +564,21 @@ func (p *picker) repaint() {
 	if p.hwnd == 0 {
 		return
 	}
-	pInvalidateRect.Call(uintptr(p.hwnd), 0, 0)
-	pUpdateWindow.Call(uintptr(p.hwnd))
+	p.surfaces.PrepareCues()
+	nativeform.PresentFrame(p.hwnd, p.frameControls()...)
+}
+
+func (p *picker) frameControls() []windows.Handle {
+	controls := make([]windows.Handle, 0, len(p.controls))
 	for _, control := range p.controls {
-		pInvalidateRect.Call(uintptr(control), 0, 0)
-		pUpdateWindow.Call(uintptr(control))
+		if control != 0 {
+			controls = append(controls, control)
+		}
 	}
-	pRedrawWindow.Call(uintptr(p.hwnd), 0, 0, 0x0001|0x0080|0x0100|0x0400)
+	if p.header != 0 {
+		controls = append(controls, p.header)
+	}
+	return controls
 }
 
 func (p *picker) abortCreate() {
@@ -604,13 +613,11 @@ func (p *picker) releaseResources() {
 		hwnd := p.hwnd
 		if hwnd != 0 {
 			pKillTimer.Call(uintptr(hwnd), searchTimerID)
+			pKillTimer.Call(uintptr(hwnd), statusTimerID)
 		}
 		p.releaseHeaderRenderer()
+		p.surfaces.Close()
 		p.interaction.Release()
-		if p.searchCue != nil {
-			p.searchCue.Close()
-			p.searchCue = nil
-		}
 		if p.scrollbar != nil {
 			p.scrollbar.Close()
 			p.scrollbar = nil
@@ -641,7 +648,6 @@ func (p *picker) releaseResources() {
 			if valid, _, _ := pIsWindow.Call(uintptr(p.options.Owner)); valid != 0 {
 				pEnableWindow.Call(uintptr(p.options.Owner), 1)
 				pSetForeground.Call(uintptr(p.options.Owner))
-				trayicon.SetTabNavigationWindow(p.options.Owner, nil)
 			}
 			p.ownerDisabled = false
 		}
@@ -688,16 +694,21 @@ func (p *picker) create() (err error) {
 		return err
 	}
 	p.style = wsPopup | wsCaption | wsSysMenu | wsClipChildren
+	// Native EDIT and Header controls must remain on their own normal paint
+	// path. Top-level WS_EX_COMPOSITED can discard their text on the first DWM
+	// frame; list/preview updates are committed explicitly by PresentControl.
 	p.exStyle = wsExTopmost
 	if p.captureHost {
 		p.style = wsOverlapped | wsCaption | wsSysMenu | wsThickFrame | wsMinimizeBox | wsMaximizeBox | wsClipChildren
-		p.exStyle = wsExAppWindow | wsExComposited
+		p.exStyle = wsExAppWindow
 	}
-	hwnd, callErr := createWindowForPicker(p.exStyle, class, title, p.style, 0, 0, 1, 1, p.options.Owner, 0)
+	creationX, creationY := nativeform.InitialWindowPoint(p.options.Owner)
+	hwnd, callErr := createWindowForPicker(p.exStyle, class, title, p.style, creationX, creationY, 1, 1, p.options.Owner, 0)
 	if callErr != nil {
 		return fmt.Errorf("create process picker: %w", callErr)
 	}
 	p.hwnd = hwnd
+	firstFrame := nativeform.BeginFirstFrame(p.hwnd)
 	p.dpiScale = p.windowScale()
 	scale := p.scale()
 	p.font, _ = newFontForPicker(int32(14*scale+0.5), 400, p.options.Chinese)
@@ -714,28 +725,32 @@ func (p *picker) create() (err error) {
 	}
 	p.child("STATIC", p.text("process_picker_heading"), wsChild|wsVisible|ssLeft, 18, 16, 664, 20, idHeading)
 	p.child("STATIC", p.text("process_picker_helper"), wsChild|wsVisible|ssLeft, 18, 40, 664, 30, idHelper)
-	searchSurface := p.child("STATIC", "", wsChild|wsVisible|ssOwnerDraw, 18, 78, 370, 34, idSearchSurface)
+	searchSurface := p.child("STATIC", "", formSurfaceStyle|wsVisible, 18, 78, 370, 34, idSearchSurface)
 	pSetWindowPos.Call(uintptr(searchSurface), 1, 0, 0, 0, 0, swpNoMove|swpNoSize|swpNoActivate)
-	search := p.child("EDIT", "", wsChild|wsVisible|wsTabStop|esAutoHScroll, 20, 85, 366, 20, idSearch)
+	search := p.child("EDIT", "", wsChild|wsVisible|wsTabStop|wsClipSiblings|esAutoHScroll, 20, 85, 366, 20, idSearch)
 	if p.createErr != nil {
 		return p.createErr
 	}
-	cue, cueErr := newCueBannerForPicker(search, p.text("process_picker_search_hint"), p.palette.MutedText, p.scale())
-	if cueErr != nil {
-		return cueErr
+	if _, err := p.surfaces.Add(nativeform.ControlSurfaceOptions{
+		ControlID: idSearch, SurfaceID: idSearchSurface, Control: search, Surface: searchSurface,
+		CueText: p.text("process_picker_search_hint"), CueColor: p.palette.MutedText, Scale: p.scale(),
+		Tracker: &p.interaction, NewCue: newCueBannerForPicker,
+	}); err != nil {
+		return err
 	}
-	p.searchCue = cue
-	p.surfaceFields[idSearchSurface] = idSearch
-	p.interaction.Track(search, p.controls[idSearchSurface])
 	p.child("BUTTON", p.text("process_picker_refresh"), wsChild|wsVisible|wsTabStop|bsOwnerDraw, 396, 78, 132, 34, idRefresh)
 	p.child("BUTTON", p.text("process_picker_browse"), wsChild|wsVisible|wsTabStop|bsOwnerDraw, 536, 78, 146, 34, idBrowse)
-	listSurface := p.child("STATIC", "", wsChild|wsVisible|ssOwnerDraw, 18, 120, 664, 180, idListSurface)
+	listSurface := p.child("STATIC", "", formSurfaceStyle|wsVisible, 18, 120, 664, 180, idListSurface)
 	pSetWindowPos.Call(uintptr(listSurface), 1, 0, 0, 0, 0, swpNoMove|swpNoSize|swpNoActivate)
-	list := p.child("SysListView32", "", wsChild|wsVisible|wsTabStop|wsClipSiblings|lvsReport|lvsSingleSel|lvsShowSelAlways, 20, 122, 660, 176, idList)
+	list := p.child("SysListView32", "", wsChild|wsVisible|wsTabStop|wsClipChildren|wsClipSiblings|lvsReport|lvsSingleSel|lvsShowSelAlways, 20, 122, 660, 176, idList)
 	if p.createErr != nil {
 		return p.createErr
 	}
-	p.surfaceFields[idListSurface] = idList
+	if _, err := p.surfaces.Add(nativeform.ControlSurfaceOptions{
+		ControlID: idList, SurfaceID: idListSurface, Control: list, Surface: listSurface, Tracker: &p.interaction,
+	}); err != nil {
+		return err
+	}
 	pSendMessage.Call(uintptr(list), lvmSetExtendedStyle, 0, lvsExCheckboxes|lvsExFullRowSelect|lvsExInfoTip|lvsExDoubleBuffer)
 	p.createColumns()
 	p.resizeColumns()
@@ -762,11 +777,16 @@ func (p *picker) create() (err error) {
 	p.child("STATIC", p.text("process_picker_loading"), wsChild|ssLeft, 42, 180, 616, 40, idEmpty)
 	p.child("STATIC", p.text("process_picker_loading"), wsChild|wsVisible|ssLeft, 18, 308, 664, 20, idStatus)
 	p.child("STATIC", p.text("process_picker_selection_title"), wsChild|wsVisible|ssLeft, 18, 336, 664, 20, idPreviewTitle)
-	previewSurface := p.child("STATIC", "", wsChild|wsVisible|ssOwnerDraw, 18, 360, 664, 58, idPreviewSurface)
+	previewSurface := p.child("STATIC", "", formSurfaceStyle|wsVisible, 18, 360, 664, 58, idPreviewSurface)
 	pSetWindowPos.Call(uintptr(previewSurface), 1, 0, 0, 0, 0, swpNoMove|swpNoSize|swpNoActivate)
-	preview := p.child("LISTBOX", "", wsChild|wsVisible|wsVScroll|lbsNoSelection|lbsNoIntegralHeight, 20, 362, 660, 54, idPreview)
+	preview := p.child("LISTBOX", "", wsChild|wsVisible|wsVScroll|wsClipSiblings|lbsNoSelection|lbsNoIntegralHeight, 20, 362, 660, 54, idPreview)
 	if p.createErr != nil {
 		return p.createErr
+	}
+	if _, err := p.surfaces.Add(nativeform.ControlSurfaceOptions{
+		ControlID: idPreview, SurfaceID: idPreviewSurface, Control: preview, Surface: previewSurface, Tracker: &p.interaction,
+	}); err != nil {
+		return err
 	}
 	previewScroll, previewErr := newListboxScrollForPicker(nativeform.ListboxScrollbarOptions{
 		Parent: p.hwnd, Listbox: preview, Palette: p.palette, Background: p.palette.Surface, Scale: p.scale(),
@@ -812,14 +832,16 @@ func (p *picker) create() (err error) {
 		// picker never flashes an uninitialized empty list.
 		p.startLoad(processLoadInitial)
 	}
-	pShowWindow.Call(uintptr(hwnd), 5)
-	if p.captureHost {
-		// STARTUPINFO from a hidden screenshot host may override the first
-		// ShowWindow call; repeat it so PrintWindow sees the child controls.
-		pShowWindow.Call(uintptr(hwnd), 5)
-	} else {
+	p.surfaces.PrepareCues()
+	if err := firstFrame.Reveal(nativeform.FirstFrameOptions{
+		RepeatShow: p.captureHost,
+		Controls:   p.frameControls(),
+	}); err != nil {
+		return err
+	}
+	if !p.captureHost {
 		pSetForeground.Call(uintptr(hwnd))
-		trayicon.SetTabNavigationWindow(p.hwnd, nil)
+		trayicon.SetTabNavigationWindow(p.hwnd, func() { p.interaction.SetFocusVisible(true) })
 	}
 	return nil
 }

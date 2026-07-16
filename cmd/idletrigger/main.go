@@ -85,7 +85,10 @@ func main() {
 		cli.Run(cfg.Language)
 		return
 	}
-	gdiplus.Start() // failure preserves the control panel's GDI fallback paths.
+	// Suppressing GDI+'s background thread avoids its internal top-left hook
+	// window. Start before the tray message loop and unhook after that loop ends;
+	// failure preserves the controls' GDI fallback paths.
+	gdiplus.Start()
 	defer gdiplus.Shutdown()
 
 	// GUI mode

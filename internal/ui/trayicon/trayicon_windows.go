@@ -48,12 +48,18 @@ var (
 	pSetForegroundWindow   = u32.NewProc("SetForegroundWindow")
 	pSetMenuInfo           = u32.NewProc("SetMenuInfo")
 	pSetMenuItemInfo       = u32.NewProc("SetMenuItemInfoW")
-	pShowWindow            = u32.NewProc("ShowWindow")
 	pTrackPopupMenu        = u32.NewProc("TrackPopupMenu")
 	pTranslateMessage      = u32.NewProc("TranslateMessage")
 	pUnregisterClass       = u32.NewProc("UnregisterClassW")
-	pUpdateWindow          = u32.NewProc("UpdateWindow")
 )
+
+// The notification-area host must remain a real hidden top-level window so it
+// receives broadcast power, theme and Explorer-restart messages. It does not
+// need a caption, frame, default placement or client area: WS_POPUP at 0x0
+// cannot flash a normal window frame even if the shell is still composing the
+// process's first top-level HWND.
+const trayHostWindowStyle = 0x80000000 // WS_POPUP, deliberately without WS_VISIBLE.
+const trayHostWindowCoordinate = int32(-32000)
 
 const (
 	wmKeyDown = 0x0100

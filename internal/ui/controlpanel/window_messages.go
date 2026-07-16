@@ -1,8 +1,10 @@
 package controlpanel
 
 import (
+	"fmt"
 	mylog "github.com/JeffioZ/idletrigger/internal/logging"
 	"github.com/JeffioZ/idletrigger/internal/ui/font"
+	"github.com/JeffioZ/idletrigger/internal/ui/nativeform"
 	"golang.org/x/sys/windows"
 	"unsafe"
 )
@@ -78,23 +80,49 @@ func panelOrigin(work rect, width, height, margin int32) (int32, int32) {
 	return x, y
 }
 
-func (p *panel) position(style, exStyle uint32) {
-	r := rect{Right: int32(p.sc(p.metrics.style.Layout.PanelWidth)), Bottom: int32(p.sc(p.clientH))}
-	pAdjustWindowRect.Call(uintptr(unsafe.Pointer(&r)), uintptr(style), 0, uintptr(exStyle))
-	width, height := r.Right-r.Left, r.Bottom-r.Top
-	monitor, _, _ := pMonitorFromWindow.Call(uintptr(p.hwnd), monitorNearest)
-	info := monitorInfo{Size: uint32(unsafe.Sizeof(monitorInfo{}))}
-	if monitor != 0 {
-		pGetMonitorInfo.Call(monitor, uintptr(unsafe.Pointer(&info)))
-	} else {
-		info.Work = rect{Right: width, Bottom: height}
+func cursorWorkArea(fallback windows.Handle) (rect, bool) {
+	var cursor struct{ X, Y int32 }
+	monitor := uintptr(0)
+	if result, _, _ := pGetCursorPos.Call(uintptr(unsafe.Pointer(&cursor))); result != 0 {
+		anchor := rect{Left: cursor.X, Top: cursor.Y, Right: cursor.X + 1, Bottom: cursor.Y + 1}
+		monitor, _, _ = pMonitorFromRect.Call(uintptr(unsafe.Pointer(&anchor)), monitorNearest)
 	}
-	x, y := panelOrigin(info.Work, width, height, int32(p.sc(16)))
+	if monitor == 0 && fallback != 0 {
+		monitor, _, _ = pMonitorFromWindow.Call(uintptr(fallback), monitorNearest)
+	}
+	if monitor == 0 {
+		return rect{}, false
+	}
+	info := monitorInfo{Size: uint32(unsafe.Sizeof(monitorInfo{}))}
+	if result, _, _ := pGetMonitorInfo.Call(monitor, uintptr(unsafe.Pointer(&info))); result == 0 {
+		return rect{}, false
+	}
+	return info.Work, info.Work.Right > info.Work.Left && info.Work.Bottom > info.Work.Top
+}
+
+func (p *panel) position(style, exStyle uint32) error {
+	r := rect{Right: int32(p.sc(p.metrics.style.Layout.PanelWidth)), Bottom: int32(p.sc(p.clientH))}
+	if result, _, callErr := pAdjustWindowRect.Call(uintptr(unsafe.Pointer(&r)), uintptr(style), 0, uintptr(exStyle)); result == 0 {
+		return fmt.Errorf("calculate control panel bounds: %w", callErr)
+	}
+	width, height := r.Right-r.Left, r.Bottom-r.Top
+	work, ok := cursorWorkArea(p.hwnd)
+	if !ok {
+		return fmt.Errorf("locate control panel monitor work area")
+	}
+	x, y := panelOrigin(work, width, height, int32(p.sc(16)))
 	insertAfter := ^uintptr(0)
 	if p.developerCapturePanel || p.captureHost {
 		insertAfter = 0
 	}
-	pSetWindowPos.Call(uintptr(p.hwnd), insertAfter, uintptr(x), uintptr(y), uintptr(width), uintptr(height), swpShowWindow)
+	// Keep placement and visibility as two distinct commits. Combining them
+	// with SWP_SHOWWINDOW can let DWM compose the newly visible cold-start frame
+	// at CreateWindowEx's temporary coordinates before the final position is
+	// applied. The caller explicitly shows the fully positioned window.
+	if result, _, callErr := pSetWindowPos.Call(uintptr(p.hwnd), insertAfter, uintptr(x), uintptr(y), uintptr(width), uintptr(height), swpNoActivate); result == 0 {
+		return fmt.Errorf("position control panel: %w", callErr)
+	}
+	return nil
 }
 
 func wndProc(hwnd windows.Handle, msg uint32, wp, lp uintptr) uintptr {
@@ -105,7 +133,7 @@ func wndProc(hwnd windows.Handle, msg uint32, wp, lp uintptr) uintptr {
 			Hide()
 			return 0
 		case wmActivate:
-			if uint16(wp) == waInactive {
+			if uint16(wp) == waInactive && !nativeform.IsChoicePopupOwnedBy(windows.Handle(lp), p.hwnd) {
 				p.closeOpenMenus()
 			}
 		case wmNcLButtonDown:
@@ -147,19 +175,16 @@ func wndProc(hwnd windows.Handle, msg uint32, wp, lp uintptr) uintptr {
 			p.refreshTheme(true)
 		case wmDpiChanged:
 			p.refreshFontsForDPI()
-			p.position(p.style, p.exStyle)
+			if err := p.position(p.style, p.exStyle); err != nil {
+				mylog.Info("Control panel DPI placement failed: %v", err)
+			}
 			mylog.Info("UI font: surface=popup rebuilt reason=dpi-change dpi=%d face=%q client_px=%dx%d", int(p.metrics.scale*96+0.5), p.fontChoice.Face, p.sc(p.metrics.style.Layout.PanelWidth), p.sc(p.clientH))
 			return 0
 		case wmCommand:
 			id, notification := uint16(wp), uint16(wp>>16)
 			if notification == bnClicked {
 				if id == idIdleTimeout || id == idIdleAction {
-					p.choice.focusOnOpen = p.keyboardNavigation
 					p.openChoice(id)
-					return 0
-				}
-				if _, _, ok := choiceOptionOwner(p, id); ok {
-					p.applyChoice(id)
 					return 0
 				}
 				p.handleCommand(id)

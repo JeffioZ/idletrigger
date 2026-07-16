@@ -77,34 +77,27 @@ func TestTimeoutChoices(t *testing.T) {
 	}
 }
 
-func TestChoiceOptionOwnerAndSelectionModel(t *testing.T) {
+func TestChoiceSelectionModelAppliesByOwnerAndIndex(t *testing.T) {
+	var action Action
+	var value int
 	p := &panel{
+		onAction: func(next Action, nextValue int) { action, value = next, nextValue },
+		labels:   map[uint16]string{},
 		choice: choiceSurface{
-			optionIDs: map[uint16][]uint16{
-				idIdleTimeout: {idTimeoutOptionBase, idTimeoutOptionBase + 1},
-				idIdleAction:  {idActionOptionBase, idActionOptionBase + 1},
-			},
-			selected: map[uint16]int{idIdleTimeout: 1, idIdleAction: 0},
+			options:  map[uint16][]string{idIdleAction: {"Sleep", "Shutdown"}},
+			selected: map[uint16]int{idIdleAction: 0},
 		},
 	}
-	owner, index, ok := choiceOptionOwner(p, idTimeoutOptionBase+1)
-	if !ok || owner != idIdleTimeout || index != 1 {
-		t.Fatalf("timeout option lookup = (%d, %d, %v)", owner, index, ok)
+	p.applyChoice(idIdleAction, 1)
+	if p.choice.selected[idIdleAction] != 1 || p.labels[idIdleAction] != "Shutdown" {
+		t.Fatalf("selection was not applied: selected=%d label=%q", p.choice.selected[idIdleAction], p.labels[idIdleAction])
 	}
-	if owner, _, ok := choiceOptionOwner(p, idActionOptionBase); !ok || owner != idIdleAction {
-		t.Fatalf("action option lookup failed: owner=%d ok=%v", owner, ok)
+	if action != ActIdleAction || value != 1 {
+		t.Fatalf("selection callback = (%v, %d)", action, value)
 	}
-}
-
-func TestChoiceOptionRangesDoNotOverlap(t *testing.T) {
-	timeoutIDs := make(map[uint16]bool)
-	for i := 0; i < len(timeoutMinutes); i++ {
-		timeoutIDs[idTimeoutOptionBase+uint16(i)] = true
-	}
-	for i := 0; i < 4; i++ {
-		if timeoutIDs[idActionOptionBase+uint16(i)] {
-			t.Fatalf("action option ID %d overlaps timeout range", idActionOptionBase+uint16(i))
-		}
+	p.applyChoice(idIdleAction, 1)
+	if value != 1 {
+		t.Fatal("reapplying the selected row should remain a no-op")
 	}
 }
 
@@ -352,6 +345,12 @@ func TestPanelOriginDoesNotEscapeSmallWorkArea(t *testing.T) {
 	}
 }
 
+func TestPanelFallbackCoordinateCannotReachTheDesktop(t *testing.T) {
+	if panelFallbackWindowCoordinate > -30000 {
+		t.Fatalf("panel fallback coordinate %d is not safely outside the desktop", panelFallbackWindowCoordinate)
+	}
+}
+
 func TestOwnedBrushesIncludesEveryPanelBrush(t *testing.T) {
 	p := &panel{}
 	p.dangerPressedBorderBrush = windows.Handle(21)
@@ -449,34 +448,41 @@ func TestClosingHoverMenuClearsTrackedHover(t *testing.T) {
 	}
 }
 
-func TestChoiceOpenOnlyEntersFocusVisibleForKeyboard(t *testing.T) {
-	mouse := &panel{choice: choiceSurface{scroll: map[uint16]int{}, selected: map[uint16]int{}}}
-	if mouse.beginChoiceOpen(idIdleTimeout) || mouse.keyboardNavigation || mouse.choice.restoreFocus {
-		t.Fatal("mouse-opened choice must not enable keyboard focus-visible")
+func TestChoiceTriggerKeyboardKeysOpenTheSharedPopup(t *testing.T) {
+	for _, key := range []uintptr{vkReturn, vkSpace, vkUp, vkDown, vkF4} {
+		if !isChoiceOpenKey(key) {
+			t.Fatalf("key %#x should open a choice popup", key)
+		}
 	}
-	keyboard := &panel{choice: choiceSurface{
-		focusOnOpen: true,
-		scroll:      map[uint16]int{},
-		selected:    map[uint16]int{idIdleTimeout: 3},
-	}}
-	if !keyboard.beginChoiceOpen(idIdleTimeout) || !keyboard.keyboardNavigation || !keyboard.choice.restoreFocus {
-		t.Fatal("keyboard-opened choice must preserve focus-visible restoration")
-	}
-	if got := keyboard.choice.scroll[idIdleTimeout]; got != 3 {
-		t.Fatalf("keyboard choice scroll = %d, want selected option 3", got)
+	for _, key := range []uintptr{vkEscape, vkHome, vkEnd} {
+		if isChoiceOpenKey(key) {
+			t.Fatalf("key %#x must not open a closed choice popup", key)
+		}
 	}
 }
 
-func TestChoiceFocusContainsItsOpenTrigger(t *testing.T) {
-	trigger := windows.Handle(17)
-	p := &panel{
-		controls: map[uint16]windows.Handle{idIdleTimeout: trigger},
-		choice: choiceSurface{
-			openID: idIdleTimeout,
-		},
+func TestChoiceTriggerTogglesARealSharedPopup(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping native Win32 integration test in short mode")
 	}
-	if !p.choiceFocusContains(trigger) {
-		t.Fatal("the open choice trigger must retain focus while its menu is visible")
+	err := Capture(State{IdleTimeout: 30}, func(key string) string { return key }, 1, func(hwnd windows.Handle) error {
+		p := panelFor(hwnd)
+		if p == nil {
+			t.Fatal("capture panel is not active")
+		}
+		p.openChoice(idIdleTimeout)
+		popup := p.choice.popup
+		if p.choice.openID != idIdleTimeout || popup == nil || !popup.IsOpen() || popup.Window() == 0 {
+			t.Fatal("choice trigger did not create the shared native popup")
+		}
+		p.openChoice(idIdleTimeout)
+		if p.choice.openID != 0 || p.choice.popup != nil || popup.IsOpen() {
+			t.Fatal("clicking the open choice trigger did not close its popup")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -505,11 +511,9 @@ func TestMenuClickKeepsOnlyTheOpenSurfaceInteractive(t *testing.T) {
 		t.Fatal("another trigger must close the current menu before switching")
 	}
 
-	p = &panel{choice: choiceSurface{openID: idIdleTimeout, optionIDs: map[uint16][]uint16{idIdleTimeout: {idTimeoutOptionBase}}}}
-	for _, id := range []uint16{idIdleTimeout, idChoiceSurface, idTimeoutOptionBase} {
-		if !p.menuClickKeepsOpen(id) {
-			t.Fatalf("choice click %d should keep the menu open", id)
-		}
+	p = &panel{choice: choiceSurface{openID: idIdleTimeout}}
+	if !p.menuClickKeepsOpen(idIdleTimeout) {
+		t.Fatal("clicking the open choice trigger should keep its popup alive until the deferred toggle")
 	}
 	if p.menuClickKeepsOpen(idIdleAction) {
 		t.Fatal("another choice trigger must close the open choice before switching")

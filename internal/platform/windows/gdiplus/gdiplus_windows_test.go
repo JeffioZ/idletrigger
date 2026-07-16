@@ -19,7 +19,14 @@ func TestFillModeConstantsMatchSDK(t *testing.T) {
 
 func TestLifecycleStartAndShutdownAreIdempotent(t *testing.T) {
 	var starts, stops int
-	m := newLifecycle(func() (uintptr, bool) { starts++; return 7, true }, func(uintptr) { stops++ })
+	var stopped lifecycleSession
+	m := newLifecycle(func() (lifecycleSession, bool) {
+		starts++
+		return lifecycleSession{gdiplusToken: 7, notificationToken: 8, notificationUnhook: 9}, true
+	}, func(session lifecycleSession) {
+		stops++
+		stopped = session
+	})
 	if !m.start() {
 		t.Fatal("first Start failed")
 	}
@@ -34,11 +41,14 @@ func TestLifecycleStartAndShutdownAreIdempotent(t *testing.T) {
 	if stops != 1 || m.start() {
 		t.Fatalf("stops=%d; Start after close must fail", stops)
 	}
+	if stopped.gdiplusToken != 7 || stopped.notificationToken != 8 || stopped.notificationUnhook != 9 {
+		t.Fatalf("shutdown session=%+v, want all startup and notification tokens", stopped)
+	}
 }
 
 func TestShutdownWaitsAndRejectsNewDrawing(t *testing.T) {
 	stopped := make(chan struct{})
-	m := newLifecycle(func() (uintptr, bool) { return 7, true }, func(uintptr) { close(stopped) })
+	m := newLifecycle(func() (lifecycleSession, bool) { return lifecycleSession{gdiplusToken: 7}, true }, func(lifecycleSession) { close(stopped) })
 	if !m.start() {
 		t.Fatal("Start failed")
 	}
@@ -72,7 +82,7 @@ func TestShutdownWaitsAndRejectsNewDrawing(t *testing.T) {
 
 func TestStartupFailureIsNotRetried(t *testing.T) {
 	starts := 0
-	m := newLifecycle(func() (uintptr, bool) { starts++; return 0, false }, func(uintptr) {})
+	m := newLifecycle(func() (lifecycleSession, bool) { starts++; return lifecycleSession{}, false }, func(lifecycleSession) {})
 	if m.start() {
 		t.Fatal("first Start unexpectedly succeeded")
 	}
@@ -127,7 +137,7 @@ func TestLoadRequiredAPIAcceptsCompleteAPI(t *testing.T) {
 
 func TestConcurrentStartDrawingAndShutdown(t *testing.T) {
 	var starts, stops int
-	m := newLifecycle(func() (uintptr, bool) { starts++; return 7, true }, func(uintptr) { stops++ })
+	m := newLifecycle(func() (lifecycleSession, bool) { starts++; return lifecycleSession{gdiplusToken: 7}, true }, func(lifecycleSession) { stops++ })
 	var wg sync.WaitGroup
 	for range 16 {
 		wg.Add(1)
@@ -163,7 +173,7 @@ func TestConcurrentStartDrawingAndShutdown(t *testing.T) {
 }
 
 func TestSetupFailureDoesNotDraw(t *testing.T) {
-	m := newLifecycle(func() (uintptr, bool) { return 7, true }, func(uintptr) {})
+	m := newLifecycle(func() (lifecycleSession, bool) { return lifecycleSession{gdiplusToken: 7}, true }, func(lifecycleSession) {})
 	if !m.start() {
 		t.Fatal("Start failed")
 	}
@@ -187,7 +197,7 @@ func TestSetupFailureDoesNotDraw(t *testing.T) {
 }
 
 func TestPixelOffsetFailureDoesNotDraw(t *testing.T) {
-	m := newLifecycle(func() (uintptr, bool) { return 7, true }, func(uintptr) {})
+	m := newLifecycle(func() (lifecycleSession, bool) { return lifecycleSession{gdiplusToken: 7}, true }, func(lifecycleSession) {})
 	if !m.start() {
 		t.Fatal("Start failed")
 	}
@@ -207,7 +217,7 @@ func TestPixelOffsetFailureDoesNotDraw(t *testing.T) {
 }
 
 func TestFinalDrawFailureIsMarkedMayBeDirty(t *testing.T) {
-	m := newLifecycle(func() (uintptr, bool) { return 7, true }, func(uintptr) {})
+	m := newLifecycle(func() (lifecycleSession, bool) { return lifecycleSession{gdiplusToken: 7}, true }, func(lifecycleSession) {})
 	if !m.start() {
 		t.Fatal("Start failed")
 	}
@@ -226,7 +236,7 @@ func TestFinalDrawFailureIsMarkedMayBeDirty(t *testing.T) {
 }
 
 func TestRoundedRectUsesWindingPathsAndOnePixelInset(t *testing.T) {
-	m := newLifecycle(func() (uintptr, bool) { return 7, true }, func(uintptr) {})
+	m := newLifecycle(func() (lifecycleSession, bool) { return lifecycleSession{gdiplusToken: 7}, true }, func(lifecycleSession) {})
 	if !m.start() {
 		t.Fatal("Start failed")
 	}
@@ -265,7 +275,7 @@ func TestRoundedRectUsesWindingPathsAndOnePixelInset(t *testing.T) {
 }
 
 func TestRoundedRectSetupFailureDoesNotDraw(t *testing.T) {
-	m := newLifecycle(func() (uintptr, bool) { return 7, true }, func(uintptr) {})
+	m := newLifecycle(func() (lifecycleSession, bool) { return lifecycleSession{gdiplusToken: 7}, true }, func(lifecycleSession) {})
 	if !m.start() {
 		t.Fatal("Start failed")
 	}
@@ -282,7 +292,7 @@ func TestRoundedRectSetupFailureDoesNotDraw(t *testing.T) {
 }
 
 func TestRoundedRectFinalFailureIsMarkedMayBeDirty(t *testing.T) {
-	m := newLifecycle(func() (uintptr, bool) { return 7, true }, func(uintptr) {})
+	m := newLifecycle(func() (lifecycleSession, bool) { return lifecycleSession{gdiplusToken: 7}, true }, func(lifecycleSession) {})
 	if !m.start() {
 		t.Fatal("Start failed")
 	}
@@ -298,7 +308,7 @@ func TestRoundedRectFinalFailureIsMarkedMayBeDirty(t *testing.T) {
 }
 
 func TestRoundedRectRejectsEmptyAndTooSmallBounds(t *testing.T) {
-	m := newLifecycle(func() (uintptr, bool) { return 7, true }, func(uintptr) {})
+	m := newLifecycle(func() (lifecycleSession, bool) { return lifecycleSession{gdiplusToken: 7}, true }, func(lifecycleSession) {})
 	if !m.start() {
 		t.Fatal("Start failed")
 	}
@@ -321,7 +331,7 @@ func TestRoundedRectRejectsEmptyAndTooSmallBounds(t *testing.T) {
 }
 
 func TestRoundedRectRadiusIsClampedAndInset(t *testing.T) {
-	m := newLifecycle(func() (uintptr, bool) { return 7, true }, func(uintptr) {})
+	m := newLifecycle(func() (lifecycleSession, bool) { return lifecycleSession{gdiplusToken: 7}, true }, func(lifecycleSession) {})
 	if !m.start() {
 		t.Fatal("Start failed")
 	}

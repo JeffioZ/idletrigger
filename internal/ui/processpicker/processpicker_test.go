@@ -3,6 +3,7 @@ package processpicker
 import (
 	"errors"
 	"fmt"
+	"os"
 	"runtime"
 	"sync"
 	"testing"
@@ -27,7 +28,50 @@ var (
 	pickerTestEnumMonitors   = pickerTestUser32.NewProc("EnumDisplayMonitors")
 	pickerTestGetMonitorInfo = pickerTestUser32.NewProc("GetMonitorInfoW")
 	pickerTestScrollBarInfo  = pickerTestUser32.NewProc("GetScrollBarInfo")
+	pickerTestGetUpdateRect  = pickerTestUser32.NewProc("GetUpdateRect")
+	pickerTestPeekMessage    = pickerTestUser32.NewProc("PeekMessageW")
+	pickerTestTranslate      = pickerTestUser32.NewProc("TranslateMessage")
+	pickerTestDispatch       = pickerTestUser32.NewProc("DispatchMessageW")
+	pickerTestGDI32          = windows.NewLazySystemDLL("gdi32.dll")
+	pickerTestCreateDIB      = pickerTestGDI32.NewProc("CreateDIBSection")
+	pickerTestBitBlt         = pickerTestGDI32.NewProc("BitBlt")
+	pickerTestCopyMemory     = windows.NewLazySystemDLL("kernel32.dll").NewProc("RtlMoveMemory")
+	pickerTestDWMFlush       = windows.NewLazySystemDLL("dwmapi.dll").NewProc("DwmFlush")
 )
+
+type pickerTestBitmapInfoHeader struct {
+	Size          uint32
+	Width         int32
+	Height        int32
+	Planes        uint16
+	BitsPerPixel  uint16
+	Compression   uint32
+	SizeImage     uint32
+	XPelsPerMeter int32
+	YPelsPerMeter int32
+	ColorsUsed    uint32
+	ColorsNeeded  uint32
+}
+
+type pickerTestBitmapInfo struct {
+	Header pickerTestBitmapInfoHeader
+	Colors [1]uint32
+}
+
+type pickerDesktopCapture struct {
+	bounds rect
+	pixels []byte
+	stride int
+}
+
+type pickerTestMessage struct {
+	Window  windows.Handle
+	Message uint32
+	WParam  uintptr
+	LParam  uintptr
+	Time    uint32
+	Point   struct{ X, Y int32 }
+}
 
 func TestBuildItemsKeepsRunningListDeduplicatedByName(t *testing.T) {
 	path := `C:\Apps\player.exe`
@@ -67,6 +111,268 @@ func TestProcessPickerRefreshAgeAdaptsToMeasuredScanCost(t *testing.T) {
 	}
 	if got := processPickerRefreshAge(time.Second); got != processPickerAutoRefreshMaxAge {
 		t.Fatalf("slow refresh age = %v, want %v", got, processPickerAutoRefreshMaxAge)
+	}
+}
+
+func TestProcessPickerStatusHoldDelay(t *testing.T) {
+	now := time.Unix(100, 0)
+	if got := processPickerStatusHoldDelay(now, time.Time{}); got != 0 {
+		t.Fatalf("zero deadline delay = %v, want 0", got)
+	}
+	if got := processPickerStatusHoldDelay(now, now); got != 0 {
+		t.Fatalf("elapsed deadline delay = %v, want 0", got)
+	}
+	if got := processPickerStatusHoldDelay(now, now.Add(1500*time.Millisecond)); got != 1500*time.Millisecond {
+		t.Fatalf("active deadline delay = %v, want 1.5s", got)
+	}
+}
+
+func TestProcessPickerCompletedLoadCommitsListHeaderAndPreviewPaint(t *testing.T) {
+	requireNativeIntegration(t)
+	err := Capture(testPickerOptions(), nil, 1, false, func(hwnd windows.Handle) error {
+		p := activePickerForTest(t, hwnd)
+		generation := nextGeneration.Add(1)
+		p.generation = generation
+		p.finishLoad(generation, []processcatalog.Instance{
+			{Executable: "alpha.exe", Description: "Alpha", PID: 1},
+			{Executable: "beta.exe", Description: "Beta", PID: 2},
+		}, nil, true, time.Millisecond)
+		for name, control := range map[string]windows.Handle{
+			"list": p.controls[idList], "header": p.header, "preview": p.controls[idPreview],
+		} {
+			if control == 0 {
+				t.Fatalf("%s control is missing", name)
+			}
+			if pending, _, _ := pickerTestGetUpdateRect.Call(uintptr(control), 0, 0); pending != 0 {
+				t.Fatalf("%s retained a deferred paint region after the completed load", name)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// This opt-in diagnostic deliberately settles the deterministic Capture host
+// before sampling desktop pixels. It verifies final native rendering only; it
+// is not a substitute for the production Show path's asynchronous first frame.
+func TestManualSettledProcessPickerVisiblePixels(t *testing.T) {
+	if os.Getenv("IDLETRIGGER_MANUAL_VISIBLE_UI") != "1" {
+		t.Skip("set IDLETRIGGER_MANUAL_VISIBLE_UI=1 for a settled-frame desktop rendering diagnostic")
+	}
+	requireNativeIntegration(t)
+	groups := []processcatalog.Group{
+		{Executable: "alpha.exe", Description: "Alpha process", Count: 1},
+		{Executable: "beta.exe", Description: "Beta process", Count: 2},
+	}
+	err := Capture(testPickerOptions(), groups, 1, false, func(hwnd windows.Handle) error {
+		p := activePickerForTest(t, hwnd)
+		cueWindow := p.controls[idSearch]
+		const showWithoutSizing = 0x0001 | 0x0040
+		// The package test binary has no application manifest, so mixed-DPI
+		// secondary monitors can virtualize GetWindowRect while desktop BitBlt
+		// still uses physical pixels. Keep this screen-pixel assertion on the
+		// primary monitor; product mixed-DPI coverage lives in the HWND tests.
+		pSetWindowPos.Call(uintptr(hwnd), ^uintptr(0), 80, 80, 0, 0, showWithoutSizing)
+		pSetForeground.Call(uintptr(hwnd))
+		p.repaint()
+		nativeform.PresentControl(p.controls[idSearch], true)
+		nativeform.PresentControl(p.header, true)
+		pumpPickerPaintMessages()
+		pickerTestDWMFlush.Call()
+		capture := capturePickerDesktopWindow(t, hwnd)
+		checks := []struct {
+			name       string
+			control    windows.Handle
+			background uint32
+			minimum    int
+		}{
+			{"search cue", cueWindow, p.palette.Surface, 12},
+			{"process header", p.header, p.palette.Surface, 12},
+			{"process rows", p.controls[idList], p.palette.Surface, 30},
+			{"selection preview", p.controls[idPreview], p.palette.Surface, 12},
+		}
+		failed := false
+		for _, check := range checks {
+			if pixels := visibleContrastingPixels(t, capture, check.control, check.background); pixels < check.minimum {
+				t.Errorf("%s has only %d contrasting on-screen pixels, want at least %d", check.name, pixels, check.minimum)
+				failed = true
+			}
+		}
+		if got := p.controlText(idSearch); got != "" {
+			t.Errorf("cue leaked into logical search text: %q", got)
+			failed = true
+		}
+		pSendMessage.Call(uintptr(p.controls[idSearch]), 0x0102, 'x', 0) // WM_CHAR
+		if got := p.controlText(idSearch); got != "x" {
+			t.Errorf("first typed character after cue = %q, want x", got)
+			failed = true
+		}
+		empty, _ := windows.UTF16PtrFromString("")
+		pSetWindowText.Call(uintptr(p.controls[idSearch]), uintptr(unsafe.Pointer(empty)))
+		if got := p.controlText(idSearch); got != "" {
+			t.Errorf("restored cue leaked into logical search text: %q", got)
+			failed = true
+		}
+		if failed {
+			return fmt.Errorf("visible desktop pixel checks failed")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func pumpPickerPaintMessages() {
+	const removeMessage = 0x0001
+	for range 512 {
+		var message pickerTestMessage
+		available, _, _ := pickerTestPeekMessage.Call(uintptr(unsafe.Pointer(&message)), 0, 0, 0, removeMessage)
+		if available == 0 {
+			return
+		}
+		pickerTestTranslate.Call(uintptr(unsafe.Pointer(&message)))
+		pickerTestDispatch.Call(uintptr(unsafe.Pointer(&message)))
+	}
+}
+
+func capturePickerDesktopWindow(t *testing.T, hwnd windows.Handle) pickerDesktopCapture {
+	t.Helper()
+	var bounds rect
+	if ok, _, _ := pGetWindowRect.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&bounds))); ok == 0 {
+		t.Fatalf("read screen bounds for %v", hwnd)
+	}
+	width := int(bounds.Right - bounds.Left)
+	height := int(bounds.Bottom - bounds.Top)
+	if width <= 0 || height <= 0 {
+		t.Fatalf("invalid window bounds %+v", bounds)
+	}
+	screenDC, _, _ := pGetDC.Call(0)
+	if screenDC == 0 {
+		t.Fatal("get desktop DC")
+	}
+	defer pReleaseDC.Call(0, screenDC)
+	memoryDC, _, _ := pCreateCompatibleDC.Call(screenDC)
+	if memoryDC == 0 {
+		t.Fatal("create capture DC")
+	}
+	defer pDeleteDC.Call(memoryDC)
+
+	bitmapInfo := pickerTestBitmapInfo{
+		Header: pickerTestBitmapInfoHeader{
+			Size:         uint32(unsafe.Sizeof(pickerTestBitmapInfoHeader{})),
+			Width:        int32(width),
+			Height:       -int32(height),
+			Planes:       1,
+			BitsPerPixel: 32,
+		},
+	}
+	var bits uintptr
+	bitmap, _, _ := pickerTestCreateDIB.Call(
+		memoryDC,
+		uintptr(unsafe.Pointer(&bitmapInfo)),
+		0,
+		uintptr(unsafe.Pointer(&bits)),
+		0,
+		0,
+	)
+	if bitmap == 0 || bits == 0 {
+		t.Fatal("create capture bitmap")
+	}
+	oldBitmap, _, _ := pSelectObject.Call(memoryDC, bitmap)
+	if oldBitmap == 0 {
+		pDeleteObject.Call(bitmap)
+		t.Fatal("select capture bitmap")
+	}
+	defer func() {
+		pSelectObject.Call(memoryDC, oldBitmap)
+		pDeleteObject.Call(bitmap)
+	}()
+
+	const sourceCopy = 0x00cc0020
+	if ok, _, _ := pickerTestBitBlt.Call(
+		memoryDC,
+		0,
+		0,
+		uintptr(width),
+		uintptr(height),
+		screenDC,
+		uintptr(int64(bounds.Left)),
+		uintptr(int64(bounds.Top)),
+		sourceCopy,
+	); ok == 0 {
+		t.Fatal("copy visible desktop pixels")
+	}
+	stride := width * 4
+	pixels := make([]byte, stride*height)
+	pickerTestCopyMemory.Call(uintptr(unsafe.Pointer(&pixels[0])), bits, uintptr(len(pixels)))
+	return pickerDesktopCapture{bounds: bounds, pixels: pixels, stride: stride}
+}
+
+func visibleContrastingPixels(t *testing.T, capture pickerDesktopCapture, control windows.Handle, background uint32) int {
+	t.Helper()
+	var bounds rect
+	if ok, _, _ := pGetWindowRect.Call(uintptr(control), uintptr(unsafe.Pointer(&bounds))); ok == 0 {
+		t.Fatalf("read screen bounds for %v", control)
+	}
+	left := max(int(bounds.Left-capture.bounds.Left)+6, 0)
+	top := max(int(bounds.Top-capture.bounds.Top)+3, 0)
+	right := min(int(bounds.Right-capture.bounds.Left)-18, capture.stride/4)
+	bottom := min(int(bounds.Bottom-capture.bounds.Top)-3, len(capture.pixels)/capture.stride)
+	count, samples, maximumDistance := 0, 0, 0
+	for y := top; y < bottom; y++ {
+		row := capture.pixels[y*capture.stride : (y+1)*capture.stride]
+		for x := left; x < right; x++ {
+			offset := x * 4
+			color := uint32(row[offset+2]) | uint32(row[offset+1])<<8 | uint32(row[offset])<<16
+			samples++
+			distance := colorDistance(color, background)
+			if distance > maximumDistance {
+				maximumDistance = distance
+			}
+			if distance >= 90 {
+				count++
+			}
+		}
+	}
+	t.Logf("visible pixels hwnd=%v bounds=%+v background=%06x samples=%d contrasting=%d max-distance=%d", control, bounds, background&0xffffff, samples, count, maximumDistance)
+	return count
+}
+
+func colorDistance(left, right uint32) int {
+	abs := func(value int) int {
+		if value < 0 {
+			return -value
+		}
+		return value
+	}
+	return abs(int(left&0xff)-int(right&0xff)) +
+		abs(int((left>>8)&0xff)-int((right>>8)&0xff)) +
+		abs(int((left>>16)&0xff)-int((right>>16)&0xff))
+}
+
+func TestProcessPickerEmptyMessageFollowsExplicitViewPhase(t *testing.T) {
+	p := &picker{options: Options{Text: func(key string) string { return key }}}
+	tests := []struct {
+		name   string
+		phase  pickerViewPhase
+		filter string
+		want   string
+	}{
+		{"loading", pickerViewLoading, "", "process_picker_loading"},
+		{"error", pickerViewError, "", "process_picker_load_failed"},
+		{"ready empty", pickerViewReady, "", "process_picker_empty"},
+		{"ready filtered", pickerViewReady, "player", "process_picker_no_results"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			p.viewPhase = test.phase
+			if got := p.emptyMessage(test.filter); got != test.want {
+				t.Fatalf("empty message = %q, want %q", got, test.want)
+			}
+		})
 	}
 }
 

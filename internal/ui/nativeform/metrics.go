@@ -10,10 +10,12 @@ const (
 	LabelGap          = 2
 	ButtonHeight      = 36
 	FieldHeight       = 34
+	CheckboxSize      = 16
 	CornerRadius      = 6
 	MenuRowHeight     = 34
 	MenuRowGap        = 1
 	MenuSurfaceInset  = 4
+	MenuAnchorGap     = 0
 	MenuMarkerWidth   = 3
 	ScrollbarWidth    = 10
 	ScrollbarMinThumb = 22

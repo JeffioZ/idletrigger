@@ -8,41 +8,44 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// CueBanner paints a theme-aware hint inside an empty native EDIT control.
-// Windows' built-in EM_SETCUEBANNER uses a fixed light-theme color on some
-// systems, which makes the hint nearly invisible in dark mode.
+// CueBanner lets a native EDIT paint its own hint as temporary display text.
+// WM_GETTEXT and WM_GETTEXTLENGTH still report an empty field while the cue is
+// active, so search, validation and dirty-state logic never consume the hint.
+// The first real character or paste clears it before the edit processes input.
 type CueBanner struct {
-	edit   windows.Handle
-	text   string
-	color  uint32
-	scale  float64
-	closed bool
+	edit       windows.Handle
+	text       string
+	color      uint32
+	scale      float64
+	displaying bool
+	internal   bool
+	closed     bool
 }
 
-type cueClientRect struct{ Left, Top, Right, Bottom int32 }
-
 const (
-	cueSubclassID    = 0x49544355
-	cueWMSetFocus    = 0x0007
-	cueWMKillFocus   = 0x0008
-	cueWMEnable      = 0x000A
-	cueWMSetText     = 0x000C
-	cueWMGetTextLen  = 0x000E
-	cueWMPaint       = 0x000F
-	cueWMGetFont     = 0x0031
-	cueWMNCDestroy   = 0x0082
-	cueWMPrint       = 0x0317
-	cueWMPrintClient = 0x0318
-	cueEMGetMargins  = 0x00D4
+	cueSubclassID   = 0x49544355
+	cueWMEnable     = 0x000A
+	cueWMSetText    = 0x000C
+	cueWMGetTextLen = 0x000E
+	cueWMPaint      = 0x000F
+	cueWMNCDestroy  = 0x0082
+	cueEMReplaceSel = 0x00C2
+	cueWMKeyDown    = 0x0100
+	cueWMChar       = 0x0102
+	cueWMIMEStart   = 0x010D
+	cueWMIMEEnd     = 0x010E
+	cueWMCut        = 0x0300
+	cueWMCopy       = 0x0301
+	cueWMPaste      = 0x0302
+	cueWMClear      = 0x0303
+	cueWMUndo       = 0x0304
+	cueBackspace    = 0x08
+	cueDelete       = 0x2E
 )
 
 var (
 	cueUser32               = windows.NewLazySystemDLL("user32.dll")
 	cueComctl32             = windows.NewLazySystemDLL("comctl32.dll")
-	cueGetDC                = cueUser32.NewProc("GetDC")
-	cueReleaseDC            = cueUser32.NewProc("ReleaseDC")
-	cueGetClientRect        = cueUser32.NewProc("GetClientRect")
-	cueGetFocus             = cueUser32.NewProc("GetFocus")
 	cueInvalidateRect       = cueUser32.NewProc("InvalidateRect")
 	cueSendMessage          = cueUser32.NewProc("SendMessageW")
 	cueSetWindowSubclass    = cueComctl32.NewProc("SetWindowSubclass")
@@ -61,20 +64,22 @@ func NewCueBanner(edit windows.Handle, text string, color uint32, scale float64)
 		scale = 1
 	}
 	banner := &CueBanner{edit: edit, text: text, color: color, scale: scale}
-	installed, _, callErr := cueSetWindowSubclass.Call(uintptr(edit), cueCallback, cueSubclassID, 0)
-	if installed == 0 {
+	if installed, _, callErr := cueSetWindowSubclass.Call(uintptr(edit), cueCallback, cueSubclassID, 0); installed == 0 {
 		return nil, fmt.Errorf("subclass cue banner: %w", callErr)
 	}
 	cueMu.Lock()
 	cueBanners[edit] = banner
 	cueMu.Unlock()
-	cueInvalidateRect.Call(uintptr(edit), 0, 0)
+	banner.ensureVisible()
 	return banner, nil
 }
 
 func (c *CueBanner) Close() {
 	if c == nil || c.closed {
 		return
+	}
+	if c.displaying {
+		c.hide()
 	}
 	c.closed = true
 	if c.edit != 0 {
@@ -91,9 +96,7 @@ func (c *CueBanner) SetTheme(color uint32) {
 		return
 	}
 	c.color = color
-	if c.edit != 0 {
-		cueInvalidateRect.Call(uintptr(c.edit), 0, 0)
-	}
+	c.invalidate()
 }
 
 func (c *CueBanner) SetScale(scale float64) {
@@ -104,58 +107,106 @@ func (c *CueBanner) SetScale(scale float64) {
 		scale = 1
 	}
 	c.scale = scale
-	if c.edit != 0 {
-		cueInvalidateRect.Call(uintptr(c.edit), 0, 0)
+}
+
+func (c *CueBanner) invalidate() {
+	if c != nil && c.edit != 0 {
+		cueInvalidateRect.Call(uintptr(c.edit), 0, 1)
+		PresentControl(c.edit, true)
 	}
 }
 
-func (c *CueBanner) draw(dc windows.Handle) {
-	if c == nil || c.closed || dc == 0 || c.edit == 0 {
+func (c *CueBanner) setRawText(value string) {
+	if c == nil || c.edit == 0 {
+		return
+	}
+	text, err := windows.UTF16PtrFromString(value)
+	if err != nil {
+		return
+	}
+	c.internal = true
+	cueSendMessage.Call(uintptr(c.edit), cueWMSetText, 0, uintptr(unsafe.Pointer(text)))
+	c.internal = false
+}
+
+func (c *CueBanner) ensureVisible() {
+	if c == nil || c.closed || c.edit == 0 || c.displaying {
 		return
 	}
 	length, _, _ := cueSendMessage.Call(uintptr(c.edit), cueWMGetTextLen, 0, 0)
-	focused, _, _ := cueGetFocus.Call()
-	if length != 0 || windows.Handle(focused) == c.edit {
+	if length != 0 {
 		return
 	}
-	var client cueClientRect
-	if ok, _, _ := cueGetClientRect.Call(uintptr(c.edit), uintptr(unsafe.Pointer(&client))); ok == 0 {
+	c.displaying = true
+	c.setRawText(c.text)
+	c.invalidate()
+}
+
+func (c *CueBanner) hide() {
+	if c == nil || c.closed || c.edit == 0 || !c.displaying {
 		return
 	}
-	font, _, _ := cueSendMessage.Call(uintptr(c.edit), cueWMGetFont, 0, 0)
-	margins, _, _ := cueSendMessage.Call(uintptr(c.edit), cueEMGetMargins, 0, 0)
-	left := int32(uint16(margins))
-	if left <= 0 {
-		left = scaledPixels(6, c.scale)
+	c.displaying = false
+	c.setRawText("")
+	c.invalidate()
+}
+
+func (c *CueBanner) finishEdit() {
+	if c == nil || c.closed || c.edit == 0 || c.displaying {
+		return
 	}
-	drawLabel(dc, Rect(client), windows.Handle(font), c.text, c.color, true, left, left)
+	c.ensureVisible()
 }
 
 func cueBannerProc(hwnd windows.Handle, message uint32, wParam, lParam uintptr, subclassID, refData uintptr) uintptr {
 	cueMu.Lock()
 	banner := cueBanners[hwnd]
 	cueMu.Unlock()
-	result, _, _ := cueDefSubclassProc.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
 	if banner == nil {
+		result, _, _ := cueDefSubclassProc.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
 		return result
 	}
-	switch message {
-	case cueWMPaint:
-		dc, _, _ := cueGetDC.Call(uintptr(hwnd))
-		banner.draw(windows.Handle(dc))
-		if dc != 0 {
-			cueReleaseDC.Call(uintptr(hwnd), dc)
+	if banner.displaying && !banner.internal {
+		switch message {
+		case cueWMCopy, cueWMCut, cueWMClear, cueWMUndo:
+			return 0
+		case cueWMChar:
+			if wParam == cueBackspace {
+				return 0
+			}
+			banner.hide()
+		case cueWMPaste, cueEMReplaceSel:
+			banner.hide()
+		case cueWMIMEStart:
+			banner.hide()
+		case cueWMKeyDown:
+			if wParam == cueBackspace || wParam == cueDelete {
+				return 0
+			}
 		}
-	case cueWMPrint, cueWMPrintClient:
-		banner.draw(windows.Handle(wParam))
-	case cueWMSetFocus, cueWMKillFocus, cueWMEnable, cueWMSetText:
-		cueInvalidateRect.Call(uintptr(hwnd), 0, 0)
+	}
+	if message == cueWMSetText && !banner.internal {
+		banner.displaying = false
+		result, _, _ := cueDefSubclassProc.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
+		banner.ensureVisible()
+		return result
+	}
+	result, _, _ := cueDefSubclassProc.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
+	switch message {
+	case cueWMChar, cueWMCut, cueWMPaste, cueWMClear, cueWMUndo, cueEMReplaceSel, cueWMIMEEnd:
+		banner.finishEdit()
+	case cueWMKeyDown:
+		if wParam == cueBackspace || wParam == cueDelete {
+			banner.finishEdit()
+		}
+	case cueWMEnable, cueWMPaint:
+		// The owning WM_CTLCOLOREDIT handler reads displaying and supplies the
+		// cue color during the edit's normal native paint.
 	case cueWMNCDestroy:
 		cueMu.Lock()
 		delete(cueBanners, hwnd)
 		cueMu.Unlock()
-		banner.edit = 0
-		banner.closed = true
+		banner.edit, banner.displaying, banner.closed = 0, false, true
 	}
 	return result
 }

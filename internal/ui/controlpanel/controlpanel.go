@@ -4,6 +4,7 @@ import (
 	"fmt"
 	mylog "github.com/JeffioZ/idletrigger/internal/logging"
 	"github.com/JeffioZ/idletrigger/internal/ui/font"
+	"github.com/JeffioZ/idletrigger/internal/ui/nativeform"
 	"github.com/JeffioZ/idletrigger/internal/ui/trayicon"
 	"golang.org/x/sys/windows"
 	"runtime"
@@ -59,8 +60,22 @@ func Capture(state State, langFn LangFunc, scale float64, capture func(windows.H
 			pDestroyWindow.Call(uintptr(p.hwnd))
 		}
 	}()
-	pUpdateWindow.Call(uintptr(p.hwnd))
+	p.present()
 	return capture(p.hwnd)
+}
+
+func (p *panel) present() {
+	nativeform.PresentFrame(p.hwnd, p.frameControls()...)
+}
+
+func (p *panel) frameControls() []windows.Handle {
+	controls := make([]windows.Handle, 0, len(p.controls))
+	for _, control := range p.controls {
+		if control != 0 {
+			controls = append(controls, control)
+		}
+	}
+	return controls
 }
 
 func createPanelForHost(state State, onAction OnAction, langFn LangFunc, captureScale float64, captureHost bool) (*panel, error) {
@@ -104,12 +119,8 @@ func createPanelForHost(state State, onAction OnAction, langFn LangFunc, capture
 		oldButtonProc: make(map[windows.Handle]uintptr),
 		controlBounds: make(map[uint16]logicalBounds),
 		choice: choiceSurface{
-			options:        make(map[uint16][]string),
-			selected:       make(map[uint16]int),
-			optionIDs:      make(map[uint16][]uint16),
-			optionControls: make(map[uint16]windows.Handle),
-			scroll:         make(map[uint16]int),
-			visible:        make(map[uint16]int),
+			options:  make(map[uint16][]string),
+			selected: make(map[uint16]int),
 		},
 		captureScale: captureScale,
 		captureHost:  captureHost,
@@ -272,8 +283,6 @@ func (p *panel) create() error {
 	}
 	title, _ := windows.UTF16PtrFromString(titleText)
 	name, _ := windows.UTF16PtrFromString(panelClass)
-	var cursor struct{ X, Y int32 }
-	pGetCursorPos.Call(uintptr(unsafe.Pointer(&cursor)))
 	style := uint32(wsPopup | wsCaption | wsSysMenu | wsClipChildren)
 	exStyle := uint32(wsExTopmost | wsExComposited)
 	owner := uintptr(p.owner)
@@ -284,11 +293,21 @@ func (p *panel) create() error {
 		exStyle = uint32(wsExAppWindow | wsExComposited)
 		owner = 0
 	}
-	hwnd, _, callErr := pCreateWindowEx.Call(uintptr(exStyle), uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(title)), uintptr(style), uintptr(cursor.X), uintptr(cursor.Y), 1, 1, owner, 0, 0, 0)
+	// Create hidden on the destination monitor instead of at a default or
+	// primary-monitor origin. Besides making GetDpiForWindow correct before the
+	// first layout, this keeps even a compositor-retained creation rectangle
+	// away from the top-left corner. The off-screen coordinate remains the safe
+	// fallback when monitor discovery itself fails.
+	creationX, creationY := panelFallbackWindowCoordinate, panelFallbackWindowCoordinate
+	if work, ok := cursorWorkArea(0); ok {
+		creationX, creationY = work.Right-1, work.Bottom-1
+	}
+	hwnd, _, callErr := pCreateWindowEx.Call(uintptr(exStyle), uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(title)), uintptr(style), uintptr(uint32(creationX)), uintptr(uint32(creationY)), 1, 1, owner, 0, 0, 0)
 	if hwnd == 0 {
 		return fmt.Errorf("create control panel: %w", callErr)
 	}
 	p.hwnd = windows.Handle(hwnd)
+	firstFrame := nativeform.BeginFirstFrame(p.hwnd)
 	p.style, p.exStyle = style, exStyle
 	scale := dpiForWindow(p.hwnd)
 	if p.captureScale > 0 {
@@ -315,7 +334,20 @@ func (p *panel) create() error {
 	if !p.captureHost {
 		trayicon.SetTabNavigationWindow(p.hwnd, p.enterKeyboardNavigation)
 	}
-	p.position(style, exStyle)
+	// Position the still-hidden top-level window first. This mirrors the native
+	// form windows and prevents a cold-start frame at the temporary creation
+	// coordinates from reaching the desktop compositor.
+	if err := p.position(style, exStyle); err != nil {
+		pDestroyWindow.Call(uintptr(p.hwnd))
+		return err
+	}
+	if err := firstFrame.Reveal(nativeform.FirstFrameOptions{
+		RepeatShow: p.captureHost,
+		Controls:   p.frameControls(),
+	}); err != nil {
+		pDestroyWindow.Call(uintptr(p.hwnd))
+		return err
+	}
 	if !p.captureHost {
 		pSetForeground.Call(uintptr(p.hwnd))
 	}

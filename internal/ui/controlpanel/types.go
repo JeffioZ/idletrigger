@@ -4,6 +4,7 @@ package controlpanel
 import (
 	"github.com/JeffioZ/idletrigger/internal/ui/colors"
 	"github.com/JeffioZ/idletrigger/internal/ui/font"
+	"github.com/JeffioZ/idletrigger/internal/ui/nativeform"
 	"golang.org/x/sys/windows"
 	"sync"
 )
@@ -174,23 +175,23 @@ const (
 	wsExComposited = 0x02000000
 	wsExAppWindow  = 0x00040000
 
-	swpNoSize      = 0x0001
-	swpNoMove      = 0x0002
-	swpNoZOrder    = 0x0004
-	swpNoActivate  = 0x0010
-	swpShowWindow  = 0x0040
-	swHide         = 0
-	swShow         = 5
-	monitorNearest = 2
-	gwlpWndProc    = ^uintptr(3)
-	vkUp           = 0x26
-	vkDown         = 0x28
-	vkHome         = 0x24
-	vkEnd          = 0x23
-	vkReturn       = 0x0D
-	vkSpace        = 0x20
-	vkF4           = 0x73
-	vkEscape       = 0x1B
+	swpNoSize                     = 0x0001
+	swpNoMove                     = 0x0002
+	swpNoZOrder                   = 0x0004
+	swpNoActivate                 = 0x0010
+	swpShowWindow                 = 0x0040
+	swHide                        = 0
+	monitorNearest                = 2
+	panelFallbackWindowCoordinate = int32(-32000)
+	gwlpWndProc                   = ^uintptr(3)
+	vkUp                          = 0x26
+	vkDown                        = 0x28
+	vkHome                        = 0x24
+	vkEnd                         = 0x23
+	vkReturn                      = 0x0D
+	vkSpace                       = 0x20
+	vkF4                          = 0x73
+	vkEscape                      = 0x1B
 
 	odsSelected  = 0x0001
 	odsDisabled  = 0x0004
@@ -256,12 +257,6 @@ const (
 	idProjectHome       = 501
 	idExit              = 502
 	idTestWarning       = 600
-	idChoiceSurface     = 630
-	idTimeoutOptionBase = 610
-	// Keep the two dynamic option ranges disjoint. Timeout has 10 presets
-	// (610-619), so action options must not start inside that range; otherwise
-	// choiceOptionOwner can classify the same HWND ID as either selector.
-	idActionOptionBase = 640
 )
 
 var (
@@ -288,6 +283,7 @@ var (
 	pGetFocus              = user32.NewProc("GetFocus")
 	pGetCursorPos          = user32.NewProc("GetCursorPos")
 	pMonitorFromWindow     = user32.NewProc("MonitorFromWindow")
+	pMonitorFromRect       = user32.NewProc("MonitorFromRect")
 	pGetMonitorInfo        = user32.NewProc("GetMonitorInfoW")
 	pAdjustWindowRect      = user32.NewProc("AdjustWindowRectEx")
 	pGetDpiForWindow       = user32.NewProc("GetDpiForWindow")
@@ -295,7 +291,6 @@ var (
 	pSetForeground         = user32.NewProc("SetForegroundWindow")
 	pLoadCursor            = user32.NewProc("LoadCursorW")
 	pSetCursor             = user32.NewProc("SetCursor")
-	pUpdateWindow          = user32.NewProc("UpdateWindow")
 	pSetFocus              = user32.NewProc("SetFocus")
 	pShowWindow            = user32.NewProc("ShowWindow")
 	pEnableWindow          = user32.NewProc("EnableWindow")
@@ -408,19 +403,14 @@ type panel struct {
 	captureHost             bool
 }
 
-// choiceSurface owns the transient controls used by the two value selectors.
-// The panel remains responsible for business callbacks and the selector
-// buttons; this type only owns option HWNDs and viewport/lifecycle state.
+// choiceSurface retains selector data while nativeform owns the one shared
+// popup implementation used by both the main panel and form windows.
 type choiceSurface struct {
-	options        map[uint16][]string
-	selected       map[uint16]int
-	openID         uint16
-	focusOnOpen    bool
-	restoreFocus   bool
-	optionIDs      map[uint16][]uint16
-	optionControls map[uint16]windows.Handle
-	scroll         map[uint16]int
-	visible        map[uint16]int
+	options  map[uint16][]string
+	selected map[uint16]int
+	openID   uint16
+	serial   uint64
+	popup    *nativeform.ChoicePopup
 }
 
 // Show opens the panel or closes the currently open panel. It must be called

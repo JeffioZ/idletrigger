@@ -35,19 +35,6 @@ func (p *panel) build() error {
 		p.choice.options[id] = append([]string(nil), options...)
 		p.choice.selected[id] = current
 		p.labels[id] = options[current]
-		base := idTimeoutOptionBase
-		if id == idIdleAction {
-			base = idActionOptionBase
-		}
-		ids := make([]uint16, len(options))
-		for i := range options {
-			ids[i] = uint16(base + i)
-			if err := createMenuOption(p, options[i], 0, 0, 1, 1, ids[i]); err != nil {
-				return err
-			}
-			p.choice.optionControls[ids[i]] = p.controls[ids[i]]
-		}
-		p.choice.optionIDs[id] = ids
 		return nil
 	}
 	choiceRow := func(x, y, totalW int, labels []string, ids []uint16) (int, error) {
@@ -232,9 +219,9 @@ func buttonHidden(p *panel, text string, x, y, width, height int, id uint16) err
 	return createMenuOption(p, text, x, y, width, height, id)
 }
 
-// createMenuOption is shared by the fixed quick/language menus and the
-// dynamic choice surface. Keeping creation in one path guarantees identical
-// class, style, font, owner-draw and subclass behavior.
+// createMenuOption is shared by the two fixed in-panel menus. Value selectors
+// use nativeform.ChoicePopup so scrolling and keyboard behavior are identical
+// in the main panel and form windows.
 func createMenuOption(p *panel, text string, x, y, width, height int, id uint16) error {
 	hwnd, err := p.child("BUTTON", text, wsChild|wsTabStop|bsOwnerDraw, x, y, width, height, id, p.font)
 	if err != nil {
@@ -361,9 +348,6 @@ func (p *panel) visualState(id uint16) buttonVisualState {
 // current Win32 draw notification and never escapes into tray business state.
 func (p *panel) controlState(id uint16, itemState uint32) buttonVisualState {
 	state := p.visualState(id)
-	if owner, index, ok := choiceOptionOwner(p, id); ok {
-		state.Active = p.choice.selected[owner] == index
-	}
 	state.Hovered = p.hoverID == id || itemState&odsHotlight != 0
 	// Native BUTTON hotlight can outlive WM_MOUSELEAVE on owner-drawn menu and
 	// choice triggers. Those controls use the panel's tracked hover state

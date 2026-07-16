@@ -11,15 +11,10 @@ func (p *panel) beginRebuild() {
 	if p.hwnd == 0 {
 		return
 	}
-	// WM_SETREDRAW changes WS_VISIBLE in DefWindowProc. Suspending every child
-	// therefore makes EndRebuild accidentally show controls belonging to the
-	// other view. Suspend only an already-visible top-level window; a window
-	// still under construction needs no batching because it has no visible
-	// frame yet.
-	if visible, _, _ := pIsWindowVisible.Call(uintptr(p.hwnd)); visible != 0 {
-		pSendMessage.Call(uintptr(p.hwnd), wmSetRedraw, 0, 0)
-		p.rebuildSuspended = true
-	}
+	// View changes run to completion inside one UI-thread message. Commit one
+	// final frame in EndRebuild without changing the top-level WS_VISIBLE state;
+	// WM_SETREDRAW caused a black intermediate frame on some Windows builds.
+	p.rebuildSuspended = true
 }
 
 func (p *panel) endRebuild() {
@@ -30,13 +25,33 @@ func (p *panel) endRebuild() {
 		return
 	}
 	p.rebuildSuspended = false
-	pSendMessage.Call(uintptr(p.hwnd), wmSetRedraw, 1, 0)
-	// DefWindowProc clears WS_VISIBLE while redraw is suspended. Restore that
-	// style without moving, resizing or activating the dialog before the one
-	// final repaint. This keeps both live transitions and PrintWindow captures
-	// on a fully initialized frame.
-	pSetWindowPos.Call(uintptr(p.hwnd), 0, 0, 0, 0, 0, swpNoMove|swpNoSize|swpNoZOrder|swpNoActivate|swpShowWindow)
-	pRedrawWindow.Call(uintptr(p.hwnd), 0, 0, 0x0001|0x0080|0x0100|0x0400)
+	if p.firstFramePending {
+		return
+	}
+	p.repaint()
+}
+
+func (p *panel) repaint() {
+	if p.hwnd == 0 {
+		return
+	}
+	p.surfaces.PrepareCues()
+	nativeform.PresentFrame(p.hwnd, p.frameControls()...)
+}
+
+func (p *panel) frameControls() []windows.Handle {
+	controls := make([]windows.Handle, 0, len(p.controls)+len(p.anonymous))
+	for _, control := range p.controls {
+		if control != 0 {
+			controls = append(controls, control)
+		}
+	}
+	for _, control := range p.anonymous {
+		if control != 0 {
+			controls = append(controls, control)
+		}
+	}
+	return controls
 }
 
 func (p *panel) setChoiceOptions(id uint16, labels []string) {
@@ -75,7 +90,7 @@ func (p *panel) openChoice(id uint16) {
 	p.choiceOpen = id
 	popup, err := nativeform.ShowChoicePopup(nativeform.ChoicePopupOptions{
 		Owner: p.hwnd, Anchor: p.controls[id], Font: p.font, SelectedFont: p.sectionFont, Palette: p.palette, Dark: p.themeDark,
-		Scale: p.scale(), Selected: choice.selected, MaxVisible: 6, Items: items,
+		Scale: p.scale(), Selected: choice.selected, MaxVisible: 6, Items: items, RestoreAnchorOnCancel: true,
 		OnSelect: func(index int) {
 			p.choicePopup = nil
 			p.choiceOpen = 0
@@ -152,10 +167,10 @@ func (p *panel) drawStyledOwnerItemDirect(value *drawItem) bool {
 		nativeform.DrawSurface(value.HDC, bounds, p.palette, p.palette.WindowBackground, p.palette.Surface, p.palette.Border, radius)
 		return true
 	}
-	if fieldID, ok := p.surfaceFields[id]; ok {
-		state := p.interaction.State(p.controls[fieldID])
+	if field, ok := p.surfaces.ForSurface(id); ok {
+		state := p.interaction.State(field.Control)
 		nativeform.DrawField(value.HDC, bounds, p.palette, p.palette.WindowBackground, nativeform.ControlState{
-			Hovered: state.Hovered, Focused: state.Focused, Disabled: !p.controlEnabled(fieldID),
+			Hovered: state.Hovered, Focused: state.Focused, Disabled: !p.controlEnabled(field.ControlID),
 		}, radius)
 		return true
 	}
@@ -167,7 +182,7 @@ func (p *panel) drawStyledOwnerItemDirect(value *drawItem) bool {
 	state := nativeform.ControlState{
 		Hovered:  interaction.Hovered,
 		Pressed:  interaction.Pressed || value.ItemState&odsSelected != 0,
-		Focused:  interaction.Focused || value.ItemState&odsFocus != 0,
+		Focused:  interaction.FocusVisible,
 		Disabled: value.ItemState&odsDisabled != 0 || !p.controlEnabled(id),
 	}
 	if _, ok := p.choices[id]; ok {
@@ -177,7 +192,7 @@ func (p *panel) drawStyledOwnerItemDirect(value *drawItem) bool {
 	}
 	if id == idKeepScreen {
 		state.Active = p.checked(id)
-		nativeform.DrawCheckbox(value.HDC, bounds, p.font, p.labels[id], p.palette, p.palette.WindowBackground, state, scale)
+		nativeform.DrawCheckbox(value.HDC, bounds, p.font, p.labels[id], p.palette, p.palette.WindowBackground, state, p.scale())
 		return true
 	}
 	if id == idProcessInfo {

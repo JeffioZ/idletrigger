@@ -74,7 +74,7 @@ func (p *picker) handleNotify(lParam unsafe.Pointer) {
 				}
 			}
 			p.captureSelection()
-			p.updateSelectionStatus()
+			p.refreshViewStatus()
 		}
 	case lvnGetInfoTipW:
 		p.fillRowInfoTip((*nmLVGetInfoTip)(lParam))
@@ -102,7 +102,7 @@ func (p *picker) handleNotify(lParam unsafe.Pointer) {
 		pSendMessage.Call(uintptr(p.controls[idList]), lvmSetItemState, uintptr(hit.Item), uintptr(unsafe.Pointer(&entry)))
 		p.populating = false
 		p.captureSelection()
-		p.updateSelectionStatus()
+		p.refreshViewStatus()
 	}
 }
 
@@ -175,7 +175,7 @@ func (p *picker) controlText(id uint16) string {
 	if len(buffer) > 0 {
 		pSendMessage.Call(uintptr(hwnd), wmGetText, uintptr(len(buffer)), uintptr(unsafe.Pointer(&buffer[0])))
 	}
-	return windows.UTF16ToString(buffer)
+	return p.surfaces.LogicalText(hwnd, windows.UTF16ToString(buffer))
 }
 
 func (p *picker) scale() float64 {
@@ -365,9 +365,7 @@ func (p *picker) applyTheme() {
 	if p.contentScroll != nil {
 		p.contentScroll.SetTheme(p.palette, p.palette.WindowBackground)
 	}
-	if p.searchCue != nil {
-		p.searchCue.SetTheme(p.palette.MutedText)
-	}
+	p.surfaces.SetCueTheme(p.palette.MutedText)
 	nativeform.ApplyTooltip(p.tooltip, p.themeDark, p.palette)
 	if p.hwnd != 0 {
 		pInvalidateRect.Call(uintptr(p.hwnd), 0, 0)
@@ -425,9 +423,7 @@ func (p *picker) rebuildForDPI() {
 		p.syncPreviewScrollbarBounds()
 		p.previewScroll.Sync()
 	}
-	if p.searchCue != nil {
-		p.searchCue.SetScale(scale)
-	}
+	p.surfaces.SetScale(scale)
 	if p.tooltip != 0 {
 		pSendMessage.Call(uintptr(p.tooltip), ttmSetMaxTipWidth, 0, uintptr(int(360*scale)))
 	}
@@ -446,7 +442,7 @@ func wndProc(hwnd windows.Handle, message uint32, wParam, lParam uintptr) uintpt
 	}
 	switch message {
 	case wmActivate:
-		if uint16(wParam) != 0 && !p.captureHost && shouldAutoRefreshProcessPicker(p.lastSnapshot, time.Now(), p.lastScanDuration, p.loading) {
+		if uint16(wParam) != 0 && !p.captureHost && shouldAutoRefreshProcessPicker(p.lastSnapshot, time.Now(), p.lastScanDuration, p.viewPhase == pickerViewLoading) {
 			p.startLoad(processLoadAutomatic)
 		}
 	case wmClose:
@@ -463,9 +459,12 @@ func wndProc(hwnd windows.Handle, message uint32, wParam, lParam uintptr) uintpt
 		p.handleNotify(nativeform.MessagePointer(lParam))
 		return 0
 	case wmTimer:
-		if wParam == searchTimerID {
+		switch wParam {
+		case searchTimerID:
 			pKillTimer.Call(uintptr(hwnd), searchTimerID)
 			p.applyFilter()
+		case statusTimerID:
+			p.finishStatusHold()
 		}
 		return 0
 	case wmMouseWheel:
@@ -497,7 +496,11 @@ func wndProc(hwnd windows.Handle, message uint32, wParam, lParam uintptr) uintpt
 		pSetBkMode.Call(wParam, opaque)
 		return uintptr(brush)
 	case wmCtlColorEdit, wmCtlColorList:
-		pSetTextColor.Call(wParam, uintptr(p.palette.PrimaryText))
+		textColor := p.palette.PrimaryText
+		if cueColor, cue := p.surfaces.CueColor(windows.Handle(lParam)); cue {
+			textColor = cueColor
+		}
+		pSetTextColor.Call(wParam, uintptr(textColor))
 		pSetBkColor.Call(wParam, uintptr(p.palette.Surface))
 		return uintptr(p.surfaceBrush)
 	case wmSettingChange, wmSysColorChange, wmThemeChanged:

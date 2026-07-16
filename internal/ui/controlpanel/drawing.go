@@ -103,10 +103,6 @@ func (p *panel) roundRectFocusRing(dc windows.Handle, bounds rect, color uint32)
 func (p *panel) drawButton(item *drawItem) {
 	id := uint16(item.CtlID)
 	state := p.controlState(id, item.ItemState)
-	if owner, index, ok := choiceOptionOwner(p, id); ok {
-		p.drawMenuOption(item, state, menuOptionStyleFor(id, p.choice.selected[owner] == index))
-		return
-	}
 	if containsLanguageOption(id) {
 		p.drawMenuOption(item, state, menuOptionStyleFor(id, p.selected[id]))
 		return
@@ -259,9 +255,8 @@ func menuOptionStyleFor(id uint16, selected bool) menuOptionStyle {
 	}
 }
 
-// drawMenuOption is the single rendering path for quick actions, language
-// choices, idle-time choices, and idle-action choices. The style describes
-// only their real semantic differences.
+// drawMenuOption is the rendering path for the two fixed in-panel menus.
+// Value selector rows are drawn by nativeform.ChoicePopup.
 func (p *panel) drawMenuOption(item *drawItem, state buttonVisualState, style menuOptionStyle) {
 	brush, border, textColor := p.surfaceBrush, p.palette.Border, p.palette.PrimaryText
 	if state.Hovered {

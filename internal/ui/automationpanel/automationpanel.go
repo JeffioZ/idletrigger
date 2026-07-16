@@ -5,7 +5,6 @@ package automationpanel
 
 import (
 	"fmt"
-	"reflect"
 	"runtime"
 	"sync"
 	"unsafe"
@@ -111,8 +110,7 @@ type panel struct {
 	triggerOptions      []automation.Trigger
 	labels              map[uint16]string
 	bounds              map[uint16]logicalBounds
-	fieldSurfaces       map[uint16]uint16
-	surfaceFields       map[uint16]uint16
+	surfaces            nativeform.ControlSurfaceSet
 	choices             map[uint16]*choiceField
 	checks              map[uint16]bool
 	choiceOpen          uint16
@@ -131,9 +129,9 @@ type panel struct {
 	managerReady        bool
 	editorReady         bool
 	rebuildSuspended    bool
+	firstFramePending   bool
 	managerScroll       *nativeform.ListboxScrollbar
 	contentScroll       *nativeform.Scrollbar
-	nameCue             *nativeform.CueBanner
 	pendingState        *State
 	managerNotice       string
 }
@@ -216,7 +214,6 @@ const (
 	wmThemeChanged      = 0x031A
 	wmDpiChanged        = 0x02E0
 	wmSetFont           = 0x0030
-	wmSetRedraw         = 0x000B
 	wmLButtonDown       = 0x0201
 	wmMouseWheel        = 0x020A
 	wmKeyDown           = 0x0100
@@ -231,12 +228,12 @@ const (
 	wsMinimizeBox       = 0x00020000
 	wsMaximizeBox       = 0x00010000
 	wsClipChildren      = 0x02000000
+	wsClipSiblings      = 0x04000000
 	wsChild             = 0x40000000
 	wsVisible           = 0x10000000
 	wsTabStop           = 0x00010000
 	wsVScroll           = 0x00200000
 	wsExTopmost         = 0x00000008
-	wsExComposited      = 0x02000000
 	wsExAppWindow       = 0x00040000
 	esAutoHScroll       = 0x0080
 	lbsNotify           = 0x0001
@@ -244,6 +241,7 @@ const (
 	bsOwnerDraw         = 0x0000000B
 	ssLeft              = 0
 	ssOwnerDraw         = 0x0000000D
+	formSurfaceStyle    = wsChild | wsClipSiblings | ssOwnerDraw
 	lbAddString         = 0x0180
 	lbResetContent      = 0x0184
 	lbGetCurSel         = 0x0188
@@ -272,7 +270,6 @@ const (
 	swpNoSize           = 0x0001
 	swpNoMove           = 0x0002
 	swpNoActivate       = 0x0010
-	swpShowWindow       = 0x0040
 	odsSelected         = 0x0001
 	odsDisabled         = 0x0004
 	odsFocus            = 0x0010
@@ -295,7 +292,6 @@ var (
 	pPostMessage       = user32.NewProc("PostMessageW")
 	pSetWindowPos      = user32.NewProc("SetWindowPos")
 	pShowWindow        = user32.NewProc("ShowWindow")
-	pUpdateWindow      = user32.NewProc("UpdateWindow")
 	pEnableWindow      = user32.NewProc("EnableWindow")
 	pIsWindow          = user32.NewProc("IsWindow")
 	pIsWindowEnabled   = user32.NewProc("IsWindowEnabled")
@@ -305,9 +301,7 @@ var (
 	pGetClientRect     = user32.NewProc("GetClientRect")
 	pFillRect          = user32.NewProc("FillRect")
 	pInvalidateRect    = user32.NewProc("InvalidateRect")
-	pRedrawWindow      = user32.NewProc("RedrawWindow")
 	pGetDpiForWindow   = user32.NewProc("GetDpiForWindow")
-	pGetCursorPos      = user32.NewProc("GetCursorPos")
 	pSetTextColor      = gdi32.NewProc("SetTextColor")
 	pSetBkColor        = gdi32.NewProc("SetBkColor")
 	pSetBkMode         = gdi32.NewProc("SetBkMode")
@@ -460,17 +454,7 @@ func Capture(state State, text TextFunc, scale float64, dark, editor bool, captu
 	if capture == nil {
 		return nil
 	}
-	pInvalidateRect.Call(uintptr(p.hwnd), 0, 0)
-	pUpdateWindow.Call(uintptr(p.hwnd))
-	for _, control := range p.controls {
-		pInvalidateRect.Call(uintptr(control), 0, 0)
-		pUpdateWindow.Call(uintptr(control))
-	}
-	for _, control := range p.anonymous {
-		pInvalidateRect.Call(uintptr(control), 0, 0)
-		pUpdateWindow.Call(uintptr(control))
-	}
-	pRedrawWindow.Call(uintptr(p.hwnd), 0, 0, 0x0001|0x0080|0x0100|0x0400)
+	p.repaint()
 	return capture(p.hwnd)
 }
 
@@ -495,17 +479,23 @@ func (p *panel) create() error {
 	class, _ := windows.UTF16PtrFromString(windowClass)
 	title, _ := windows.UTF16PtrFromString(p.t("automation_title"))
 	p.style = wsPopup | wsCaption | wsSysMenu | wsClipChildren
+	// Keep native EDIT controls on their normal paint path. The first-frame gate
+	// provides atomic presentation without top-level descendant compositing.
 	p.exStyle = wsExTopmost
 	if p.captureHost {
 		p.style = wsOverlapped | wsCaption | wsSysMenu | wsThickFrame | wsMinimizeBox | wsMaximizeBox | wsClipChildren
-		p.exStyle = wsExAppWindow | wsExComposited
+		p.exStyle = wsExAppWindow
 	}
-	hwnd, _, callErr := pCreateWindowEx.Call(p.exStyle, uintptr(unsafe.Pointer(class)), uintptr(unsafe.Pointer(title)), p.style, 0, 0, 1, 1, uintptr(p.state.Owner), 0, 0, 0)
+	creationX, creationY := nativeform.InitialWindowPoint(p.state.Owner)
+	hwnd, _, callErr := pCreateWindowEx.Call(
+		p.exStyle, uintptr(unsafe.Pointer(class)), uintptr(unsafe.Pointer(title)), p.style,
+		uintptr(creationX), uintptr(creationY), 1, 1, uintptr(p.state.Owner), 0, 0, 0,
+	)
 	if hwnd == 0 {
 		return fmt.Errorf("create automation panel: %w", callErr)
 	}
 	p.hwnd = windows.Handle(hwnd)
-	p.moveToCursorMonitor()
+	firstFrame := nativeform.BeginFirstFrame(p.hwnd)
 	p.dpiScale = p.windowScale()
 	scale := p.scale()
 	p.font, _ = font.New(int32(14*scale+0.5), 400, p.state.Chinese)
@@ -520,28 +510,31 @@ func (p *panel) create() error {
 		return scrollErr
 	}
 	p.contentScroll = contentScroll
+	p.firstFramePending = true
 	p.showManager()
 	if p.layoutErr != nil {
 		err := p.layoutErr
 		pDestroyWindow.Call(hwnd)
 		return err
 	}
+	p.firstFramePending = false
 	if !p.captureHost && p.state.Owner != 0 {
 		if enabled, _, _ := pIsWindowEnabled.Call(uintptr(p.state.Owner)); enabled != 0 {
 			pEnableWindow.Call(uintptr(p.state.Owner), 0)
 			p.ownerDisabled = true
 		}
 	}
-	pShowWindow.Call(hwnd, 5)
-	if p.captureHost {
-		// A hidden devtools host can override the first ShowWindow call through
-		// STARTUPINFO. The second call uses the explicit state and keeps native
-		// child controls visible for PrintWindow.
-		pShowWindow.Call(hwnd, 5)
+	p.surfaces.PrepareCues()
+	if err := firstFrame.Reveal(nativeform.FirstFrameOptions{
+		RepeatShow: p.captureHost,
+		Controls:   p.frameControls(),
+	}); err != nil {
+		pDestroyWindow.Call(hwnd)
+		return err
 	}
 	if !p.captureHost {
 		pSetForeground.Call(hwnd)
-		trayicon.SetTabNavigationWindow(p.hwnd, nil)
+		trayicon.SetTabNavigationWindow(p.hwnd, func() { p.interaction.SetFocusVisible(true) })
 		// Let the manager commit its first frame before constructing the hidden
 		// editor controls. The queued prewarm removes the first-New delay without
 		// making the manager itself wait for a second page of controls.
@@ -552,10 +545,7 @@ func (p *panel) create() error {
 
 func (p *panel) clearControls() {
 	p.closeChoice(false)
-	if p.nameCue != nil {
-		p.nameCue.Close()
-		p.nameCue = nil
-	}
+	p.surfaces.Close()
 	if p.managerScroll != nil {
 		p.managerScroll.Close()
 		p.managerScroll = nil
@@ -584,14 +574,12 @@ func (p *panel) initializeControlState() {
 	p.tooltipText = nil
 	p.labels = make(map[uint16]string)
 	p.bounds = make(map[uint16]logicalBounds)
-	p.fieldSurfaces = make(map[uint16]uint16)
-	p.surfaceFields = make(map[uint16]uint16)
+	p.surfaces = nativeform.ControlSurfaceSet{}
 	p.choices = make(map[uint16]*choiceField)
 	p.checks = make(map[uint16]bool)
 	p.choiceOpen = 0
 	p.managerReady = false
 	p.editorReady = false
-	p.nameCue = nil
 }
 
 func (p *panel) updateState(state State) {
@@ -609,7 +597,7 @@ func (p *panel) updateState(state State) {
 	if p.view == editorView {
 		p.syncDraft()
 		selectedID = p.draft.ID
-		if !reflect.DeepEqual(p.draft, p.originalDraft) {
+		if editorHasAnyChanges(p.originalDraft, p.draft) {
 			pending := cloneState(state)
 			p.pendingState = &pending
 			p.setEditorError(idSave, p.t("automation_changed_external"))

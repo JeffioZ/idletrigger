@@ -81,25 +81,6 @@ func (t *winTray) wndProc(hWnd windows.Handle, message uint32, wParam, lParam ui
 func (t *winTray) initInstance() error {
 	const IDI_APPLICATION = 32512
 	const IDC_ARROW = 32512 // Standard arrow
-	// https://msdn.microsoft.com/en-us/library/windows/desktop/ms633548(v=vs.85).aspx
-	const SW_HIDE = 0
-	const CW_USEDEFAULT = 0x80000000
-	// https://msdn.microsoft.com/en-us/library/windows/desktop/ms632600(v=vs.85).aspx
-	const (
-		WS_CAPTION     = 0x00C00000
-		WS_MAXIMIZEBOX = 0x00010000
-		WS_MINIMIZEBOX = 0x00020000
-		WS_OVERLAPPED  = 0x00000000
-		WS_SYSMENU     = 0x00080000
-		WS_THICKFRAME  = 0x00040000
-
-		WS_OVERLAPPEDWINDOW = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX
-	)
-	// https://msdn.microsoft.com/en-us/library/windows/desktop/ff729176
-	const (
-		CS_HREDRAW = 0x0002
-		CS_VREDRAW = 0x0001
-	)
 	const NIF_MESSAGE = 0x00000001
 
 	// https://msdn.microsoft.com/en-us/library/windows/desktop/ms644931(v=vs.85).aspx
@@ -165,7 +146,6 @@ func (t *winTray) initInstance() error {
 	}
 
 	t.wcex = &wndClassEx{
-		Style:      CS_HREDRAW | CS_VREDRAW,
 		WndProc:    windows.NewCallback(t.wndProc),
 		Instance:   t.instance,
 		Icon:       t.icon,
@@ -178,15 +158,16 @@ func (t *winTray) initInstance() error {
 		return err
 	}
 
+	hiddenCoordinate := trayHostWindowCoordinate
 	windowHandle, _, err := pCreateWindowEx.Call(
 		uintptr(0),
 		uintptr(unsafe.Pointer(classNamePtr)),
 		uintptr(unsafe.Pointer(windowNamePtr)),
-		uintptr(WS_OVERLAPPEDWINDOW),
-		uintptr(CW_USEDEFAULT),
-		uintptr(CW_USEDEFAULT),
-		uintptr(CW_USEDEFAULT),
-		uintptr(CW_USEDEFAULT),
+		uintptr(trayHostWindowStyle),
+		uintptr(uint32(hiddenCoordinate)),
+		uintptr(uint32(hiddenCoordinate)),
+		0,
+		0,
 		uintptr(0),
 		uintptr(0),
 		uintptr(t.instance),
@@ -197,15 +178,6 @@ func (t *winTray) initInstance() error {
 	}
 	t.window = windows.Handle(windowHandle)
 	darkmode.AllowWindow(uintptr(t.window))
-
-	pShowWindow.Call(
-		uintptr(t.window),
-		uintptr(SW_HIDE),
-	)
-
-	pUpdateWindow.Call(
-		uintptr(t.window),
-	)
 
 	t.muNID.Lock()
 	defer t.muNID.Unlock()

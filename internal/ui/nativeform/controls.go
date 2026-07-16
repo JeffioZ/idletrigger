@@ -141,22 +141,23 @@ func DrawChoice(dc windows.Handle, bounds Rect, font windows.Handle, label strin
 	drawArrow(dc, bounds.Right-18*scale, (bounds.Top+bounds.Bottom)/2, state.Open, arrowColor, scale)
 }
 
-func DrawCheckbox(dc windows.Handle, bounds Rect, font windows.Handle, label string, palette colors.Palette, background uint32, state ControlState, scale int32) {
+func DrawCheckbox(dc windows.Handle, bounds Rect, font windows.Handle, label string, palette colors.Palette, background uint32, state ControlState, scale float64) {
 	fillRect(dc, bounds, background)
-	boxSize := 18 * scale
-	box := Rect{Left: bounds.Left + 2*scale, Top: bounds.Top + (bounds.Bottom-bounds.Top-boxSize)/2}
+	boxSize := scaledPixels(CheckboxSize, scale)
+	box := Rect{Left: bounds.Left + scaledPixels(2, scale), Top: bounds.Top + (bounds.Bottom-bounds.Top-boxSize)/2}
 	box.Right, box.Bottom = box.Left+boxSize, box.Top+boxSize
-	drawCheckboxBox(dc, box, palette, background, state, float64(scale))
+	drawCheckboxBox(dc, box, palette, background, state, scale)
 	if state.Focused && !state.Disabled {
 		frame := bounds
-		frame.Left += scale
-		frame.Top += scale
-		frame.Right -= scale
-		frame.Bottom -= scale
+		inset := scaledPixels(1, scale)
+		frame.Left += inset
+		frame.Top += inset
+		frame.Right -= inset
+		frame.Bottom -= inset
 		frameRect(dc, frame, palette.Focus)
 	}
 	textBounds := bounds
-	textBounds.Left = box.Right + 8*scale
+	textBounds.Left = box.Right + scaledPixels(8, scale)
 	drawLabel(dc, textBounds, font, label, checkboxTextColor(palette, state), true, 0, 4)
 }
 
@@ -164,7 +165,7 @@ func DrawCheckbox(dc windows.Handle, bounds Rect, font windows.Handle, label str
 // label. It is also suitable for native list-view state images.
 func DrawCheckboxGlyph(dc windows.Handle, bounds Rect, palette colors.Palette, background uint32, state ControlState, scale float64) {
 	fillRect(dc, bounds, background)
-	boxSize := scaledPixels(18, scale)
+	boxSize := scaledPixels(CheckboxSize, scale)
 	box := Rect{
 		Left: bounds.Left + (bounds.Right-bounds.Left-boxSize)/2,
 		Top:  bounds.Top + (bounds.Bottom-bounds.Top-boxSize)/2,
@@ -211,33 +212,6 @@ func DrawMenuOption(dc windows.Handle, bounds Rect, font, selectedFont windows.H
 		}
 	}
 	drawLabel(dc, bounds, font, label, textColor, true, 10*scale, 8*scale)
-}
-
-// DrawListHeader renders a flat sortable column header with stable hover and
-// pressed states in both themes. Native header colors vary across supported
-// Windows builds, so form-style lists use this small shared renderer instead.
-func DrawListHeader(dc windows.Handle, bounds Rect, font windows.Handle, label string, palette colors.Palette, state ControlState, scale int32) {
-	fill, textColor := palette.ElevatedSurface, palette.PrimaryText
-	if state.Hovered {
-		fill = palette.HoverSurface
-	}
-	if state.Pressed {
-		fill, textColor = palette.AccentPressed, palette.AccentText
-	}
-	fillRect(dc, bounds, fill)
-	drawLabel(dc, bounds, font, label, textColor, true, 6*scale, 4*scale)
-
-	pen, _, _ := controlCreatePen.Call(drawPSolid, 1, uintptr(palette.SubtleBorder))
-	if pen == 0 {
-		return
-	}
-	old, _, _ := controlSelectObject.Call(uintptr(dc), pen)
-	controlMoveToEx.Call(uintptr(dc), uintptr(bounds.Right-1), uintptr(bounds.Top), 0)
-	controlLineTo.Call(uintptr(dc), uintptr(bounds.Right-1), uintptr(bounds.Bottom))
-	controlMoveToEx.Call(uintptr(dc), uintptr(bounds.Left), uintptr(bounds.Bottom-1), 0)
-	controlLineTo.Call(uintptr(dc), uintptr(bounds.Right), uintptr(bounds.Bottom-1))
-	controlSelectObject.Call(uintptr(dc), old)
-	controlDeleteObject.Call(pen)
 }
 
 func drawCheckboxBox(dc windows.Handle, box Rect, palette colors.Palette, background uint32, state ControlState, scale float64) {

@@ -6,6 +6,7 @@ package gdiplus
 
 import (
 	"sync"
+	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -40,6 +41,17 @@ type startupInput struct {
 	SuppressExternalCodecs   uint32
 }
 
+type startupOutput struct {
+	NotificationHook   uintptr
+	NotificationUnhook uintptr
+}
+
+type lifecycleSession struct {
+	gdiplusToken       uintptr
+	notificationToken  uintptr
+	notificationUnhook uintptr
+}
+
 type lifecycleState uint8
 
 const (
@@ -54,13 +66,13 @@ type lifecycleManager struct {
 	mu       sync.Mutex
 	changed  *sync.Cond
 	state    lifecycleState
-	token    uintptr
+	session  lifecycleSession
 	active   int
-	startup  func() (uintptr, bool)
-	shutdown func(uintptr)
+	startup  func() (lifecycleSession, bool)
+	shutdown func(lifecycleSession)
 }
 
-func newLifecycle(startup func() (uintptr, bool), shutdown func(uintptr)) *lifecycleManager {
+func newLifecycle(startup func() (lifecycleSession, bool), shutdown func(lifecycleSession)) *lifecycleManager {
 	m := &lifecycleManager{startup: startup, shutdown: shutdown}
 	m.changed = sync.NewCond(&m.mu)
 	return m
@@ -75,12 +87,12 @@ func (m *lifecycleManager) start() bool {
 	if m.state != stateNew {
 		return false
 	}
-	token, ok := m.startup()
-	if !ok || token == 0 {
+	session, ok := m.startup()
+	if !ok || session.gdiplusToken == 0 {
 		m.state = stateFailed
 		return false
 	}
-	m.token, m.state = token, stateReady
+	m.session, m.state = session, stateReady
 	return true
 }
 
@@ -123,11 +135,11 @@ func (m *lifecycleManager) close() {
 	for m.active != 0 {
 		m.changed.Wait()
 	}
-	token := m.token
-	m.token = 0
+	session := m.session
+	m.session = lifecycleSession{}
 	m.mu.Unlock()
 
-	m.shutdown(token)
+	m.shutdown(session)
 
 	m.mu.Lock()
 	m.state = stateClosed
@@ -347,7 +359,7 @@ func roundedRectPath(a gdiAPI, bounds roundedRect, radius int32) (uintptr, bool)
 	return path, true
 }
 
-func startup() (uintptr, bool) {
+func startup() (lifecycleSession, bool) {
 	if !loadRequiredAPI(
 		dll.Load,
 		pStartup.Find,
@@ -367,12 +379,33 @@ func startup() (uintptr, bool) {
 		pAddPathBezierI.Find,
 		pFillPath.Find,
 	) {
-		return 0, false
+		return lifecycleSession{}, false
 	}
-	input := startupInput{Version: 1}
+	// The default GDI+ background thread owns a hidden "GDI+ Hook Window" at
+	// (0,0). IdleTrigger already has one lifetime-long Win32 message loop, so use
+	// the documented notification hook path instead and avoid creating that
+	// auxiliary top-level window altogether.
+	input := startupInput{Version: 1, SuppressBackgroundThread: 1}
+	var output startupOutput
 	var token uintptr
-	status, _, _ := pStartup.Call(uintptr(unsafe.Pointer(&token)), uintptr(unsafe.Pointer(&input)), 0)
-	return token, status == 0 && token != 0
+	status, _, _ := pStartup.Call(uintptr(unsafe.Pointer(&token)), uintptr(unsafe.Pointer(&input)), uintptr(unsafe.Pointer(&output)))
+	if status != 0 || token == 0 || output.NotificationHook == 0 || output.NotificationUnhook == 0 {
+		if token != 0 {
+			pShutdown.Call(token)
+		}
+		return lifecycleSession{}, false
+	}
+	var notificationToken uintptr
+	status, _, _ = syscall.SyscallN(output.NotificationHook, uintptr(unsafe.Pointer(&notificationToken)))
+	if status != 0 {
+		pShutdown.Call(token)
+		return lifecycleSession{}, false
+	}
+	return lifecycleSession{
+		gdiplusToken:       token,
+		notificationToken:  notificationToken,
+		notificationUnhook: output.NotificationUnhook,
+	}, true
 }
 
 func loadRequiredAPI(load func() error, finders ...func() error) bool {
@@ -387,7 +420,14 @@ func loadRequiredAPI(load func() error, finders ...func() error) bool {
 	return true
 }
 
-func shutdown(token uintptr) { pShutdown.Call(token) }
+func shutdown(session lifecycleSession) {
+	if session.notificationUnhook != 0 {
+		syscall.SyscallN(session.notificationUnhook, session.notificationToken)
+	}
+	if session.gdiplusToken != 0 {
+		pShutdown.Call(session.gdiplusToken)
+	}
+}
 
 func createFromHDC(hdc windows.Handle) (uintptr, bool) {
 	var graphics uintptr

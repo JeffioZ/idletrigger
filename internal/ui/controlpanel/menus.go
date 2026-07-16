@@ -102,11 +102,7 @@ func (p *panel) menuClickKeepsOpen(id uint16) bool {
 	if p.choice.openID == 0 {
 		return false
 	}
-	if id == p.choice.openID || id == idChoiceSurface {
-		return true
-	}
-	owner, _, ok := choiceOptionOwner(p, id)
-	return ok && owner == p.choice.openID
+	return id == p.choice.openID
 }
 
 func (p *panel) setDisabled(id uint16, value bool) {

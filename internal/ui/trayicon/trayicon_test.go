@@ -60,13 +60,18 @@ func TestNestedTabNavigationRestoresOwner(t *testing.T) {
 	})
 
 	owner, child, warning := windows.Handle(100), windows.Handle(200), windows.Handle(300)
-	SetTabNavigationWindow(owner, nil)
+	ownerNavigated := 0
+	SetTabNavigationWindow(owner, func() { ownerNavigated++ })
 	SetTabNavigationWindow(child, nil)
 	SetTabNavigationWindow(warning, nil)
 	ClearTabNavigationWindow(child)
 	ClearTabNavigationWindow(warning)
 	if tabNavigation.hwnd != owner || len(tabNavigation.stack) != 0 {
 		t.Fatalf("active=%d stack=%+v", tabNavigation.hwnd, tabNavigation.stack)
+	}
+	tabNavigation.onNavigated()
+	if ownerNavigated != 1 {
+		t.Fatal("nested dialog cleanup did not restore the owner's Tab-navigation callback")
 	}
 	ClearTabNavigationWindow(owner)
 }
@@ -79,6 +84,23 @@ func TestThemeChangeMessageScope(t *testing.T) {
 	}
 	if isThemeChangeMessage(wmKeyDown) {
 		t.Fatal("keyboard messages must not trigger a theme refresh")
+	}
+}
+
+func TestTrayHostWindowCannotExposeANormalFrame(t *testing.T) {
+	const (
+		wsVisible = 0x10000000
+		wsCaption = 0x00C00000
+		wsPopup   = 0x80000000
+	)
+	if trayHostWindowStyle&wsPopup == 0 {
+		t.Fatal("tray host must remain a top-level popup for broadcast messages")
+	}
+	if trayHostWindowStyle&(wsVisible|wsCaption) != 0 {
+		t.Fatalf("tray host style %#x can expose a visible framed window", trayHostWindowStyle)
+	}
+	if trayHostWindowCoordinate > -30000 {
+		t.Fatalf("tray host creation coordinate %d is not safely outside the desktop", trayHostWindowCoordinate)
 	}
 }
 

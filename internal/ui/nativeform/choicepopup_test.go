@@ -1,6 +1,10 @@
 package nativeform
 
-import "testing"
+import (
+	"testing"
+
+	"golang.org/x/sys/windows"
+)
 
 func TestChoicePopupRowHitTestingSkipsHeadersAndGaps(t *testing.T) {
 	p := &ChoicePopup{
@@ -47,5 +51,46 @@ func TestChoicePopupKeyboardNavigationAndViewport(t *testing.T) {
 	p.ensureVisible(1, p.visibleRows())
 	if p.first != 1 {
 		t.Fatalf("viewport first after moving up = %d, want 1", p.first)
+	}
+}
+
+func TestChoicePopupFocusTransferWithinOwnerWaitsForOwnerCommand(t *testing.T) {
+	owner := windows.Handle(41)
+	anchor := windows.Handle(42)
+	if !choicePopupFocusStaysWithinOwner(owner, anchor, anchor) {
+		t.Fatal("focus transfer to the choice anchor should keep the popup alive")
+	}
+	if !choicePopupFocusStaysWithinOwner(owner, anchor, owner) {
+		t.Fatal("focus transfer through the owner should keep the popup alive")
+	}
+	if choicePopupFocusStaysWithinOwner(owner, anchor, 0) {
+		t.Fatal("focus leaving the owner should close the popup")
+	}
+}
+
+func TestChoicePopupReselectionPolicyIsExplicit(t *testing.T) {
+	if !choicePopupKeepsReselectionOpen(2, 2, true) {
+		t.Fatal("configured reselection should remain open")
+	}
+	if choicePopupKeepsReselectionOpen(2, 2, false) {
+		t.Fatal("default reselection should close")
+	}
+	if choicePopupKeepsReselectionOpen(2, 3, true) {
+		t.Fatal("a different selection must be applied")
+	}
+}
+
+func TestChoicePopupHomeAndEndSkipHeaders(t *testing.T) {
+	p := &ChoicePopup{options: ChoicePopupOptions{Items: []ChoicePopupItem{
+		{Label: "State", Header: true},
+		{Label: "On", Value: 0},
+		{Label: "System", Header: true},
+		{Label: "Shutdown", Value: 1},
+	}}}
+	if got := p.nextSelectable(-1, 1); got != 1 {
+		t.Fatalf("first selectable row = %d, want 1", got)
+	}
+	if got := p.nextSelectable(len(p.options.Items), -1); got != 3 {
+		t.Fatalf("last selectable row = %d, want 3", got)
 	}
 }

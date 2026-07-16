@@ -28,9 +28,9 @@ func (p *panel) showManager() {
 	p.resize(managerWidth, managerHeight)
 	if !p.managerReady {
 		p.child("STATIC", p.t("automation_rules_title"), wsChild|wsVisible|ssLeft, 18, 16, 564, 24, idTitle, p.sectionFont)
-		surface := p.child("STATIC", "", wsChild|wsVisible|ssOwnerDraw, 18, 48, 564, 240, idListSurface, p.font)
+		surface := p.child("STATIC", "", formSurfaceStyle|wsVisible, 18, 48, 564, 240, idListSurface, p.font)
 		pSetWindowPos.Call(uintptr(surface), 1, 0, 0, 0, 0, swpNoMove|swpNoSize|swpNoActivate)
-		list := p.child("LISTBOX", "", wsChild|wsVisible|wsTabStop|wsVScroll|lbsNotify|lbsNoIntegralHeight, 20, 50, 560, 236, idList, p.font)
+		list := p.child("LISTBOX", "", wsChild|wsVisible|wsTabStop|wsVScroll|wsClipSiblings|lbsNotify|lbsNoIntegralHeight, 20, 50, 560, 236, idList, p.font)
 		if scrollbar, err := nativeform.NewListboxScrollbar(nativeform.ListboxScrollbarOptions{
 			Parent: p.hwnd, Listbox: list, Palette: p.palette, Background: p.palette.Surface, Scale: p.scale(),
 		}); err == nil {

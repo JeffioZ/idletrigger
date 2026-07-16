@@ -30,6 +30,7 @@ const (
 	windowMonitorNearest = 2
 	windowSWPNoZOrder    = 0x0004
 	windowSWPNoActivate  = 0x0010
+	windowFallbackPoint  = -32000
 )
 
 var (
@@ -43,6 +44,25 @@ var (
 	windowMonitorFromWindow = windowUser32.NewProc("MonitorFromWindow")
 	windowSetWindowPos      = windowUser32.NewProc("SetWindowPos")
 )
+
+// InitialWindowPoint returns a hidden 1x1 creation point on the anchor's
+// monitor. Creating there lets GetDpiForWindow report the destination DPI
+// before controls and fonts are built. The off-screen fallback is used only
+// when no valid owner/anchor monitor is available.
+func InitialWindowPoint(anchor windows.Handle) (int, int) {
+	if anchor != 0 {
+		monitor, _, _ := windowMonitorFromWindow.Call(uintptr(anchor), windowMonitorNearest)
+		if monitor != 0 {
+			info := windowMonitorInfo{Size: uint32(unsafe.Sizeof(windowMonitorInfo{}))}
+			if ok, _, _ := windowGetMonitorInfo.Call(monitor, uintptr(unsafe.Pointer(&info))); ok != 0 {
+				if info.Work.Right > info.Work.Left && info.Work.Bottom > info.Work.Top {
+					return int(info.Work.Right - 1), int(info.Work.Bottom - 1)
+				}
+			}
+		}
+	}
+	return windowFallbackPoint, windowFallbackPoint
+}
 
 // PlaceWindow sizes and positions a top-level form inside one visible monitor
 // work area. WM_DPICHANGED callers pass Suggested so Windows' recommended

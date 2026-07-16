@@ -14,6 +14,7 @@ import (
 
 	"github.com/JeffioZ/idletrigger/internal/automation"
 	"github.com/JeffioZ/idletrigger/internal/platform/windows/processcatalog"
+	"github.com/JeffioZ/idletrigger/internal/ui/nativeform"
 )
 
 func (p *picker) startLoad(mode processLoadMode) {
@@ -22,13 +23,12 @@ func (p *picker) startLoad(mode processLoadMode) {
 	}
 	p.captureSelection()
 	p.captureViewAnchors()
-	p.loading = true
-	p.enriching = false
-	p.setText(idStatus, p.text("process_picker_loading"))
-	p.setText(idEmpty, p.text("process_picker_loading"))
-	p.show(idEmpty, len(p.visible) == 0)
-	p.enable(idRefresh, false)
-	p.enable(idConfirm, len(p.selected) > 0)
+	if mode == processLoadManual {
+		p.beginManualStatusHold()
+	} else {
+		p.clearStatusHold()
+	}
+	p.transitionView(pickerViewLoading, "")
 	generation := nextGeneration.Add(1)
 	p.generation = generation
 	var exactTargets []automation.ProcessTarget
@@ -151,14 +151,9 @@ func (p *picker) finishLoad(generation uint64, instances []processcatalog.Instan
 		return
 	}
 	if err != nil {
-		p.loading = false
-		p.enriching = false
-		p.setText(idStatus, fmt.Sprintf(p.text("process_picker_error"), err.Error()))
-		p.setText(idEmpty, p.text("process_picker_load_failed"))
-		p.show(idEmpty, len(p.visible) == 0)
-		p.enable(idRefresh, true)
-		p.enable(idConfirm, len(p.selected) > 0)
+		p.transitionView(pickerViewError, fmt.Sprintf(p.text("process_picker_error"), err.Error()))
 		p.anchorTopKey, p.anchorFocusKey = "", ""
+		p.repaint()
 		return
 	}
 	if scanDuration > 0 {
@@ -175,15 +170,103 @@ func (p *picker) finishLoad(generation uint64, instances []processcatalog.Instan
 		}
 	}
 	p.items = buildItems(groups, p.selected, p.options.Text)
-	p.loading = false
-	p.enriching = !final
-	p.enable(idRefresh, true)
+	phase := pickerViewReady
+	if !final {
+		phase = pickerViewEnriching
+	}
+	p.transitionView(phase, "")
 	p.applyFilter()
 	p.restoreViewAnchors(final)
-	if p.enriching {
-		p.setText(idStatus, p.text("process_picker_loading_descriptions"))
-	}
 	p.updatePreview()
+	// The snapshot, header, rows, status, preview and themed backing surfaces
+	// form one visible state transition. Commit that state as a complete frame;
+	// per-control updates remain useful for search and checkbox interaction, but
+	// are not sufficient for a newly completed asynchronous load on all builds.
+	p.repaint()
+}
+
+func (p *picker) transitionView(phase pickerViewPhase, detail string) {
+	p.viewPhase = phase
+	p.enable(idConfirm, len(p.selected) > 0 && len(p.selected) <= automation.MaxProcessesPerRule)
+	switch phase {
+	case pickerViewLoading:
+		p.setText(idStatus, p.text("process_picker_loading"))
+		p.setText(idEmpty, p.text("process_picker_loading"))
+		p.show(idEmpty, len(p.visible) == 0)
+		p.enable(idRefresh, false)
+	case pickerViewError:
+		p.clearStatusHold()
+		p.setText(idStatus, detail)
+		p.setText(idEmpty, p.text("process_picker_load_failed"))
+		p.show(idEmpty, len(p.visible) == 0)
+		p.enable(idRefresh, true)
+	default:
+		p.enable(idRefresh, true)
+	}
+}
+
+func (p *picker) refreshViewStatus() {
+	switch p.viewPhase {
+	case pickerViewLoading, pickerViewError:
+		return
+	case pickerViewEnriching:
+		p.setStatus(p.text("process_picker_loading_descriptions"))
+	default:
+		p.updateSelectionStatus()
+	}
+}
+
+func (p *picker) beginManualStatusHold() {
+	p.clearStatusHold()
+	p.statusHoldUntil = time.Now().Add(processPickerManualStatusHold)
+	if timer, _, _ := pSetTimer.Call(uintptr(p.hwnd), statusTimerID, uintptr(processPickerManualStatusHold/time.Millisecond), 0); timer == 0 {
+		p.statusHoldUntil = time.Time{}
+	}
+}
+
+func (p *picker) clearStatusHold() {
+	if p.hwnd != 0 {
+		pKillTimer.Call(uintptr(p.hwnd), statusTimerID)
+	}
+	p.statusHoldUntil = time.Time{}
+	p.pendingStatus = ""
+}
+
+func (p *picker) setStatus(value string) {
+	if delay := processPickerStatusHoldDelay(time.Now(), p.statusHoldUntil); delay > 0 {
+		p.pendingStatus = value
+		return
+	}
+	p.clearStatusHold()
+	p.setText(idStatus, value)
+}
+
+func (p *picker) finishStatusHold() {
+	if delay := processPickerStatusHoldDelay(time.Now(), p.statusHoldUntil); delay > 0 {
+		milliseconds := (delay + time.Millisecond - 1) / time.Millisecond
+		if timer, _, _ := pSetTimer.Call(uintptr(p.hwnd), statusTimerID, uintptr(milliseconds), 0); timer != 0 {
+			return
+		}
+	}
+	pending := p.pendingStatus
+	p.clearStatusHold()
+	if pending != "" {
+		p.setText(idStatus, pending)
+		return
+	}
+	if p.viewPhase == pickerViewLoading {
+		// A slow snapshot remains a loading operation after the minimum display
+		// interval. Its completion will publish the result count normally.
+		return
+	}
+	p.refreshViewStatus()
+}
+
+func processPickerStatusHoldDelay(now, until time.Time) time.Duration {
+	if until.IsZero() || !now.Before(until) {
+		return 0
+	}
+	return until.Sub(now)
 }
 
 func (p *picker) captureViewAnchors() {
@@ -279,16 +362,26 @@ func (p *picker) applyFilter() {
 	p.visible = next
 	p.reconcileVisible(previous, next)
 	if len(p.visible) == 0 {
-		message := p.text("process_picker_empty")
-		if filter != "" {
-			message = p.text("process_picker_no_results")
-		}
+		message := p.emptyMessage(filter)
 		p.setText(idEmpty, message)
 		p.show(idEmpty, true)
 	} else {
 		p.show(idEmpty, false)
 	}
-	p.updateSelectionStatus()
+	p.refreshViewStatus()
+}
+
+func (p *picker) emptyMessage(filter string) string {
+	switch p.viewPhase {
+	case pickerViewLoading:
+		return p.text("process_picker_loading")
+	case pickerViewError:
+		return p.text("process_picker_load_failed")
+	}
+	if filter != "" {
+		return p.text("process_picker_no_results")
+	}
+	return p.text("process_picker_empty")
 }
 
 func (p *picker) reconcileVisible(previous, next []item) {
@@ -332,6 +425,9 @@ func (p *picker) reconcileVisible(previous, next []item) {
 	}
 	pSendMessage.Call(uintptr(list), wmSetRedraw, 1, 0)
 	p.populating = false
+	if len(next) > 0 {
+		pSendMessage.Call(uintptr(list), lvmRedrawItems, 0, uintptr(len(next)-1))
+	}
 	// The vertical scrollbar appears only after rows are populated and reduces
 	// the usable report width. Refit at that point so the list never creates a
 	// horizontal scrollbar.
@@ -339,7 +435,7 @@ func (p *picker) reconcileVisible(previous, next []item) {
 	p.syncListScrollbar()
 	p.resizeColumns()
 	pShowScrollBar.Call(uintptr(list), sbHorz, 0)
-	pRedrawWindow.Call(uintptr(list), 0, 0, rdwInvalidate|rdwErase|rdwAllChildren|rdwUpdateNow|rdwFrame)
+	nativeform.PresentControl(list, true)
 }
 
 func sameRelativeTargetOrder(previous, next []item) bool {
@@ -484,6 +580,7 @@ func (p *picker) updatePreview() {
 	if p.previewScroll != nil {
 		p.previewScroll.Sync()
 	}
+	nativeform.PresentControl(preview, true)
 }
 
 func filterItems(values []item, filter string) []item {
@@ -541,7 +638,7 @@ func (p *picker) updateSelectionStatus() {
 		p.setText(idStatus, fmt.Sprintf(p.text("process_picker_limit"), automation.MaxProcessesPerRule))
 		return
 	}
-	p.setText(idStatus, fmt.Sprintf(p.text("process_picker_status_results"), len(p.visible), len(p.selected)))
+	p.setStatus(fmt.Sprintf(p.text("process_picker_status_results"), len(p.visible), len(p.selected)))
 }
 
 func canAddSelection(values map[string]automation.ProcessTarget, target automation.ProcessTarget) bool {
@@ -625,7 +722,7 @@ func (p *picker) browseExecutable() {
 	p.selected = normalizeSelected(candidate)
 	p.syncCheckStates()
 	p.updatePreview()
-	p.updateSelectionStatus()
+	p.refreshViewStatus()
 	key := target.Key()
 	p.workers.Add(1)
 	go func() {

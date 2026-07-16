@@ -73,9 +73,6 @@ func (p *panel) createEditorControls() {
 	p.namedLabel(idBasicsTitle, p.t("automation_basics"), p.sectionFont)
 	p.namedLabel(idNameLabel, p.t("automation_name"), p.font)
 	p.edit(idName, "")
-	if cue, err := nativeform.NewCueBanner(p.controls[idName], p.t("automation_name_placeholder"), p.palette.MutedText, p.scale()); err == nil {
-		p.nameCue = cue
-	}
 	p.namedLabel(idNameHint, p.t("automation_name_hint"), p.font)
 	p.namedLabel(idActionLabel, p.t("automation_action"), p.font)
 	p.combo(idAction, 0, 0, 314, actionLabels(p.text))
@@ -532,13 +529,53 @@ func (p *panel) updateManagerActions() {
 
 func (p *panel) cancelEditor() {
 	p.syncDraft()
-	if !reflect.DeepEqual(p.draft, p.originalDraft) && !p.confirm(p.t("automation_discard_title"), p.t("automation_discard_confirm")) {
+	if editorChangesRequireConfirmation(p.editing, p.originalDraft, p.draft) && !p.confirm(p.t("automation_discard_title"), p.t("automation_discard_confirm")) {
 		return
 	}
 	if p.pendingState != nil {
 		p.acceptState(*p.pendingState)
 	}
 	p.showManager()
+}
+
+func editorChangesRequireConfirmation(editing int, original, draft automation.Rule) bool {
+	if !editorHasAnyChanges(original, draft) {
+		return false
+	}
+	if editing >= 0 {
+		return true
+	}
+	return !reflect.DeepEqual(newRuleIntentOf(draft), newRuleIntentOf(original))
+}
+
+func editorHasAnyChanges(original, draft automation.Rule) bool {
+	return !reflect.DeepEqual(draft, original)
+}
+
+// newRuleIntent is the explicit discard boundary for an unsaved rule. Runtime
+// defaults and action options alone do not create a runnable task; identity,
+// action, trigger, schedule, days and process targets represent user work.
+// Keeping this projection explicit prevents newly added Rule fields from
+// silently changing cancel behavior.
+type newRuleIntent struct {
+	Name         string
+	Action       automation.Action
+	Trigger      automation.Trigger
+	Time         string
+	EndTime      string
+	Date         string
+	Days         []string
+	ProcessLogic automation.ProcessLogic
+	Processes    []automation.ProcessTarget
+}
+
+func newRuleIntentOf(rule automation.Rule) newRuleIntent {
+	return newRuleIntent{
+		Name: rule.Name, Action: rule.Action, Trigger: rule.Trigger,
+		Time: rule.Time, EndTime: rule.EndTime, Date: rule.Date,
+		Days: append([]string(nil), rule.Days...), ProcessLogic: rule.ProcessLogic,
+		Processes: append([]automation.ProcessTarget(nil), rule.Processes...),
+	}
 }
 func (p *panel) selectedRule() int {
 	value, _, _ := pSendMessage.Call(uintptr(p.controls[idList]), lbGetCurSel, 0, 0)

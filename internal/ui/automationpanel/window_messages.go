@@ -31,6 +31,7 @@ func wndProc(hwnd windows.Handle, message uint32, wParam, lParam uintptr) uintpt
 		}
 		return 0
 	case wmLButtonDown:
+		p.interaction.SetFocusVisible(false)
 		p.closeChoice(false)
 	case wmMouseWheel:
 		if p.scrollWheel(wParam) {
@@ -94,6 +95,9 @@ func wndProc(hwnd windows.Handle, message uint32, wParam, lParam uintptr) uintpt
 		brush := p.surfaceBrush
 		textColor := p.palette.PrimaryText
 		backgroundColor := p.palette.Surface
+		if cueColor, cue := p.surfaces.CueColor(windows.Handle(lParam)); cue {
+			textColor = cueColor
+		}
 		if enabled, _, _ := pIsWindowEnabled.Call(lParam); enabled == 0 {
 			brush = p.disabledBrush
 			textColor = p.palette.DisabledText
@@ -127,10 +131,7 @@ func wndProc(hwnd windows.Handle, message uint32, wParam, lParam uintptr) uintpt
 			p.contentScroll.Close()
 			p.contentScroll = nil
 		}
-		if p.nameCue != nil {
-			p.nameCue.Close()
-			p.nameCue = nil
-		}
+		p.surfaces.Close()
 		if p.managerScroll != nil {
 			p.managerScroll.Close()
 			p.managerScroll = nil

@@ -28,3 +28,9 @@ func TestCenteredRectPreservesRequestedSize(t *testing.T) {
 		t.Fatalf("CenteredRect = %+v", got)
 	}
 }
+
+func TestInitialWindowPointFallbackCannotReachTheDesktop(t *testing.T) {
+	if windowFallbackPoint > -30000 {
+		t.Fatalf("window fallback point %d is not safely outside the desktop", windowFallbackPoint)
+	}
+}

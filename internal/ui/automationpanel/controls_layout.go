@@ -17,11 +17,16 @@ func (p *panel) namedLabel(id uint16, value string, useFont windows.Handle) {
 }
 func (p *panel) edit(id uint16, value string) {
 	surfaceID := idFieldSurfaceBase + id
-	p.child("STATIC", "", wsChild|ssOwnerDraw, 0, 0, 1, 1, surfaceID, p.font)
-	hwnd := p.child("EDIT", value, wsChild|wsTabStop|esAutoHScroll, 0, 0, 1, 1, id, p.font)
-	p.fieldSurfaces[id] = surfaceID
-	p.surfaceFields[surfaceID] = id
-	p.interaction.Track(hwnd, p.controls[surfaceID])
+	surface := p.child("STATIC", "", formSurfaceStyle, 0, 0, 1, 1, surfaceID, p.font)
+	hwnd := p.child("EDIT", value, wsChild|wsTabStop|wsClipSiblings|esAutoHScroll, 0, 0, 1, 1, id, p.font)
+	cue := ""
+	if id == idName {
+		cue = p.t("automation_name_placeholder")
+	}
+	_, _ = p.surfaces.Add(nativeform.ControlSurfaceOptions{
+		ControlID: id, SurfaceID: surfaceID, Control: hwnd, Surface: surface,
+		CueText: cue, CueColor: p.palette.MutedText, Scale: p.scale(), Tracker: &p.interaction,
+	})
 	margin := int(6*p.scale() + 0.5)
 	pSendMessage.Call(uintptr(hwnd), emSetMargins, 3, uintptr(margin|(margin<<16)))
 }
@@ -35,11 +40,10 @@ func (p *panel) place(id uint16, x, y, width, height int, visible bool) {
 		return
 	}
 	p.bounds[id] = logicalBounds{X: x, Y: y, Width: width, Height: height}
-	if surfaceID, ok := p.fieldSurfaces[id]; ok {
-		p.positionControl(p.controls[surfaceID], x, y, width, height)
+	if field, ok := p.surfaces.ForControl(id); ok {
+		p.positionControl(field.Surface, x, y, width, height)
 		innerHeight := min(20, height-4)
 		p.positionControl(hwnd, x+2, y+(height-innerHeight)/2, width-4, innerHeight)
-		p.show(surfaceID, visible)
 		p.show(id, visible)
 		if visible {
 			pSetWindowPos.Call(uintptr(hwnd), 0, 0, 0, 0, 0, swpNoMove|swpNoSize|swpNoActivate)
@@ -136,8 +140,8 @@ func (p *panel) show(id uint16, visible bool) {
 		command = 5
 	}
 	pShowWindow.Call(uintptr(p.controls[id]), command)
-	if surfaceID, ok := p.fieldSurfaces[id]; ok {
-		pShowWindow.Call(uintptr(p.controls[surfaceID]), command)
+	if field, ok := p.surfaces.ForControl(id); ok {
+		pShowWindow.Call(uintptr(field.Surface), command)
 	}
 }
 
@@ -160,7 +164,7 @@ func (p *panel) controlText(id uint16) string {
 	if len(buf) > 0 {
 		pSendMessage.Call(uintptr(hwnd), wmGetText, uintptr(len(buf)), uintptr(unsafe.Pointer(&buf[0])))
 	}
-	return windows.UTF16ToString(buf)
+	return p.surfaces.LogicalText(hwnd, windows.UTF16ToString(buf))
 }
 func (p *panel) selectCombo(id uint16, index int) {
 	choice := p.choices[id]
@@ -196,8 +200,8 @@ func (p *panel) enable(id uint16, value bool) {
 	}
 	pEnableWindow.Call(uintptr(p.controls[id]), flag)
 	p.invalidateControl(id)
-	if surfaceID, ok := p.fieldSurfaces[id]; ok {
-		pInvalidateRect.Call(uintptr(p.controls[surfaceID]), 0, 0)
+	if field, ok := p.surfaces.ForControl(id); ok {
+		pInvalidateRect.Call(uintptr(field.Surface), 0, 0)
 	}
 }
 func (p *panel) t(key string) string { return p.text(key) }
@@ -258,12 +262,6 @@ func (p *panel) resizeInWorkArea(width, height int, workArea *nativeform.Rect) {
 	}
 }
 
-func (p *panel) moveToCursorMonitor() {
-	var cursor point
-	pGetCursorPos.Call(uintptr(unsafe.Pointer(&cursor)))
-	pSetWindowPos.Call(uintptr(p.hwnd), 0, uintptr(cursor.X), uintptr(cursor.Y), 1, 1, 0x0010)
-}
-
 func (p *panel) syncContentViewport() {
 	if p.hwnd == 0 {
 		return
@@ -304,15 +302,15 @@ func (p *panel) scrollContentTo(position int) {
 
 func (p *panel) repositionContent() {
 	for id, bounds := range p.bounds {
-		if _, fieldSurface := p.surfaceFields[id]; fieldSurface {
+		if _, fieldSurface := p.surfaces.ForSurface(id); fieldSurface {
 			continue
 		}
 		hwnd := p.controls[id]
 		if hwnd == 0 {
 			continue
 		}
-		if surfaceID, field := p.fieldSurfaces[id]; field {
-			p.positionControl(p.controls[surfaceID], bounds.X, bounds.Y, bounds.Width, bounds.Height)
+		if field, ok := p.surfaces.ForControl(id); ok {
+			p.positionControl(field.Surface, bounds.X, bounds.Y, bounds.Width, bounds.Height)
 			innerHeight := min(20, bounds.Height-4)
 			p.positionControl(hwnd, bounds.X+2, bounds.Y+(bounds.Height-innerHeight)/2, bounds.Width-4, innerHeight)
 			continue
@@ -402,9 +400,7 @@ func (p *panel) applyTheme() {
 	if p.contentScroll != nil {
 		p.contentScroll.SetTheme(p.palette, p.palette.WindowBackground)
 	}
-	if p.nameCue != nil {
-		p.nameCue.SetTheme(p.palette.MutedText)
-	}
+	p.surfaces.SetCueTheme(p.palette.MutedText)
 	if p.hwnd != 0 {
 		pInvalidateRect.Call(uintptr(p.hwnd), 0, 0)
 	}

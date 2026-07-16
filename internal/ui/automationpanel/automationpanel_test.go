@@ -34,6 +34,120 @@ func TestChoiceFocusNotificationDoesNotClosePopup(t *testing.T) {
 	}
 }
 
+func TestEditorChoiceTriggerTogglesARealSharedPopup(t *testing.T) {
+	requireNativeIntegration(t)
+	err := Capture(State{}, func(key string) string { return key }, 1, false, true, func(hwnd windows.Handle) error {
+		p := activePanelForTest(t, hwnd)
+		p.openChoice(idAction)
+		popup := p.choicePopup
+		if p.choiceOpen != idAction || popup == nil || !popup.IsOpen() || popup.Window() == 0 {
+			t.Fatal("editor choice trigger did not create the shared native popup")
+		}
+		p.toggleChoice(idAction)
+		if p.choiceOpen != 0 || p.choicePopup != nil || popup.IsOpen() {
+			t.Fatal("clicking the open editor choice trigger did not close its popup")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEditorChoiceOwnerFocusBridgeStillClosesOnAnchorToggle(t *testing.T) {
+	requireNativeIntegration(t)
+	err := Capture(State{}, func(key string) string { return key }, 1, false, true, func(hwnd windows.Handle) error {
+		p := activePanelForTest(t, hwnd)
+		p.openChoice(idAction)
+		popup := p.choicePopup
+		if popup == nil || !popup.IsOpen() {
+			t.Fatal("editor choice popup did not open")
+		}
+		// A real mouse click can move focus through the owner before the native
+		// button receives BN_CLICKED. That bridge must not destroy the popup, or
+		// the deferred toggle would interpret the click as a new open request.
+		pSetFocus.Call(uintptr(hwnd))
+		if p.choiceOpen != idAction || p.choicePopup != popup || !popup.IsOpen() {
+			t.Fatal("focus moving through the owner closed the popup before the anchor toggle")
+		}
+		p.toggleChoice(idAction)
+		if p.choiceOpen != 0 || p.choicePopup != nil || popup.IsOpen() {
+			t.Fatal("clicking the open choice anchor reopened the popup instead of closing it")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestKeepScreenMouseClickDoesNotExposeAKeyboardFocusOutline(t *testing.T) {
+	requireNativeIntegration(t)
+	err := Capture(State{}, func(key string) string { return key }, 1, false, true, func(hwnd windows.Handle) error {
+		p := activePanelForTest(t, hwnd)
+		control := p.controls[idKeepScreen]
+		if control == 0 {
+			t.Fatal("editor keep-screen checkbox was not created")
+		}
+		p.interaction.SetFocusVisible(true)
+		const wmLButtonUp = 0x0202
+		const pointInside = uintptr(5 | (5 << 16))
+		pSendMessage.Call(uintptr(control), wmLButtonDown, 1, pointInside)
+		pSendMessage.Call(uintptr(control), wmLButtonUp, 0, pointInside)
+		state := p.interaction.State(control)
+		if !state.Focused {
+			t.Fatal("mouse click did not leave the native checkbox focused; test cannot verify focus presentation")
+		}
+		if state.FocusVisible {
+			t.Fatal("mouse-focused checkbox retained the keyboard-only focus outline")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNewRuleOptionOnlyChangesDoNotRequireDiscardConfirmation(t *testing.T) {
+	original := defaultRule()
+	draft := original
+	draft.KeepScreenOn = !draft.KeepScreenOn
+	draft.IdleMinutes++
+	draft.WarningSeconds++
+	draft.BlockedPolicy = automation.BlockedWait
+	draft.MaxWaitMinutes++
+	if editorChangesRequireConfirmation(-1, original, draft) {
+		t.Fatal("option-only changes on an otherwise untouched new rule should not prompt")
+	}
+	if !editorChangesRequireConfirmation(0, original, draft) {
+		t.Fatal("the same changes to an existing rule must still prompt")
+	}
+}
+
+func TestNewRuleStructuralChangesRequireDiscardConfirmation(t *testing.T) {
+	original := defaultRule()
+	tests := []struct {
+		name   string
+		mutate func(*automation.Rule)
+	}{
+		{"name", func(rule *automation.Rule) { rule.Name = "Night task" }},
+		{"action", func(rule *automation.Rule) { rule.Action = automation.ActionShutdown }},
+		{"time", func(rule *automation.Rule) { rule.Time = "23:00" }},
+		{"process", func(rule *automation.Rule) {
+			rule.Processes = []automation.ProcessTarget{{Match: automation.MatchName, Executable: "player.exe"}}
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			draft := original
+			test.mutate(&draft)
+			if !editorChangesRequireConfirmation(-1, original, draft) {
+				t.Fatal("meaningful new-rule work should prompt before discard")
+			}
+		})
+	}
+}
+
 func TestSystemActionOffersProcessLifecycleTriggers(t *testing.T) {
 	p := &panel{
 		choices: map[uint16]*choiceField{},

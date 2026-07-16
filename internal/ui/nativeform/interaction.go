@@ -11,9 +11,10 @@ import (
 // owner-drawn controls. Semantic state (checked/selected) stays with the
 // owning window.
 type InteractionState struct {
-	Hovered bool
-	Pressed bool
-	Focused bool
+	Hovered      bool
+	Pressed      bool
+	Focused      bool
+	FocusVisible bool
 }
 
 type trackedControl struct {
@@ -26,7 +27,9 @@ type trackedControl struct {
 // InteractionTracker subclasses standard Win32 controls only to observe
 // hover, press and focus changes. Native controls continue to own their input,
 // keyboard and accessibility behavior.
-type InteractionTracker struct{}
+type InteractionTracker struct {
+	focusVisible bool
+}
 
 type trackMouseEvent struct {
 	Size      uint32
@@ -42,6 +45,8 @@ const (
 	wmEnable         = 0x000A
 	wmCancelMode     = 0x001F
 	wmNCDestroy      = 0x0082
+	wmKeyDown        = 0x0100
+	wmSysKeyDown     = 0x0104
 	wmMouseMove      = 0x0200
 	wmLButtonDown    = 0x0201
 	wmLButtonUp      = 0x0202
@@ -93,7 +98,34 @@ func (t *InteractionTracker) State(control windows.Handle) InteractionState {
 	if entry == nil || entry.owner != t {
 		return InteractionState{}
 	}
-	return entry.state
+	state := entry.state
+	state.FocusVisible = state.Focused && t.focusVisible
+	return state
+}
+
+// SetFocusVisible switches between mouse and keyboard focus presentation.
+// Native focus is always retained for input and accessibility; only the
+// owner-drawn focus outline follows the current input modality.
+func (t *InteractionTracker) SetFocusVisible(visible bool) {
+	if t == nil {
+		return
+	}
+	interactionMu.Lock()
+	if t.focusVisible == visible {
+		interactionMu.Unlock()
+		return
+	}
+	t.focusVisible = visible
+	var invalidates []windows.Handle
+	for _, entry := range interactionControls {
+		if entry.owner == t && entry.state.Focused && entry.invalidate != 0 {
+			invalidates = append(invalidates, entry.invalidate)
+		}
+	}
+	interactionMu.Unlock()
+	for _, hwnd := range invalidates {
+		interactionInvalidateRect.Call(uintptr(hwnd), 0, 0)
+	}
 }
 
 // Release restores every live subclass owned by this tracker. Controls that
@@ -105,6 +137,7 @@ func (t *InteractionTracker) Release() {
 	}
 	var values []restore
 	interactionMu.Lock()
+	t.focusVisible = false
 	for hwnd, entry := range interactionControls {
 		if entry.owner == t {
 			values = append(values, restore{hwnd: hwnd, proc: entry.oldProc})
@@ -126,6 +159,8 @@ func interactionWndProc(hwnd windows.Handle, message uint32, wParam, lParam uint
 	}
 	changed := false
 	switch message {
+	case wmKeyDown, wmSysKeyDown:
+		entry.owner.SetFocusVisible(true)
 	case wmMouseMove:
 		if !entry.state.Hovered {
 			entry.state.Hovered = true
@@ -138,6 +173,7 @@ func interactionWndProc(hwnd windows.Handle, message uint32, wParam, lParam uint
 		entry.state.Hovered = false
 		entry.state.Pressed = false
 	case wmLButtonDown:
+		entry.owner.SetFocusVisible(false)
 		if !entry.state.Pressed {
 			entry.state.Pressed = true
 			changed = true

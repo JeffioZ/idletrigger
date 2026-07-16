@@ -26,8 +26,13 @@ type ChoicePopupOptions struct {
 	Selected      int
 	MaxVisible    int
 	Items         []ChoicePopupItem
-	OnSelect      func(int)
-	OnClose       func()
+	// KeepOpenOnReselect preserves selectors where the currently applied row is
+	// an intentional no-op. RestoreAnchorOnCancel returns keyboard focus after
+	// Escape/F4 without stealing it when the popup closes through mouse focus.
+	KeepOpenOnReselect    bool
+	RestoreAnchorOnCancel bool
+	OnSelect              func(int)
+	OnClose               func()
 }
 
 type ChoicePopup struct {
@@ -95,9 +100,13 @@ const (
 	cpMonitorNearest = 2
 	cpTMELeave       = 0x00000002
 	cpVKReturn       = 0x0D
+	cpVKSpace        = 0x20
+	cpVKEnd          = 0x23
+	cpVKHome         = 0x24
 	cpVKEscape       = 0x1B
 	cpVKUp           = 0x26
 	cpVKDown         = 0x28
+	cpVKF4           = 0x73
 )
 
 var (
@@ -112,6 +121,7 @@ var (
 	cpGetMonitorInfo = cpUser32.NewProc("GetMonitorInfoW")
 	cpSetWindowPos   = cpUser32.NewProc("SetWindowPos")
 	cpSetFocus       = cpUser32.NewProc("SetFocus")
+	cpIsChild        = cpUser32.NewProc("IsChild")
 	cpSetCapture     = cpUser32.NewProc("SetCapture")
 	cpReleaseCapture = cpUser32.NewProc("ReleaseCapture")
 	cpTrackMouse     = cpUser32.NewProc("TrackMouseEvent")
@@ -199,9 +209,10 @@ func ShowChoicePopup(options ChoicePopupOptions) (*ChoicePopup, error) {
 	monitor, _, _ := cpMonitorFromWnd.Call(uintptr(options.Owner), cpMonitorNearest)
 	info := popupMonitorInfo{Size: uint32(unsafe.Sizeof(popupMonitorInfo{}))}
 	cpGetMonitorInfo.Call(monitor, uintptr(unsafe.Pointer(&info)))
-	x, y := anchor.Left, anchor.Bottom+int32(4*options.Scale+0.5)
+	anchorGap := int32(MenuAnchorGap*options.Scale + 0.5)
+	x, y := anchor.Left, anchor.Bottom+anchorGap
 	if y+height > info.Work.Bottom {
-		above := anchor.Top - height - int32(4*options.Scale+0.5)
+		above := anchor.Top - height - anchorGap
 		if above >= info.Work.Top {
 			y = above
 		} else {
@@ -225,12 +236,41 @@ func ShowChoicePopup(options ChoicePopupOptions) (*ChoicePopup, error) {
 }
 
 func (p *ChoicePopup) Close() {
+	p.close(false)
+}
+
+func (p *ChoicePopup) close(restoreAnchor bool) {
 	if p != nil && p.hwnd != 0 && !p.closed {
 		cpDestroyWindow.Call(uintptr(p.hwnd))
+		if restoreAnchor && p.options.RestoreAnchorOnCancel && p.options.Anchor != 0 {
+			cpSetFocus.Call(uintptr(p.options.Anchor))
+		}
 	}
 }
 
 func (p *ChoicePopup) IsOpen() bool { return p != nil && p.hwnd != 0 && !p.closed }
+
+func (p *ChoicePopup) Window() windows.Handle {
+	if p == nil || p.closed {
+		return 0
+	}
+	return p.hwnd
+}
+
+// IsChoicePopupOwnedBy is safe during ShowChoicePopup re-entrancy. Windows can
+// deactivate the owner while the popup is being shown, before ShowChoicePopup
+// has returned its handle to the caller; the registry is already authoritative
+// at that point.
+func IsChoicePopupOwnedBy(window, owner windows.Handle) bool {
+	if window == 0 || owner == 0 {
+		return false
+	}
+	cpMu.Lock()
+	popup := cpWindows[window]
+	owned := popup != nil && !popup.closed && popup.options.Owner == owner
+	cpMu.Unlock()
+	return owned
+}
 
 func (p *ChoicePopup) nextSelectable(start, delta int) int {
 	for index := start + delta; index >= 0 && index < len(p.options.Items); index += delta {
@@ -293,6 +333,10 @@ func (p *ChoicePopup) apply(index int) {
 		return
 	}
 	value, callback := p.options.Items[index].Value, p.options.OnSelect
+	if choicePopupKeepsReselectionOpen(p.options.Selected, value, p.options.KeepOpenOnReselect) {
+		cpInvalidateRect.Call(uintptr(p.hwnd), 0, 0)
+		return
+	}
 	p.Close()
 	if callback != nil {
 		callback(value)
@@ -391,8 +435,18 @@ func choicePopupWndProc(hwnd windows.Handle, message uint32, wParam, lParam uint
 		return 0
 	case cpWMKeyDown:
 		switch wParam {
-		case cpVKEscape:
-			p.Close()
+		case cpVKEscape, cpVKF4:
+			p.close(true)
+		case cpVKHome:
+			p.focus = p.nextSelectable(-1, 1)
+			p.ensureVisible(p.focus, p.visibleRows())
+			p.updateScroll(p.visibleRows())
+			cpInvalidateRect.Call(uintptr(hwnd), 0, 0)
+		case cpVKEnd:
+			p.focus = p.nextSelectable(len(p.options.Items), -1)
+			p.ensureVisible(p.focus, p.visibleRows())
+			p.updateScroll(p.visibleRows())
+			cpInvalidateRect.Call(uintptr(hwnd), 0, 0)
 		case cpVKUp:
 			p.focus = p.nextSelectable(p.focus, -1)
 			p.ensureVisible(p.focus, p.visibleRows())
@@ -403,11 +457,18 @@ func choicePopupWndProc(hwnd windows.Handle, message uint32, wParam, lParam uint
 			p.ensureVisible(p.focus, p.visibleRows())
 			p.updateScroll(p.visibleRows())
 			cpInvalidateRect.Call(uintptr(hwnd), 0, 0)
-		case cpVKReturn:
+		case cpVKReturn, cpVKSpace:
 			p.apply(p.focus)
 		}
 		return 0
 	case cpWMKillFocus:
+		// Clicking an owner control can move focus through the owner HWND before
+		// it reaches the actual child and emits BN_CLICKED. Keep the popup alive
+		// throughout that internal transfer; the owner's command closes or toggles
+		// it. Closing here would make the deferred anchor click reopen the popup.
+		if choicePopupFocusStaysWithinOwner(p.options.Owner, p.options.Anchor, windows.Handle(wParam)) {
+			return 0
+		}
 		p.Close()
 		return 0
 	case cpWMDestroy:
@@ -427,4 +488,25 @@ func choicePopupWndProc(hwnd windows.Handle, message uint32, wParam, lParam uint
 	}
 	result, _, _ := cpDefWindowProc.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
 	return result
+}
+
+func choicePopupFocusStaysWithinOwner(owner, anchor, next windows.Handle) bool {
+	if next == 0 {
+		return false
+	}
+	if anchor != 0 && next == anchor {
+		return true
+	}
+	if owner == 0 {
+		return false
+	}
+	if next == owner {
+		return true
+	}
+	isChild, _, _ := cpIsChild.Call(uintptr(owner), uintptr(next))
+	return isChild != 0
+}
+
+func choicePopupKeepsReselectionOpen(selected, value int, keepOpen bool) bool {
+	return keepOpen && selected == value
 }

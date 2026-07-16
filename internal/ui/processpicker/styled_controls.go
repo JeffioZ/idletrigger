@@ -33,17 +33,10 @@ func (p *picker) drawOwnerItemDirect(value *drawItem) bool {
 	if radius < 3 {
 		radius = 3
 	}
-	if fieldID, ok := p.surfaceFields[id]; ok {
-		interaction := p.interaction.State(p.controls[fieldID])
-		state := nativeform.ControlState{Focused: interaction.Focused}
-		if id == idSearchSurface {
-			state.Hovered = interaction.Hovered
-		}
+	if field, ok := p.surfaces.ForSurface(id); ok {
+		interaction := p.interaction.State(field.Control)
+		state := nativeform.ControlState{Hovered: interaction.Hovered, Focused: interaction.Focused}
 		nativeform.DrawField(value.HDC, bounds, p.palette, p.palette.WindowBackground, state, radius)
-		return true
-	}
-	if id == idPreviewSurface {
-		nativeform.DrawField(value.HDC, bounds, p.palette, p.palette.WindowBackground, nativeform.ControlState{}, radius)
 		return true
 	}
 	control := p.controls[id]
@@ -54,7 +47,7 @@ func (p *picker) drawOwnerItemDirect(value *drawItem) bool {
 	state := nativeform.ControlState{
 		Hovered:  interaction.Hovered,
 		Pressed:  interaction.Pressed || value.ItemState&odsSelected != 0,
-		Focused:  interaction.Focused || value.ItemState&odsFocus != 0,
+		Focused:  interaction.FocusVisible,
 		Disabled: value.ItemState&odsDisabled != 0 || !p.controlEnabled(id),
 	}
 	nativeform.DrawButton(value.HDC, bounds, p.font, p.labels[id], p.palette, p.palette.WindowBackground, state, radius, false)
