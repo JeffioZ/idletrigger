@@ -1,9 +1,15 @@
+#requires -Version 7.0
+
 [CmdletBinding()]
 param(
+    [switch]$Full,
     [switch]$Vulncheck
 )
 
 $ErrorActionPreference = "Stop"
+$PSNativeCommandUseErrorActionPreference = $false
+Set-StrictMode -Version Latest
+$repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 
 function Invoke-NativeCheck {
     param(
@@ -13,52 +19,71 @@ function Invoke-NativeCheck {
 
     Write-Host "==> $Name"
     & $Command
+    $succeeded = $?
     $exitCode = $LASTEXITCODE
-    if ($exitCode -ne 0) {
-        Write-Host "FAILED: $Name failed with exit code $exitCode."
-        exit $exitCode
+    if (-not $succeeded -or $exitCode -ne 0) {
+        if ($null -eq $exitCode) { $exitCode = 1 }
+        throw "FAILED: $Name failed with exit code $exitCode."
     }
 }
 
-Invoke-NativeCheck "go mod verify" { go mod verify }
+Push-Location $repoRoot
+try {
+    Invoke-NativeCheck "go mod verify" { go mod verify }
 
-Write-Host "==> gofmt -l ."
-$unformatted = @(gofmt -l .)
-$gofmtExitCode = $LASTEXITCODE
-if ($gofmtExitCode -ne 0) {
-    Write-Host "FAILED: gofmt failed with exit code $gofmtExitCode."
-    exit $gofmtExitCode
-}
-if ($unformatted.Count -ne 0) {
-    Write-Host "FAILED: unformatted files:"
-    $unformatted | ForEach-Object { Write-Host $_ }
-    exit 1
-}
+    Write-Host "==> gofmt -l ."
+    $unformatted = @(gofmt -l .)
+    $gofmtSucceeded = $?
+    $gofmtExitCode = $LASTEXITCODE
+    if (-not $gofmtSucceeded -or $gofmtExitCode -ne 0) {
+        if ($null -eq $gofmtExitCode) { $gofmtExitCode = 1 }
+        throw "FAILED: gofmt failed with exit code $gofmtExitCode."
+    }
+    if ($unformatted.Count -ne 0) {
+        Write-Host "FAILED: unformatted files:"
+        $unformatted | ForEach-Object { Write-Host $_ }
+        throw "FAILED: gofmt found $($unformatted.Count) unformatted file(s)."
+    }
 
-Invoke-NativeCheck "git diff --check" { git diff --check }
-Invoke-NativeCheck "go test -count=1 ./..." { go test -count=1 ./... }
-Invoke-NativeCheck "go test -count=1 -tags devtools ./..." { go test -count=1 -tags devtools ./... }
-Invoke-NativeCheck "go test -count=1 -tags tools ./..." { go test -count=1 -tags tools ./... }
-Invoke-NativeCheck "go vet ./..." { go vet ./... }
-Invoke-NativeCheck "go vet -tags devtools ./..." { go vet -tags devtools ./... }
-Invoke-NativeCheck "build dependency boundaries" { & (Join-Path $PSScriptRoot 'check-build-boundaries.ps1') }
+    Invoke-NativeCheck "git diff HEAD --check" { git diff HEAD --check }
+    if ($Full) {
+        Invoke-NativeCheck "go test -count=1 ./..." { go test -count=1 ./... }
+    } else {
+        Invoke-NativeCheck "go test -short -count=1 ./..." { go test -short -count=1 ./... }
+    }
+    Invoke-NativeCheck "go vet ./..." { go vet ./... }
+    Invoke-NativeCheck "build dependency boundaries" { & (Join-Path $PSScriptRoot 'check-build-boundaries.ps1') }
 
-$golangci = Get-Command golangci-lint -ErrorAction SilentlyContinue
-$golangciSkipped = $null -eq $golangci
-if ($golangciSkipped) {
-    Write-Host "SKIPPED: golangci-lint is not installed."
-} else {
-    Invoke-NativeCheck "golangci-lint" { & $golangci.Source run --timeout=5m --disable=errcheck ./... }
-}
+    $golangciSkipped = $false
+    if ($Full) {
+        Invoke-NativeCheck "go test -count=1 -tags devtools ./..." { go test -count=1 -tags devtools ./... }
+        Invoke-NativeCheck "go test -count=1 -tags tools ./..." { go test -count=1 -tags tools ./... }
+        Invoke-NativeCheck "go vet -tags devtools ./..." { go vet -tags devtools ./... }
 
-if ($Vulncheck) {
-    Invoke-NativeCheck "govulncheck v1.1.4" { go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./... }
-} else {
-    Write-Host "NOT RUN: govulncheck (pass -Vulncheck to run it)."
-}
+        $golangci = Get-Command golangci-lint -ErrorAction SilentlyContinue
+        $golangciSkipped = $null -eq $golangci
+        if ($golangciSkipped) {
+            Write-Host "SKIPPED: golangci-lint is not installed."
+        } else {
+            Invoke-NativeCheck "golangci-lint" { & $golangci.Source run --timeout=5m --disable=errcheck ./... }
+        }
+    } else {
+        Write-Host "NOT RUN: extended build-tag checks and golangci-lint (pass -Full to run them)."
+    }
 
-if (-not $golangciSkipped -and $Vulncheck) {
-    Write-Host "All requested checks passed."
-} else {
-    Write-Host "Core checks passed; see skipped or not-run checks above."
+    if ($Vulncheck) {
+        Invoke-NativeCheck "govulncheck v1.1.4" { go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./... }
+    } else {
+        Write-Host "NOT RUN: govulncheck (pass -Vulncheck to run it)."
+    }
+
+    if ($Full -and -not $golangciSkipped -and $Vulncheck) {
+        Write-Host "All requested checks passed."
+    } elseif ($Full) {
+        Write-Host "Full checks passed; see skipped or not-run checks above."
+    } else {
+        Write-Host "Quick checks passed; see not-run checks above."
+    }
+} finally {
+    Pop-Location
 }

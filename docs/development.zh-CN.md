@@ -6,6 +6,7 @@
 
 - Go 1.26 或更高版本
 - Git
+- 仓库脚本要求 PowerShell 7 或更高版本
 - 仅重新生成 Windows 资源时需要 `github.com/akavel/rsrc`
 
 IdleTrigger 面向 Windows 10 / Windows Server 2016 及以上系统，仓库同时产出 `windows/amd64` 和 `windows/386`。
@@ -35,15 +36,22 @@ go build -trimpath "-ldflags=$ldflags" -o $output ./cmd/idletrigger
 
 ## 验证
 
-在 Windows PowerShell 5.1 或更高版本中执行本地标准检查：
+在 PowerShell 7 或更高版本中执行本地标准检查：
 
 ```powershell
 .\tools\check.ps1
 ```
 
-检查脚本会覆盖普通、`devtools` 和 `tools` 三种构建标签组合。已安装
-`golangci-lint` 时脚本会执行它；未安装时会明确打印 `SKIPPED`。
-联网时可执行可选漏洞扫描：
+默认命令执行适合日常开发的轻量检查：模块校验、格式、工作区空白错误、短测试集、
+普通 vet 和依赖边界。真实 Win32 集成及资源循环测试保留在完整模式中。发布前或较大
+范围改动后，使用完整模式覆盖 `devtools`、`tools` 构建标签，并在已安装时执行
+`golangci-lint`：
+
+```powershell
+.\tools\check.ps1 -Full
+```
+
+联网时可执行可选漏洞扫描；该参数可与 `-Full` 组合使用：
 
 ```powershell
 .\tools\check.ps1 -Vulncheck

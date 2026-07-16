@@ -1,3 +1,5 @@
+#requires -Version 7.0
+
 [CmdletBinding()]
 param(
     [ValidateSet('Readme', 'Review')]
@@ -6,12 +8,15 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$PSNativeCommandUseErrorActionPreference = $false
+Set-StrictMode -Version Latest
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     $OutputDirectory = if ($CaptureSet -eq 'Readme') { Join-Path $repoRoot 'docs\images' } else { Join-Path $repoRoot 'dist\ui-review' }
 }
 $outputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 $temporaryDirectory = Join-Path (Join-Path $repoRoot 'dist') ('.screenshot-build-' + $PID)
+$captureDirectory = Join-Path $temporaryDirectory 'captured'
 $exePath = Join-Path $temporaryDirectory 'IdleTrigger-screenshot.exe'
 $files = if ($CaptureSet -eq 'Readme') {
     @('panel-en-light.png', 'panel-en-dark.png', 'panel-zh-light.png', 'panel-zh-dark.png')
@@ -23,6 +28,11 @@ $files = if ($CaptureSet -eq 'Readme') {
             @('control', 'automation', 'automation-editor', 'process-picker') | ForEach-Object { "$_-$language-$theme.png" }
         }
     }
+}
+$previousEnvironment = @{
+    CGO_ENABLED = [Environment]::GetEnvironmentVariable('CGO_ENABLED', 'Process')
+    GOARCH = [Environment]::GetEnvironmentVariable('GOARCH', 'Process')
+    GOCACHE = [Environment]::GetEnvironmentVariable('GOCACHE', 'Process')
 }
 
 function Get-PngSize([string]$Path) {
@@ -46,14 +56,14 @@ try {
         go build -tags devtools -trimpath -ldflags '-s -w -H windowsgui -X github.com/JeffioZ/idletrigger/internal/version.Value=screenshot' -o $exePath ./cmd/idletrigger
         if ($LASTEXITCODE -ne 0) { throw "go build failed with exit code $LASTEXITCODE" }
         $setFlag = if ($CaptureSet -eq 'Readme') { '--readme-set' } else { '--review-set' }
-        $arguments = @('screenshot', $setFlag, '--output', ('"' + $outputDirectory + '"'))
+        $arguments = @('screenshot', $setFlag, '--output', ('"' + $captureDirectory + '"'))
         $process = Start-Process -FilePath $exePath -ArgumentList $arguments -WindowStyle Hidden -Wait -PassThru
         if ($process.ExitCode -ne 0) { throw "screenshot command failed with exit code $($process.ExitCode)" }
     } finally { Pop-Location }
 
     $sizes = @{}
     foreach ($name in $files) {
-        $path = Join-Path $outputDirectory $name
+        $path = Join-Path $captureDirectory $name
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing screenshot: $path" }
         $size = Get-PngSize $path
         $sizes[$name] = $size
@@ -71,7 +81,16 @@ try {
             }
         }
     }
+
+    New-Item -ItemType Directory -Force -Path $outputDirectory | Out-Null
+    foreach ($name in $files) {
+        Copy-Item -LiteralPath (Join-Path $captureDirectory $name) -Destination (Join-Path $outputDirectory $name) -Force
+    }
 } finally {
+    foreach ($name in $previousEnvironment.Keys) {
+        [Environment]::SetEnvironmentVariable($name, $previousEnvironment[$name], 'Process')
+    }
+
     # Windows may briefly retain a handle to a just-exited GUI executable.
     # Clean synchronously so the script never leaves a detached cleanup
     # process behind.

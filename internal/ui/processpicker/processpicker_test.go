@@ -195,7 +195,15 @@ func TestSelectionLimitRejectsOnlyTheAdditionalTarget(t *testing.T) {
 	}
 }
 
+func requireNativeIntegration(t *testing.T) {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("skipping native Win32 integration test in short mode")
+	}
+}
+
 func TestProcessPickerRemainsOperableAcrossDPIAndSmallWorkArea(t *testing.T) {
+	requireNativeIntegration(t)
 	work := nativeform.Rect{Right: 1366, Bottom: 768}
 	groups := []processcatalog.Group{{Executable: "player.exe", Description: "Media Player", Count: 2}}
 	for _, scale := range []float64{1, 1.25, 1.5, 2} {
@@ -224,6 +232,7 @@ func TestProcessPickerRemainsOperableAcrossDPIAndSmallWorkArea(t *testing.T) {
 }
 
 func TestProcessPickerAppliesSuggestedRectAcrossDPIChanges(t *testing.T) {
+	requireNativeIntegration(t)
 	err := Capture(testPickerOptions(), nil, 1, false, func(hwnd windows.Handle) error {
 		p := activePickerForTest(t, hwnd)
 		p.captureScale = 0
@@ -253,6 +262,7 @@ func TestProcessPickerAppliesSuggestedRectAcrossDPIChanges(t *testing.T) {
 }
 
 func TestProcessPickerReleasesResourcesAcrossRepresentativeCycles(t *testing.T) {
+	requireNativeIntegration(t)
 	const (
 		stabilizationCycles = 8
 		measuredCycles      = 8
@@ -287,6 +297,7 @@ func TestProcessPickerReleasesResourcesAcrossRepresentativeCycles(t *testing.T) 
 }
 
 func TestProcessPickerCreationFailuresReleasePartialResources(t *testing.T) {
+	requireNativeIntegration(t)
 	if err := Capture(testPickerOptions(), nil, 1, false, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -400,6 +411,7 @@ func TestProcessPickerCreationFailuresReleasePartialResources(t *testing.T) {
 }
 
 func TestProcessPickerIgnoresCallbacksThatArriveAfterClose(t *testing.T) {
+	requireNativeIntegration(t)
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	originalSnapshot := snapshotNamesForPicker

@@ -85,7 +85,15 @@ func TestRuleSummaryIncludesEffectiveDays(t *testing.T) {
 	}
 }
 
+func requireNativeIntegration(t *testing.T) {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("skipping native Win32 integration test in short mode")
+	}
+}
+
 func TestProcessTooltipBufferRemainsBoundedAcrossRefreshes(t *testing.T) {
+	requireNativeIntegration(t)
 	err := Capture(State{}, func(key string) string { return key }, 1, false, true, func(hwnd windows.Handle) error {
 		p := activePanelForTest(t, hwnd)
 		p.draft.Processes = []automation.ProcessTarget{{Match: automation.MatchName, Executable: "player.exe"}}
@@ -143,6 +151,7 @@ func TestEditorKeepsDraftBaseWhenExternalStateArrives(t *testing.T) {
 }
 
 func TestAutomationWindowsRemainOperableAcrossDPIAndSmallWorkArea(t *testing.T) {
+	requireNativeIntegration(t)
 	work := nativeform.Rect{Right: 1366, Bottom: 768}
 	for _, scale := range []float64{1, 1.25, 1.5, 2} {
 		for _, editor := range []bool{false, true} {
@@ -195,6 +204,7 @@ func TestManagerLayoutFitsCICompactViewport(t *testing.T) {
 }
 
 func TestAutomationWindowsApplySuggestedRectAcrossDPIChanges(t *testing.T) {
+	requireNativeIntegration(t)
 	for _, editor := range []bool{false, true} {
 		t.Run(map[bool]string{false: "manager", true: "editor"}[editor], func(t *testing.T) {
 			err := Capture(State{}, func(key string) string { return key }, 1, false, editor, func(hwnd windows.Handle) error {
@@ -231,6 +241,7 @@ func TestAutomationWindowsApplySuggestedRectAcrossDPIChanges(t *testing.T) {
 }
 
 func TestAutomationWindowsReleaseResourcesAcrossRepresentativeCycles(t *testing.T) {
+	requireNativeIntegration(t)
 	const (
 		stabilizationCycles = 8
 		measuredCycles      = 8

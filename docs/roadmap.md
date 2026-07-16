@@ -2,7 +2,7 @@
 
 ## 发布检查清单
 
-- [ ] `.\tools\check.ps1` 核心检查通过，并确认 `SKIPPED` / `NOT RUN` 项符合本次发布预期
+- [ ] `.\tools\check.ps1 -Full -Vulncheck` 完整检查通过，并确认 `SKIPPED` 项符合本次发布预期
 - [ ] 386 / amd64 Windows GUI 构建通过
 - [ ] 两种架构 EXE 均包含应用图标和 manifest
 - [ ] CLI、控制面板、自动任务/进程选择器、IPC、热键和两类预警做一次人工冒烟测试

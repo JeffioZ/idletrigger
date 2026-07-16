@@ -6,6 +6,7 @@
 
 - Go 1.26 or later
 - Git
+- PowerShell 7 or later for repository scripts
 - `github.com/akavel/rsrc` only when regenerating Windows resources
 
 IdleTrigger targets Windows 10 / Windows Server 2016 and later. The repository produces both `windows/amd64` and `windows/386` binaries.
@@ -35,15 +36,24 @@ go build -trimpath "-ldflags=$ldflags" -o $output ./cmd/idletrigger
 
 ## Verify
 
-Run the standard local checks in Windows PowerShell 5.1 or later:
+Run the standard local checks in PowerShell 7 or later:
 
 ```powershell
 .\tools\check.ps1
 ```
 
-The check script covers normal, `devtools`, and `tools` build-tag variants.
-`golangci-lint` is run when installed; otherwise the script prints `SKIPPED`.
-Run the optional vulnerability scan while online:
+The default command is the quick development check: module verification,
+formatting, working-tree whitespace, the short test suite, normal vet, and
+dependency boundaries. Native Win32 integration and resource-cycle tests stay
+in the full suite. Before a release or broad change, run the full build-tag
+matrix and `golangci-lint` (when installed):
+
+```powershell
+.\tools\check.ps1 -Full
+```
+
+Run the optional vulnerability scan while online; it can be combined with
+`-Full`:
 
 ```powershell
 .\tools\check.ps1 -Vulncheck
