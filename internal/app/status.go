@@ -18,8 +18,11 @@ import (
 	"time"
 )
 
+var saveConfigAtRevision = config.SaveAtRevision
+
 func (s *runtimeState) reloadConfig() error {
 	wasIPLocationEligible := ipLocationLookupEnabled(s.cfg)
+	previousLanguage := s.cfg.Language
 	newCfg, err := config.Load()
 	if err != nil {
 		return err
@@ -58,10 +61,12 @@ func (s *runtimeState) reloadConfig() error {
 	s.reconcileRuntime()
 	s.updateIcon()
 	s.rememberConfigModTime()
-	trayicon.Post(func() {
-		hideAutomationUI()
-		controlpanel.Hide()
-	})
+	if previousLanguage != s.cfg.Language {
+		trayicon.Post(hideAutomationUI)
+	} else {
+		s.publishAutomationPanelState()
+	}
+	trayicon.Post(controlpanel.Hide)
 	return nil
 }
 
@@ -214,27 +219,42 @@ func (s *runtimeState) applyLanguage() {
 }
 
 func (s *runtimeState) saveConfigErr() error {
+	revision, err := s.persistConfigAtRevision(s.cfg, s.cfg.SourceRevision)
+	if err != nil {
+		return err
+	}
+	s.cfg.SourceRevision = revision
+	return nil
+}
+
+func (s *runtimeState) persistConfigAtRevision(candidate config.Config, expectedRevision string) (string, error) {
 	// The config watcher runs independently of the tray UI goroutine.  Mark the
 	// whole atomic-replace window as self-authored so it cannot race the
 	// mod-time snapshot and schedule reloadConfig (which hides the control panel).
 	s.selfConfigWrite.Store(true)
 	defer s.selfConfigWrite.Store(false)
-	if err := config.Save(s.cfg); err != nil {
+	revision, err := saveConfigAtRevision(candidate, expectedRevision)
+	if err != nil {
 		mylog.Info("Config save failed: %v", err)
-		return err
+		return "", err
 	}
 	s.rememberConfigModTime()
+	candidate.SourceRevision = revision
 	if s.callbacks.OnConfigChanged != nil {
-		s.callbacks.OnConfigChanged(s.cfg)
+		s.callbacks.OnConfigChanged(candidate)
 	}
-	return nil
+	return revision, nil
 }
 
 func (s *runtimeState) saveConfig() {
 	if err := s.saveConfigErr(); err != nil {
-		msg := fmt.Sprintf(i18n.T(s.lang, "msg_config_save_failed"), err.Error())
-		dialog.Warn(i18n.T(s.lang, "app_title"), "", msg)
+		s.warnConfigSaveError(err)
 	}
+}
+
+func (s *runtimeState) warnConfigSaveError(err error) {
+	msg := fmt.Sprintf(i18n.T(s.lang, "msg_config_save_failed"), err.Error())
+	dialog.Warn(i18n.T(s.lang, "app_title"), "", msg)
 }
 
 func (s *runtimeState) showError(actionKey string, err error) {

@@ -38,6 +38,9 @@ func loadFrom(p string) (Config, error) {
 			if saveErr := saveTo(p, cfg); saveErr != nil {
 				return cfg, saveErr
 			}
+			if saved, readErr := os.ReadFile(p); readErr == nil {
+				cfg.SourceRevision = configRevision(saved)
+			}
 			return cfg, nil
 		}
 		return cfg, fmt.Errorf("read config: %w", err)
@@ -46,7 +49,19 @@ func loadFrom(p string) (Config, error) {
 		return DefaultConfig(), fmt.Errorf("parse config: %w", err)
 	}
 	normalized := NormalizeConfig(cfg)
-	corrected := !reflect.DeepEqual(normalized, cfg)
+	normalized.SourceRevision = configRevision(data)
+	normalizedDisk, originalDisk := normalized, cfg
+	normalizedDisk.AutomationIssues = nil
+	normalizedDisk.SourceRevision = ""
+	originalDisk.AutomationIssues = nil
+	originalDisk.SourceRevision = ""
+	corrected := !reflect.DeepEqual(normalizedDisk, originalDisk)
+	// Invalid automatic-task rules are kept on disk byte-for-byte. The runtime
+	// disables only those rules and the manager exposes their diagnostics; a
+	// corrected representation is written only after an explicit user save.
+	if len(normalized.AutomationIssues) > 0 {
+		return normalized, nil
+	}
 	if corrected {
 		if err := os.WriteFile(p+".bak", data, 0600); err != nil {
 			return normalized, fmt.Errorf("back up corrected config: %w", err)
@@ -55,6 +70,9 @@ func loadFrom(p string) (Config, error) {
 	if needsAnnotatedTOMLRefresh(data) || corrected {
 		if err := saveTo(p, normalized); err != nil {
 			return normalized, fmt.Errorf("refresh config annotations: %w", err)
+		}
+		if saved, err := os.ReadFile(p); err == nil {
+			normalized.SourceRevision = configRevision(saved)
 		}
 	}
 	return normalized, nil

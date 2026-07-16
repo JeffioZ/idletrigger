@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 
@@ -17,33 +18,77 @@ import (
 	"github.com/JeffioZ/idletrigger/internal/ui/trayicon"
 )
 
+var postAutomationPanelState = func(state automationpanel.State) {
+	trayicon.Post(func() { automationpanel.Update(state) })
+}
+
 func (s *runtimeState) showAutomationManager() {
-	rules := append([]automation.Rule(nil), s.cfg.AutomationRules...)
-	state := automationpanel.State{
-		Rules:    rules,
-		Chinese:  i18n.ResolveLanguage(s.lang) == "zh-CN",
-		Owner:    controlpanel.WindowHandle(),
-		NextText: nextAutomationText(s.autoState, s.lang),
-	}
+	state := s.automationPanelState()
 	lang := s.lang
 	trayicon.Post(func() {
-		err := automationpanel.Show(state, func(rules []automation.Rule) {
-			s.post(func() {
-				normalized := automation.NormalizeRules(rules)
-				if err := automation.ValidateRules(normalized); err != nil {
-					mylog.Info("Automation rules rejected: %v", err)
-					return
-				}
-				s.cfg.AutomationRules = normalized
-				s.restartAutomation()
-				s.saveConfig()
-				s.refreshControlPanelAutomationStatus()
-			})
+		err := automationpanel.Show(state, func(request automationpanel.SaveRequest) automationpanel.SaveResult {
+			return s.requestAutomationSave(request)
 		}, func(key string) string { return i18n.T(lang, key) })
 		if err != nil {
 			mylog.Info("Automation manager open failed: %v", err)
 		}
 	})
+}
+
+func (s *runtimeState) automationPanelState() automationpanel.State {
+	return automationpanel.State{
+		Rules:    append([]automation.Rule(nil), s.cfg.AutomationRules...),
+		Issues:   append([]automation.RuleIssue(nil), s.cfg.AutomationIssues...),
+		Revision: s.cfg.SourceRevision,
+		Chinese:  i18n.ResolveLanguage(s.lang) == "zh-CN",
+		Owner:    controlpanel.WindowHandle(),
+		NextText: nextAutomationText(s.autoState, s.lang),
+	}
+}
+
+func (s *runtimeState) publishAutomationPanelState() {
+	postAutomationPanelState(s.automationPanelState())
+}
+
+func (s *runtimeState) requestAutomationSave(request automationpanel.SaveRequest) automationpanel.SaveResult {
+	result := make(chan automationpanel.SaveResult, 1)
+	s.post(func() { result <- s.saveAutomationRules(request) })
+	return <-result
+}
+
+func (s *runtimeState) saveAutomationRules(request automationpanel.SaveRequest) automationpanel.SaveResult {
+	if request.BaseRevision != s.cfg.SourceRevision {
+		return automationpanel.SaveResult{State: s.automationPanelState(), Error: i18n.T(s.lang, "automation_save_conflict")}
+	}
+	normalized, issues := automation.PrepareRules(request.Rules)
+	if len(issues) > 0 {
+		mylog.Info("Automation rules rejected: %s", issues[0].Message)
+		return automationpanel.SaveResult{
+			State: s.automationPanelState(),
+			Error: fmt.Sprintf(i18n.T(s.lang, "automation_save_rejected"), issues[0].Message),
+		}
+	}
+	candidate := s.cfg
+	candidate.AutomationRules = normalized
+	candidate.AutomationIssues = nil
+	revision, err := s.persistConfigAtRevision(candidate, request.BaseRevision)
+	if err != nil {
+		if errors.Is(err, config.ErrConfigChanged) {
+			if reloadErr := s.reloadConfig(); reloadErr != nil {
+				mylog.Info("Automation save conflict reload failed: %v", reloadErr)
+			}
+			return automationpanel.SaveResult{State: s.automationPanelState(), Error: i18n.T(s.lang, "automation_save_conflict")}
+		}
+		return automationpanel.SaveResult{
+			State: s.automationPanelState(),
+			Error: fmt.Sprintf(i18n.T(s.lang, "automation_save_failed"), err.Error()),
+		}
+	}
+	candidate.SourceRevision = revision
+	s.cfg = candidate
+	s.restartAutomation()
+	s.refreshControlPanelAutomationStatus()
+	return automationpanel.SaveResult{State: s.automationPanelState()}
 }
 
 func hideAutomationUI() {
@@ -55,9 +100,13 @@ func hideAutomationUI() {
 func (s *runtimeState) startAutomation() {
 	s.stopAutomation()
 	s.autoState = autorules.EffectiveState{IdleMinutes: automation.DefaultIdleMinutes}
+	for _, issue := range s.cfg.AutomationIssues {
+		mylog.Info("Automation rule disabled: index=%d id=%q error=%s", issue.Index, issue.RuleID, issue.Message)
+	}
 	if !s.cfg.AutomationEnabled || len(s.cfg.AutomationRules) == 0 {
 		return
 	}
+	runtimeRules := automation.RuntimeRules(s.cfg.AutomationRules, s.cfg.AutomationIssues)
 	configPath, err := config.Path()
 	if err == nil {
 		s.automationStatePath = filepath.Join(filepath.Dir(configPath), "IdleTrigger.state.json")
@@ -67,17 +116,27 @@ func (s *runtimeState) startAutomation() {
 		mylog.Info("Automation state load failed; continuing without history: %v", err)
 		runtimeState = automation.RuntimeState{LastOccurrences: make(map[string]string)}
 	}
-	runner := autorules.New(s.cfg.AutomationRules, runtimeState.LastOccurrences, autorules.Callbacks{
+	generation := s.automationGeneration
+	var runner *autorules.Runner
+	runner = autorules.New(runtimeRules, runtimeState.LastOccurrences, autorules.Callbacks{
 		OnState: func(state autorules.EffectiveState) {
-			s.post(func() {
+			s.postUntil(runner.Stopping(), func() {
+				if s.automationGeneration != generation {
+					return
+				}
 				s.autoState = state
 				s.reconcileRuntime()
 				s.updateIcon()
 				s.refreshControlPanelAutomationStatus()
+				s.publishAutomationPanelState()
 			})
 		},
 		OnEvent: func(event autorules.Event) {
-			s.post(func() { s.enqueueAutomationEvent(event) })
+			s.postUntil(runner.Stopping(), func() {
+				if s.automationGeneration == generation {
+					s.enqueueAutomationEvent(event)
+				}
+			})
 		},
 		OnCheckpoint: func(last map[string]string) {
 			if s.automationStatePath == "" {
@@ -97,9 +156,11 @@ func (s *runtimeState) startAutomation() {
 }
 
 func (s *runtimeState) stopAutomation() {
+	s.automationGeneration++
 	if s.autoRunner != nil {
-		s.autoRunner.Stop()
+		runner := s.autoRunner
 		s.autoRunner = nil
+		runner.Stop()
 		mylog.Info("Automation stopped")
 	}
 	s.autoState = autorules.EffectiveState{IdleMinutes: automation.DefaultIdleMinutes}
@@ -119,7 +180,7 @@ func (s *runtimeState) enabledAutomationCount() int {
 		return 0
 	}
 	count := 0
-	for _, rule := range s.cfg.AutomationRules {
+	for _, rule := range automation.RuntimeRules(s.cfg.AutomationRules, s.cfg.AutomationIssues) {
 		if rule.Enabled {
 			count++
 		}
@@ -199,6 +260,7 @@ func (s *runtimeState) showNextAutomationEvent() {
 }
 
 func (s *runtimeState) finishOneTimeRule(ruleID string) {
+	original := append([]automation.Rule(nil), s.cfg.AutomationRules...)
 	changed := false
 	for index := range s.cfg.AutomationRules {
 		if s.cfg.AutomationRules[index].ID == ruleID && s.cfg.AutomationRules[index].Trigger == automation.TriggerOnce && s.cfg.AutomationRules[index].Enabled {
@@ -207,7 +269,12 @@ func (s *runtimeState) finishOneTimeRule(ruleID string) {
 		}
 	}
 	if changed {
-		s.saveConfig()
+		if err := s.saveConfigErr(); err != nil {
+			s.cfg.AutomationRules = original
+			s.warnConfigSaveError(err)
+			return
+		}
+		s.publishAutomationPanelState()
 		// Do not restart the runner from inside its event callback; the consumed
 		// occurrence is already checkpointed, and this rule cannot fire again.
 	}

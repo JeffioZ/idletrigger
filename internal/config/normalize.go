@@ -25,7 +25,7 @@ func NormalizeConfig(cfg Config) Config {
 	if cfg.NoSleepBatteryThreshold < 0 || cfg.NoSleepBatteryThreshold > 100 {
 		cfg.NoSleepBatteryThreshold = d.NoSleepBatteryThreshold
 	}
-	cfg.AutomationRules = automation.NormalizeRules(cfg.AutomationRules)
+	cfg.AutomationRules, cfg.AutomationIssues = automation.PrepareRules(cfg.AutomationRules)
 	if cfg.ThemeMode != "fixed" && cfg.ThemeMode != "sunrise" {
 		cfg.ThemeMode = d.ThemeMode
 	}
@@ -63,6 +63,9 @@ func (cfg Config) Validate() error {
 	}
 	if cfg.NoSleepBatteryThreshold < 0 || cfg.NoSleepBatteryThreshold > 100 {
 		return fmt.Errorf("nosleep_battery_threshold must be between 0 and 100")
+	}
+	if len(cfg.AutomationIssues) > 0 {
+		return cfg.AutomationIssues[0]
 	}
 	if err := automation.ValidateRules(cfg.AutomationRules); err != nil {
 		return err

@@ -44,3 +44,35 @@ func TestSystemActionOffersProcessLifecycleTriggers(t *testing.T) {
 		}
 	}
 }
+
+func TestManagerUsesAuthoritativeStateWhenSaveIsRejected(t *testing.T) {
+	latest := State{Revision: "new", Rules: []automation.Rule{{ID: "latest"}}}
+	p := &panel{
+		view:   managerView,
+		state:  State{Revision: "old", Rules: []automation.Rule{{ID: "old"}}},
+		rules:  []automation.Rule{{ID: "old"}},
+		onSave: func(SaveRequest) SaveResult { return SaveResult{State: latest, Error: "conflict"} },
+	}
+	if ok, _ := p.notifySave([]automation.Rule{{ID: "stale"}}); ok {
+		t.Fatal("rejected save reported success")
+	}
+	if p.state.Revision != "new" || len(p.rules) != 1 || p.rules[0].ID != "latest" || p.managerNotice != "conflict" {
+		t.Fatalf("manager state = %+v, rules = %+v", p.state, p.rules)
+	}
+}
+
+func TestEditorKeepsDraftBaseWhenExternalStateArrives(t *testing.T) {
+	latest := State{Revision: "new", Rules: []automation.Rule{{ID: "latest"}}}
+	p := &panel{
+		view:   editorView,
+		state:  State{Revision: "old", Rules: []automation.Rule{{ID: "old"}}},
+		rules:  []automation.Rule{{ID: "old"}},
+		onSave: func(SaveRequest) SaveResult { return SaveResult{State: latest, Error: "conflict"} },
+	}
+	if ok, _ := p.notifySave([]automation.Rule{{ID: "draft"}}); ok {
+		t.Fatal("rejected save reported success")
+	}
+	if p.state.Revision != "old" || p.pendingState == nil || p.pendingState.Revision != "new" {
+		t.Fatalf("editor state = %+v, pending = %+v", p.state, p.pendingState)
+	}
+}

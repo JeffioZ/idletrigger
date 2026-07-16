@@ -1,6 +1,8 @@
 package autorules
 
 import (
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -9,7 +11,7 @@ import (
 
 func TestProcessExitedWaitsForEverySameNameInstance(t *testing.T) {
 	target := automation.ProcessTarget{Match: automation.MatchName, Executable: "worker.exe"}
-	rule := automation.Rule{ID: "done", Name: "Done", Enabled: true, Action: automation.ActionLock, Trigger: automation.TriggerProcessExited, Processes: []automation.ProcessTarget{target}}
+	rule := automation.Rule{ID: "done", Name: "Done", Enabled: true, Action: automation.ActionLock, Trigger: automation.TriggerProcessExited, Processes: []automation.ProcessTarget{target}, WarningSeconds: 60}
 	var events []Event
 	runner := New([]automation.Rule{rule}, nil, Callbacks{OnEvent: func(event Event) { events = append(events, event) }})
 	state := loopState{counts: map[string]int{target.Key(): 2}, processKnown: true, previousRunning: make(map[string]bool), pending: make(map[string]pendingEvent)}
@@ -129,5 +131,76 @@ func TestPauseStateActionsOverrideTheirEnableRequests(t *testing.T) {
 	state := New(rules, nil, Callbacks{}).evaluateState(now, nil)
 	if !state.StayAwake || !state.PauseStayAwake || !state.EnableIdle || !state.PauseIdle {
 		t.Fatalf("state requests were not collected: %+v", state)
+	}
+}
+
+func TestStopRemainsResponsiveWhenCallbackQueueIsSaturated(t *testing.T) {
+	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.Local)
+	rules := make([]automation.Rule, 0, automation.MaxRules)
+	for index := 0; index < automation.MaxRules; index++ {
+		rules = append(rules, automation.Rule{
+			ID: fmt.Sprintf("due-%02d", index), Name: "Due", Enabled: true,
+			Action: automation.ActionLock, Trigger: automation.TriggerDaily,
+			Time: now.Format("15:04"), WarningSeconds: 60,
+		})
+	}
+
+	queue := make(chan struct{}, automation.MaxRules)
+	var runner *Runner
+	enqueue := func() {
+		select {
+		case queue <- struct{}{}:
+		case <-runner.Stopping():
+		}
+	}
+	runner = New(rules, nil, Callbacks{
+		OnState: func(EffectiveState) { enqueue() },
+		OnEvent: func(Event) { enqueue() },
+	})
+	runner.now = func() time.Time { return now }
+	runner.Start()
+
+	deadline := time.After(2 * time.Second)
+	for len(queue) < cap(queue) {
+		select {
+		case <-deadline:
+			t.Fatalf("callback queue did not saturate: %d/%d", len(queue), cap(queue))
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+
+	var stops sync.WaitGroup
+	stops.Add(3)
+	done := make(chan struct{})
+	for range 3 {
+		go func() {
+			defer stops.Done()
+			runner.Stop()
+		}()
+	}
+	go func() {
+		stops.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("concurrent Stop calls blocked behind the saturated callback queue")
+	}
+}
+
+func TestInvalidRuleDoesNotBlockValidOccurrence(t *testing.T) {
+	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.Local)
+	rules := []automation.Rule{
+		{ID: "valid", Enabled: true, Action: automation.ActionLock, Trigger: automation.TriggerDaily, Time: "12:00", WarningSeconds: 60},
+		{ID: "invalid", Enabled: true, Action: automation.ActionLock, Trigger: automation.TriggerDaily, Time: "12:00", WarningSeconds: 5},
+	}
+	var events []Event
+	runner := New(rules, nil, Callbacks{OnEvent: func(event Event) { events = append(events, event) }})
+	state := loopState{counts: make(map[string]int), processKnown: true, previousRunning: make(map[string]bool), pending: make(map[string]pendingEvent)}
+	runner.evaluateEvents(now, &state)
+	if len(events) != 1 || events[0].RuleID != "valid" {
+		t.Fatalf("events = %+v, want only the valid rule", events)
 	}
 }

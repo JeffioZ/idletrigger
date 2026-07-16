@@ -55,10 +55,12 @@ type Runner struct {
 	doneCh          chan struct{}
 	mu              sync.Mutex
 	running         bool
+	now             func() time.Time
 }
 
 func New(rules []automation.Rule, lastOccurrences map[string]string, callbacks Callbacks) *Runner {
-	normalized := automation.NormalizeRules(rules)
+	normalized, issues := automation.PrepareRules(rules)
+	normalized = automation.RuntimeRules(normalized, issues)
 	validIDs := make(map[string]struct{}, len(normalized))
 	for _, rule := range normalized {
 		validIDs[rule.ID] = struct{}{}
@@ -69,7 +71,7 @@ func New(rules []automation.Rule, lastOccurrences map[string]string, callbacks C
 			last[key] = value
 		}
 	}
-	return &Runner{rules: normalized, callbacks: callbacks, lastOccurrences: last}
+	return &Runner{rules: normalized, callbacks: callbacks, lastOccurrences: last, now: time.Now}
 }
 
 func (r *Runner) Start() {
@@ -77,6 +79,13 @@ func (r *Runner) Start() {
 	defer r.mu.Unlock()
 	if r.running {
 		return
+	}
+	if r.doneCh != nil {
+		select {
+		case <-r.doneCh:
+		default:
+			return
+		}
 	}
 	r.stopCh = make(chan struct{})
 	r.doneCh = make(chan struct{})
@@ -86,15 +95,37 @@ func (r *Runner) Start() {
 
 func (r *Runner) Stop() {
 	r.mu.Lock()
-	if !r.running {
-		r.mu.Unlock()
-		return
+	done := r.doneCh
+	if r.running {
+		close(r.stopCh)
+		r.running = false
 	}
-	stop, done := r.stopCh, r.doneCh
-	r.running = false
-	close(stop)
 	r.mu.Unlock()
-	<-done
+	if done != nil {
+		<-done
+	}
+}
+
+// Stopping is closed as soon as Stop begins. Callback adapters should select
+// on it while enqueueing work so a saturated downstream queue cannot form a
+// circular wait with Stop.
+func (r *Runner) Stopping() <-chan struct{} {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.stopCh
+}
+
+func (r *Runner) isStopping() bool {
+	stop := r.Stopping()
+	if stop == nil {
+		return false
+	}
+	select {
+	case <-stop:
+		return true
+	default:
+		return false
+	}
 }
 
 type pendingEvent struct {
@@ -126,7 +157,7 @@ func (r *Runner) loop(stop <-chan struct{}, done chan<- struct{}) {
 		previousRunning: make(map[string]bool),
 		pending:         make(map[string]pendingEvent),
 	}
-	r.step(time.Now(), &state, true)
+	r.step(r.now(), &state, true)
 	for {
 		select {
 		case <-stop:
@@ -138,6 +169,9 @@ func (r *Runner) loop(stop <-chan struct{}, done chan<- struct{}) {
 }
 
 func (r *Runner) step(now time.Time, state *loopState, forceScan bool) {
+	if r.isStopping() {
+		return
+	}
 	if forceScan || state.lastProcessScan.IsZero() || now.Sub(state.lastProcessScan) >= processScanInterval {
 		if err := r.scanProcesses(now, state); err != nil && r.callbacks.OnError != nil {
 			r.callbacks.OnError(err)
@@ -151,6 +185,9 @@ func (r *Runner) step(now time.Time, state *loopState, forceScan bool) {
 		if r.callbacks.OnState != nil {
 			r.callbacks.OnState(effective)
 		}
+	}
+	if r.isStopping() {
+		return
 	}
 	r.evaluateEvents(now, state)
 }
@@ -251,6 +288,9 @@ func (r *Runner) evaluateState(now time.Time, counts map[string]int) EffectiveSt
 
 func (r *Runner) evaluateEvents(now time.Time, state *loopState) {
 	for key, pending := range state.pending {
+		if r.isStopping() {
+			return
+		}
 		if !pending.expires.IsZero() && !now.Before(pending.expires) {
 			delete(state.pending, key)
 			r.markOccurrence(pending.rule.ID, pending.occurrence)
@@ -262,6 +302,9 @@ func (r *Runner) evaluateEvents(now time.Time, state *loopState) {
 		}
 	}
 	for _, rule := range r.rules {
+		if r.isStopping() {
+			return
+		}
 		if !rule.Enabled || !automation.IsEventAction(rule.Action) {
 			continue
 		}

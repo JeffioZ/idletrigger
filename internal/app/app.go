@@ -68,6 +68,7 @@ type runtimeState struct {
 	automationStatePath   string
 	automationEvents      []autorules.Event
 	automationWarningOpen bool
+	automationGeneration  uint64
 	themeSched            *theme.Scheduler
 	batteryStop           chan struct{}
 	batteryDone           chan struct{}
@@ -219,10 +220,29 @@ func (s *runtimeState) requestLoop() {
 }
 
 func (s *runtimeState) post(fn func()) {
-	s.requestCh <- runtimeRequest{fn: func() string {
+	s.postUntil(nil, fn)
+}
+
+func (s *runtimeState) postUntil(cancel <-chan struct{}, fn func()) bool {
+	request := runtimeRequest{fn: func() string {
 		fn()
 		return ""
 	}}
+	if cancel == nil {
+		s.requestCh <- request
+		return true
+	}
+	select {
+	case <-cancel:
+		return false
+	default:
+	}
+	select {
+	case s.requestCh <- request:
+		return true
+	case <-cancel:
+		return false
+	}
 }
 
 func (s *runtimeState) call(fn func() string) string {

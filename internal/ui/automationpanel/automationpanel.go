@@ -27,12 +27,24 @@ import (
 
 type State struct {
 	Rules    []automation.Rule
+	Issues   []automation.RuleIssue
+	Revision string
 	Chinese  bool
 	Owner    windows.Handle
 	NextText string
 }
 
-type OnSave func(rules []automation.Rule)
+type SaveRequest struct {
+	BaseRevision string
+	Rules        []automation.Rule
+}
+
+type SaveResult struct {
+	State State
+	Error string
+}
+
+type OnSave func(SaveRequest) SaveResult
 type TextFunc func(string) string
 
 type rect struct{ Left, Top, Right, Bottom int32 }
@@ -123,6 +135,8 @@ type panel struct {
 	rebuildSuspended    bool
 	managerScroll       *nativeform.ListboxScrollbar
 	nameCue             *nativeform.CueBanner
+	pendingState        *State
+	managerNotice       string
 }
 
 type logicalBounds struct{ X, Y, Width, Height int }
@@ -325,6 +339,7 @@ func Show(state State, onSave OnSave, text TextFunc) error {
 	if err := ensureClass(); err != nil {
 		return err
 	}
+	state = cloneState(state)
 	p := &panel{state: state, onSave: onSave, text: text, controls: make(map[uint16]windows.Handle), rules: append([]automation.Rule(nil), state.Rules...), editing: -1}
 	activeMu.Lock()
 	active = p
@@ -363,6 +378,25 @@ func Hide() {
 	if p != nil && p.hwnd != 0 {
 		pDestroyWindow.Call(uintptr(p.hwnd))
 	}
+}
+
+// Update publishes the latest authoritative rule state to an open manager.
+// The caller must run on the tray UI thread. Unsaved editor input is preserved
+// and marked stale instead of being overwritten.
+func Update(state State) {
+	activeMu.Lock()
+	p := active
+	activeMu.Unlock()
+	if p == nil || p.hwnd == 0 {
+		return
+	}
+	p.updateState(cloneState(state))
+}
+
+func cloneState(state State) State {
+	state.Rules = append([]automation.Rule(nil), state.Rules...)
+	state.Issues = append([]automation.RuleIssue(nil), state.Issues...)
+	return state
 }
 
 // Capture hosts the real manager or editor for deterministic devtools visual
@@ -547,6 +581,66 @@ func (p *panel) initializeControlState() {
 	p.nameCue = nil
 }
 
+func (p *panel) updateState(state State) {
+	if state.Revision == p.state.Revision {
+		p.state.NextText = state.NextText
+		p.state.Issues = append([]automation.RuleIssue(nil), state.Issues...)
+		if p.view == managerView {
+			p.setText(idNext, p.managerStatusText())
+			p.populateRules()
+		}
+		return
+	}
+
+	selectedID := p.selectedRuleID
+	if p.view == editorView {
+		p.syncDraft()
+		selectedID = p.draft.ID
+		if !reflect.DeepEqual(p.draft, p.originalDraft) {
+			pending := cloneState(state)
+			p.pendingState = &pending
+			p.setEditorError(idSave, p.t("automation_changed_external"))
+			return
+		}
+	}
+
+	p.managerNotice = ""
+	p.acceptState(state)
+	if p.view == managerView {
+		p.showManager()
+		return
+	}
+	for index := range p.rules {
+		if p.rules[index].ID == selectedID {
+			p.showEditor(index)
+			return
+		}
+	}
+	p.showManager()
+}
+
+func (p *panel) acceptState(state State) {
+	p.state = cloneState(state)
+	p.rules = append([]automation.Rule(nil), state.Rules...)
+	p.pendingState = nil
+}
+
+func (p *panel) issueForRule(index int) (automation.RuleIssue, bool) {
+	for _, issue := range p.state.Issues {
+		if issue.Index == index {
+			return issue, true
+		}
+	}
+	return automation.RuleIssue{}, false
+}
+
+func (p *panel) managerStatusText() string {
+	if p.managerNotice != "" {
+		return p.managerNotice
+	}
+	return p.state.NextText
+}
+
 func (p *panel) showManager() {
 	p.beginRebuild()
 	defer p.endRebuild()
@@ -568,7 +662,7 @@ func (p *panel) showManager() {
 		}
 		p.child("STATIC", p.t("automation_empty_title"), wsChild|ssLeft, 42, 136, 516, 24, idEmptyTitle, p.sectionFont)
 		p.child("STATIC", p.t("automation_empty_body"), wsChild|ssLeft, 42, 168, 516, 44, idEmptyBody, p.font)
-		p.child("STATIC", p.state.NextText, wsChild|wsVisible|ssLeft, 18, 296, 564, 24, idNext, p.font)
+		p.child("STATIC", p.managerStatusText(), wsChild|wsVisible|ssLeft, 18, 296, 564, 24, idNext, p.font)
 		p.child("BUTTON", p.t("automation_new"), wsChild|wsVisible|wsTabStop|bsOwnerDraw, 18, 328, 116, 36, idNew, p.font)
 		p.child("BUTTON", p.t("automation_edit"), wsChild|wsVisible|wsTabStop|bsOwnerDraw, 142, 328, 116, 36, idEdit, p.font)
 		p.child("BUTTON", p.t("automation_delete"), wsChild|wsVisible|wsTabStop|bsOwnerDraw, 266, 328, 116, 36, idDelete, p.font)
@@ -580,7 +674,7 @@ func (p *panel) showManager() {
 		p.managerReady = true
 	} else {
 		p.showControls(managerControlIDs())
-		p.setText(idNext, p.state.NextText)
+		p.setText(idNext, p.managerStatusText())
 	}
 	if p.managerScroll != nil {
 		p.managerScroll.SetActive(true)
@@ -618,7 +712,12 @@ func (p *panel) populateRules() {
 		if rule.Enabled {
 			state = p.t("automation_rule_enabled")
 		}
-		label := fmt.Sprintf("%s  %s — %s", state, rule.Name, p.ruleSummary(rule))
+		summary := p.ruleSummary(rule)
+		if issue, invalid := p.issueForRule(index); invalid {
+			state = p.t("automation_rule_invalid")
+			summary = issue.Message
+		}
+		label := fmt.Sprintf("%s  %s — %s", state, rule.Name, summary)
 		value, _ := windows.UTF16PtrFromString(label)
 		pSendMessage.Call(uintptr(list), lbAddString, 0, uintptr(unsafe.Pointer(value)))
 		if rule.ID == selectedID {
@@ -696,7 +795,11 @@ func (p *panel) showEditorDraft(index int, draft automation.Rule) {
 	p.setText(idIdleMinutes, strconv.Itoa(p.draft.IdleMinutes))
 	p.setText(idWarningSeconds, strconv.Itoa(p.draft.WarningSeconds))
 	p.setText(idMaxWait, strconv.Itoa(p.draft.MaxWaitMinutes))
-	p.setText(idValidation, "")
+	validation := ""
+	if issue, invalid := p.issueForRule(index); invalid {
+		validation = issue.Message
+	}
+	p.setText(idValidation, validation)
 	for dayIndex, day := range editorWeekdays {
 		p.setChecked(idWeekdayBase+uint16(dayIndex), containsDay(p.draft.Days, day))
 	}
@@ -794,14 +897,16 @@ func (p *panel) saveEditor() {
 	} else {
 		candidate = append(candidate, p.draft)
 	}
-	if err := automation.ValidateRules(candidate); err != nil {
-		p.setEditorError(idSave, p.t("automation_invalid_detail"))
+	normalized, issues := automation.PrepareRules(candidate)
+	if len(issues) > 0 {
+		p.setEditorError(idSave, issues[0].Message)
 		return
 	}
-	p.rules = candidate
-	p.rules = automation.NormalizeRules(p.rules)
 	p.selectedRuleID = p.draft.ID
-	p.notifySave()
+	if ok, message := p.notifySave(normalized); !ok {
+		p.setEditorError(idSave, message)
+		return
+	}
 	p.showManager()
 }
 
@@ -1011,8 +1116,11 @@ func (p *panel) handleManager(id, notification uint16) {
 		p.editSelected()
 	case idToggle:
 		if index := p.selectedRule(); index >= 0 {
-			p.rules[index].Enabled = !p.rules[index].Enabled
-			p.notifySave()
+			candidate := append([]automation.Rule(nil), p.rules...)
+			candidate[index].Enabled = !candidate[index].Enabled
+			if ok, message := p.notifySave(candidate); !ok {
+				p.setText(idNext, message)
+			}
 			p.populateRules()
 		}
 	case idDelete:
@@ -1020,9 +1128,12 @@ func (p *panel) handleManager(id, notification uint16) {
 			if !p.confirm(p.t("automation_delete_title"), fmt.Sprintf(p.t("automation_delete_confirm"), p.rules[index].Name)) {
 				return
 			}
-			p.rules = append(p.rules[:index], p.rules[index+1:]...)
+			candidate := append([]automation.Rule(nil), p.rules...)
+			candidate = append(candidate[:index], candidate[index+1:]...)
 			p.selectedRuleID = ""
-			p.notifySave()
+			if ok, message := p.notifySave(candidate); !ok {
+				p.setText(idNext, message)
+			}
 			p.populateRules()
 		}
 	}
@@ -1139,6 +1250,9 @@ func (p *panel) cancelEditor() {
 	if !reflect.DeepEqual(p.draft, p.originalDraft) && !p.confirm(p.t("automation_discard_title"), p.t("automation_discard_confirm")) {
 		return
 	}
+	if p.pendingState != nil {
+		p.acceptState(*p.pendingState)
+	}
 	p.showManager()
 }
 func (p *panel) selectedRule() int {
@@ -1148,10 +1262,27 @@ func (p *panel) selectedRule() int {
 	}
 	return int(value)
 }
-func (p *panel) notifySave() {
-	if p.onSave != nil {
-		p.onSave(append([]automation.Rule(nil), p.rules...))
+func (p *panel) notifySave(rules []automation.Rule) (bool, string) {
+	if p.onSave == nil {
+		p.rules = append([]automation.Rule(nil), rules...)
+		p.state.Rules = append([]automation.Rule(nil), rules...)
+		p.state.Issues = nil
+		return true, ""
 	}
+	result := p.onSave(SaveRequest{BaseRevision: p.state.Revision, Rules: append([]automation.Rule(nil), rules...)})
+	if result.Error != "" {
+		if p.view == managerView && (result.State.Revision != "" || result.State.Rules != nil) {
+			p.acceptState(result.State)
+			p.managerNotice = result.Error
+		} else if result.State.Revision != "" && result.State.Revision != p.state.Revision {
+			pending := cloneState(result.State)
+			p.pendingState = &pending
+		}
+		return false, result.Error
+	}
+	p.managerNotice = ""
+	p.acceptState(result.State)
+	return true, ""
 }
 func (p *panel) processSummary() string {
 	if len(p.draft.Processes) == 0 {

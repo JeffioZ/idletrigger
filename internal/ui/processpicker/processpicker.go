@@ -1018,7 +1018,7 @@ func (p *picker) applyFilter() {
 	} else {
 		p.show(idEmpty, false)
 	}
-	p.setText(idStatus, fmt.Sprintf(p.text("process_picker_status_results"), len(p.visible), len(p.selected)))
+	p.updateSelectionStatus()
 }
 
 func (p *picker) reconcileVisible(previous, next []item) {
@@ -1210,7 +1210,7 @@ func (p *picker) updatePreview() {
 		pSendMessage.Call(uintptr(preview), lbAddString, 0, uintptr(unsafe.Pointer(text)))
 	}
 	p.setText(idPreviewTitle, fmt.Sprintf(p.text("process_picker_selection_title"), len(targets)))
-	p.enable(idConfirm, len(targets) > 0)
+	p.enable(idConfirm, len(targets) > 0 && len(targets) <= automation.MaxProcessesPerRule)
 	if p.previewScroll != nil {
 		p.previewScroll.Sync()
 	}
@@ -1266,8 +1266,32 @@ func normalizeSelected(values map[string]automation.ProcessTarget) map[string]au
 	return out
 }
 
+func (p *picker) updateSelectionStatus() {
+	if len(p.selected) > automation.MaxProcessesPerRule {
+		p.setText(idStatus, fmt.Sprintf(p.text("process_picker_limit"), automation.MaxProcessesPerRule))
+		return
+	}
+	p.setText(idStatus, fmt.Sprintf(p.text("process_picker_status_results"), len(p.visible), len(p.selected)))
+}
+
+func canAddSelection(values map[string]automation.ProcessTarget, target automation.ProcessTarget) bool {
+	if _, exists := values[target.Key()]; exists {
+		return true
+	}
+	targets := make([]automation.ProcessTarget, 0, len(values)+1)
+	for _, existing := range values {
+		targets = append(targets, existing)
+	}
+	targets = append(targets, target)
+	return len(automation.NormalizeTargets(targets)) <= automation.MaxProcessesPerRule
+}
+
 func (p *picker) confirm() {
 	p.captureSelection()
+	if len(p.selected) > automation.MaxProcessesPerRule {
+		p.updateSelectionStatus()
+		return
+	}
 	targets := make([]automation.ProcessTarget, 0, len(p.selected))
 	for _, target := range p.selected {
 		targets = append(targets, target)
@@ -1314,16 +1338,24 @@ func (p *picker) browseExecutable() {
 		return
 	}
 	target := automation.ProcessTarget{Match: automation.MatchPath, Executable: filepath.Base(path), Path: path}
+	candidate := make(map[string]automation.ProcessTarget, len(p.selected)+1)
 	for key, existing := range p.selected {
+		candidate[key] = existing
+	}
+	for key, existing := range candidate {
 		if existing.Match == automation.MatchName && strings.EqualFold(existing.Executable, target.Executable) {
-			delete(p.selected, key)
+			delete(candidate, key)
 		}
 	}
-	p.selected[target.Key()] = target
-	p.selected = normalizeSelected(p.selected)
+	if !canAddSelection(candidate, target) {
+		p.setText(idStatus, fmt.Sprintf(p.text("process_picker_limit"), automation.MaxProcessesPerRule))
+		return
+	}
+	candidate[target.Key()] = target
+	p.selected = normalizeSelected(candidate)
 	p.syncCheckStates()
 	p.updatePreview()
-	p.setText(idStatus, fmt.Sprintf(p.text("process_picker_status_results"), len(p.visible), len(p.selected)))
+	p.updateSelectionStatus()
 	key := target.Key()
 	go func() {
 		description := processcatalog.FileDescription(path)
@@ -1383,8 +1415,19 @@ func (p *picker) handleNotify(lParam unsafe.Pointer) {
 			return
 		}
 		if notification.NewState&lvisStateImageMask != notification.OldState&lvisStateImageMask {
+			if notification.NewState&lvisStateImageMask == 2<<12 && int(notification.Item) < len(p.visible) {
+				target := p.visible[notification.Item].target
+				if !canAddSelection(p.selected, target) {
+					p.populating = true
+					entry := lvItem{StateMask: lvisStateImageMask, State: 1 << 12}
+					pSendMessage.Call(uintptr(p.controls[idList]), lvmSetItemState, uintptr(notification.Item), uintptr(unsafe.Pointer(&entry)))
+					p.populating = false
+					p.setText(idStatus, fmt.Sprintf(p.text("process_picker_limit"), automation.MaxProcessesPerRule))
+					return
+				}
+			}
 			p.captureSelection()
-			p.setText(idStatus, fmt.Sprintf(p.text("process_picker_status_results"), len(p.visible), len(p.selected)))
+			p.updateSelectionStatus()
 		}
 	case lvnGetInfoTipW:
 		p.fillRowInfoTip((*nmLVGetInfoTip)(lParam))
@@ -1403,13 +1446,16 @@ func (p *picker) handleNotify(lParam unsafe.Pointer) {
 		checked := uint32(2 << 12)
 		if uint32(state)&lvisStateImageMask == 2<<12 {
 			checked = 1 << 12
+		} else if !canAddSelection(p.selected, p.visible[hit.Item].target) {
+			p.setText(idStatus, fmt.Sprintf(p.text("process_picker_limit"), automation.MaxProcessesPerRule))
+			return
 		}
 		p.populating = true
 		entry := lvItem{StateMask: lvisStateImageMask, State: checked}
 		pSendMessage.Call(uintptr(p.controls[idList]), lvmSetItemState, uintptr(hit.Item), uintptr(unsafe.Pointer(&entry)))
 		p.populating = false
 		p.captureSelection()
-		p.setText(idStatus, fmt.Sprintf(p.text("process_picker_status_results"), len(p.visible), len(p.selected)))
+		p.updateSelectionStatus()
 	}
 }
 

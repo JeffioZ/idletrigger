@@ -1,6 +1,7 @@
 package processpicker
 
 import (
+	"fmt"
 	"testing"
 	"time"
 	"unicode/utf16"
@@ -111,5 +112,30 @@ func TestWriteUTF16TextTerminatesAndTruncates(t *testing.T) {
 	writeUTF16Text(&short[0], int32(len(short)), "abcdef")
 	if got := string(utf16.Decode(short[:3])); got != "abc" || short[3] != 0 {
 		t.Fatalf("truncated buffer = %v, decoded = %q", short, got)
+	}
+}
+
+func TestSelectionLimitRejectsOnlyTheAdditionalTarget(t *testing.T) {
+	selected := make(map[string]automation.ProcessTarget, automation.MaxProcessesPerRule)
+	for index := 0; index < automation.MaxProcessesPerRule; index++ {
+		target := automation.ProcessTarget{Match: automation.MatchName, Executable: fmt.Sprintf("process-%02d.exe", index)}
+		selected[target.Key()] = target
+	}
+	existing := selected["name:process-00.exe"]
+	if !canAddSelection(selected, existing) {
+		t.Fatal("an already-selected target should remain selectable at the limit")
+	}
+	additional := automation.ProcessTarget{Match: automation.MatchName, Executable: "additional.exe"}
+	if canAddSelection(selected, additional) {
+		t.Fatal("a 65th process target was accepted")
+	}
+	pathTarget := automation.ProcessTarget{Match: automation.MatchPath, Executable: "process-00.exe", Path: `C:\Apps\process-00.exe`}
+	delete(selected, existing.Key())
+	selected[pathTarget.Key()] = pathTarget
+	if !canAddSelection(selected, existing) {
+		t.Fatal("a name target that replaces an exact-path target should be allowed at the limit")
+	}
+	if got := normalizeSelected(selected); len(got) != automation.MaxProcessesPerRule {
+		t.Fatalf("normalization changed the existing selection: %d", len(got))
 	}
 }

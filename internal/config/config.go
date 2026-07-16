@@ -88,6 +88,11 @@ type Config struct {
 	// commands, scripts, services, or arbitrary executables.
 	AutomationRules []automation.Rule `toml:"automation_rules"`
 
+	// AutomationIssues and SourceRevision are runtime metadata populated while
+	// loading. They are never serialized into the user's TOML.
+	AutomationIssues []automation.RuleIssue `toml:"-"`
+	SourceRevision   string                 `toml:"-"`
+
 	// LoggingEnabled writes debug logs to IdleTrigger.log.
 	LoggingEnabled bool `toml:"logging_enabled"`
 

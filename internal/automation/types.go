@@ -101,6 +101,17 @@ type Rule struct {
 	MaxWaitMinutes int             `toml:"max_wait_minutes,omitempty"`
 }
 
+// RuleIssue describes why one configured rule is unsafe to run. Index is
+// stable for the loaded rule list so callers can disable and annotate only the
+// affected rule while continuing to use the others.
+type RuleIssue struct {
+	Index   int
+	RuleID  string
+	Message string
+}
+
+func (i RuleIssue) Error() string { return i.Message }
+
 func IsStateAction(action Action) bool {
 	switch action {
 	case ActionStayAwake, ActionPauseStayAwake, ActionEnableIdle, ActionPauseIdle:
@@ -136,9 +147,6 @@ func NormalizeRules(rules []Rule) []Rule {
 	if len(rules) == 0 {
 		return nil
 	}
-	if len(rules) > MaxRules {
-		rules = rules[:MaxRules]
-	}
 	out := make([]Rule, 0, len(rules))
 	seenIDs := make(map[string]struct{}, len(rules))
 	for index, value := range rules {
@@ -154,9 +162,6 @@ func NormalizeRules(rules []Rule) []Rule {
 		r.Name = strings.TrimSpace(r.Name)
 		if r.Name == "" {
 			r.Name = r.ID
-		}
-		if !ValidAction(r.Action) || !ValidTrigger(r.Trigger) {
-			r.Enabled = false
 		}
 		if r.ProcessLogic != ProcessAny && r.ProcessLogic != ProcessAll && r.ProcessLogic != ProcessNone {
 			r.ProcessLogic = ProcessAny
@@ -191,9 +196,6 @@ func NormalizeRules(rules []Rule) []Rule {
 func NormalizeTargets(targets []ProcessTarget) []ProcessTarget {
 	if len(targets) == 0 {
 		return nil
-	}
-	if len(targets) > MaxProcessesPerRule {
-		targets = targets[:MaxProcessesPerRule]
 	}
 	out := make([]ProcessTarget, 0, len(targets))
 	seen := make(map[string]struct{}, len(targets))
@@ -246,42 +248,135 @@ func NormalizeTargets(targets []ProcessTarget) []ProcessTarget {
 	return filtered
 }
 
-func ValidateRules(rules []Rule) error {
-	if len(rules) > MaxRules {
-		return fmt.Errorf("automation_rules may contain at most %d rules", MaxRules)
-	}
-	seen := make(map[string]struct{}, len(rules))
-	for index, r := range rules {
-		if strings.TrimSpace(r.ID) == "" {
-			return fmt.Errorf("automation_rules[%d].id is required", index)
+// PrepareRules is the single normalization and validation entry point used by
+// configuration loading, the editor, and the runner. It never truncates input.
+// Invalid rules remain present and receive one deterministic diagnostic.
+func PrepareRules(rules []Rule) ([]Rule, []RuleIssue) {
+	normalized := NormalizeRules(rules)
+	issues := make([]RuleIssue, 0)
+	addIssue := func(index int, message string) {
+		ruleID := ""
+		if index >= 0 && index < len(normalized) {
+			ruleID = normalized[index].ID
 		}
-		key := strings.ToLower(r.ID)
+		issues = append(issues, RuleIssue{Index: index, RuleID: ruleID, Message: message})
+	}
+
+	seen := make(map[string]struct{}, len(rules))
+	for index, raw := range rules {
+		if index >= MaxRules {
+			addIssue(index, fmt.Sprintf("automation_rules may contain at most %d rules", MaxRules))
+			continue
+		}
+		id := strings.TrimSpace(raw.ID)
+		if id == "" {
+			addIssue(index, fmt.Sprintf("automation_rules[%d].id is required", index))
+			continue
+		}
+		key := strings.ToLower(id)
 		if _, exists := seen[key]; exists {
-			return fmt.Errorf("duplicate automation rule id %q", r.ID)
+			addIssue(index, fmt.Sprintf("duplicate automation rule id %q", id))
+			continue
 		}
 		seen[key] = struct{}{}
-		if !ValidAction(r.Action) {
-			return fmt.Errorf("automation rule %q has invalid action %q", r.ID, r.Action)
+		if err := validatePreparedRule(raw, normalized[index]); err != nil {
+			addIssue(index, fmt.Sprintf("automation rule %q: %v", id, err))
 		}
-		if !ValidTrigger(r.Trigger) {
-			return fmt.Errorf("automation rule %q has invalid trigger %q", r.ID, r.Trigger)
+	}
+	return normalized, issues
+}
+
+func validatePreparedRule(raw, normalized Rule) error {
+	if !ValidAction(raw.Action) {
+		return fmt.Errorf("invalid action %q", raw.Action)
+	}
+	if !ValidTrigger(raw.Trigger) {
+		return fmt.Errorf("invalid trigger %q", raw.Trigger)
+	}
+	if raw.ProcessLogic != "" && raw.ProcessLogic != ProcessAny && raw.ProcessLogic != ProcessAll && raw.ProcessLogic != ProcessNone {
+		return fmt.Errorf("invalid process_logic %q", raw.ProcessLogic)
+	}
+	if raw.BlockedPolicy != "" && raw.BlockedPolicy != BlockedSkip && raw.BlockedPolicy != BlockedWait {
+		return fmt.Errorf("invalid blocked_policy %q", raw.BlockedPolicy)
+	}
+	if raw.IdleMinutes < 0 || raw.IdleMinutes > 7*24*60 || (raw.Action == ActionEnableIdle && raw.IdleMinutes == 0) {
+		return fmt.Errorf("idle_minutes must be between 1 and 10080")
+	}
+	if raw.WarningSeconds < 0 || raw.WarningSeconds > 3600 || (IsEventAction(raw.Action) && raw.WarningSeconds < MinWarningSeconds) {
+		return fmt.Errorf("warning_seconds must be between %d and 3600", MinWarningSeconds)
+	}
+	if raw.MaxWaitMinutes < 0 || raw.MaxWaitMinutes > 7*24*60 {
+		return fmt.Errorf("max_wait_minutes must be between 0 and 10080")
+	}
+	if IsEventAction(raw.Action) && len(raw.Processes) > 0 && raw.Trigger != TriggerProcessStarted && raw.Trigger != TriggerProcessExited && raw.BlockedPolicy == BlockedWait && raw.MaxWaitMinutes == 0 {
+		return fmt.Errorf("max_wait_minutes must be between 1 and 10080 when waiting")
+	}
+	if len(raw.Processes) > MaxProcessesPerRule {
+		return fmt.Errorf("may contain at most %d process targets", MaxProcessesPerRule)
+	}
+	if hasInvalidDay(raw.Days) {
+		return fmt.Errorf("contains an invalid weekday")
+	}
+	for _, target := range raw.Processes {
+		if err := validateProcessTarget(target); err != nil {
+			return fmt.Errorf("invalid process target: %v", err)
 		}
-		if err := validateActionTrigger(r); err != nil {
-			return fmt.Errorf("automation rule %q: %w", r.ID, err)
+	}
+	if err := validateActionTrigger(normalized); err != nil {
+		return err
+	}
+	return nil
+}
+
+// RuntimeRules returns a detached rule list with only invalid entries disabled.
+// It preserves valid entries even when another rule in the same TOML is bad.
+func RuntimeRules(rules []Rule, issues []RuleIssue) []Rule {
+	out := append([]Rule(nil), rules...)
+	for _, issue := range issues {
+		if issue.Index >= 0 && issue.Index < len(out) {
+			out[issue.Index].Enabled = false
 		}
-		if IsEventAction(r.Action) && (r.WarningSeconds < MinWarningSeconds || r.WarningSeconds > 3600) {
-			return fmt.Errorf("automation rule %q warning_seconds must be between %d and 3600", r.ID, MinWarningSeconds)
+	}
+	return out
+}
+
+func ValidateRules(rules []Rule) error {
+	_, issues := PrepareRules(rules)
+	if len(issues) > 0 {
+		return issues[0]
+	}
+	return nil
+}
+
+func validateProcessTarget(target ProcessTarget) error {
+	if target.Match != "" && target.Match != MatchName && target.Match != MatchPath {
+		return fmt.Errorf("invalid match %q", target.Match)
+	}
+	executable := strings.TrimSpace(filepath.Base(target.Executable))
+	if executable == "" || executable == "." {
+		return fmt.Errorf("executable is required")
+	}
+	if target.Match == MatchPath {
+		path := strings.TrimSpace(target.Path)
+		if !filepath.IsAbs(path) {
+			return fmt.Errorf("path must be absolute")
 		}
-		if len(r.Processes) > MaxProcessesPerRule {
-			return fmt.Errorf("automation rule %q has too many process targets", r.ID)
-		}
-		for _, target := range r.Processes {
-			if len(NormalizeTargets([]ProcessTarget{target})) != 1 {
-				return fmt.Errorf("automation rule %q has an invalid process target", r.ID)
-			}
+		if !strings.EqualFold(filepath.Base(path), executable) {
+			return fmt.Errorf("path does not match executable")
 		}
 	}
 	return nil
+}
+
+func hasInvalidDay(days []string) bool {
+	for _, value := range days {
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "sun", "mon", "tue", "wed", "thu", "fri", "sat":
+		default:
+			return true
+		}
+	}
+	return false
 }
 
 func validateActionTrigger(r Rule) error {

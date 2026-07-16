@@ -1,6 +1,7 @@
 package automation
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 )
@@ -65,5 +66,36 @@ func TestPauseStayAwakeIsAStateAction(t *testing.T) {
 	}})
 	if err := ValidateRules(rules); err != nil {
 		t.Fatalf("pause Stay Awake rule rejected: %v", err)
+	}
+}
+
+func TestNormalizeTargetsNeverSilentlyTruncates(t *testing.T) {
+	targets := make([]ProcessTarget, 0, MaxProcessesPerRule+1)
+	for index := 0; index <= MaxProcessesPerRule; index++ {
+		targets = append(targets, ProcessTarget{Match: MatchName, Executable: fmt.Sprintf("process-%02d.exe", index)})
+	}
+	if got := NormalizeTargets(targets); len(got) != len(targets) {
+		t.Fatalf("NormalizeTargets returned %d targets, want %d", len(got), len(targets))
+	}
+	_, issues := PrepareRules([]Rule{{
+		ID: "too-many", Enabled: true, Action: ActionStayAwake, Trigger: TriggerProcessRunning,
+		Processes: targets,
+	}})
+	if len(issues) != 1 || issues[0].Index != 0 {
+		t.Fatalf("too many targets issues = %+v", issues)
+	}
+}
+
+func TestPrepareRulesDisablesOnlyInvalidRuntimeEntries(t *testing.T) {
+	rules, issues := PrepareRules([]Rule{
+		{ID: "valid", Enabled: true, Action: ActionLock, Trigger: TriggerDaily, Time: "12:00", WarningSeconds: 60},
+		{ID: "invalid", Enabled: true, Action: ActionLock, Trigger: TriggerDaily, Time: "12:00", WarningSeconds: 5},
+	})
+	if len(issues) != 1 || issues[0].Index != 1 {
+		t.Fatalf("issues = %+v", issues)
+	}
+	runtimeRules := RuntimeRules(rules, issues)
+	if !runtimeRules[0].Enabled || runtimeRules[1].Enabled {
+		t.Fatalf("runtime enabled state = [%v %v]", runtimeRules[0].Enabled, runtimeRules[1].Enabled)
 	}
 }

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"math"
 	"os"
 	"path/filepath"
@@ -307,6 +308,85 @@ func TestLoadFromKeepsMalformedConfig(t *testing.T) {
 	}
 	if string(got) != string(broken) {
 		t.Fatalf("malformed config was modified: %q", got)
+	}
+}
+
+func TestLoadFromPreservesInvalidAutomationRulesWithoutRewrite(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "IdleTrigger.toml")
+	data := []byte(`automation_enabled = true
+
+[[automation_rules]]
+id = "valid"
+name = "Valid"
+enabled = true
+action = "stay_awake"
+trigger = "process_running"
+
+[[automation_rules.processes]]
+match = "name"
+executable = "render.exe"
+
+[[automation_rules]]
+id = "invalid"
+name = "Invalid"
+enabled = true
+action = "lock"
+trigger = "daily"
+time = "12:00"
+warning_seconds = 5
+`)
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := loadFrom(path)
+	if err != nil {
+		t.Fatalf("loadFrom: %v", err)
+	}
+	if len(cfg.AutomationIssues) != 1 || cfg.AutomationIssues[0].Index != 1 {
+		t.Fatalf("automation issues = %+v", cfg.AutomationIssues)
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("config with a loaded invalid automation rule became saveable without an explicit correction")
+	}
+	runtimeRules := automation.RuntimeRules(cfg.AutomationRules, cfg.AutomationIssues)
+	if len(runtimeRules) != 2 || !runtimeRules[0].Enabled || runtimeRules[1].Enabled {
+		t.Fatalf("runtime rules = %+v", runtimeRules)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(data) {
+		t.Fatalf("invalid rule config was rewritten:\n%s", got)
+	}
+	if _, err := os.Stat(path + ".bak"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("invalid rule load created an unexpected backup: %v", err)
+	}
+}
+
+func TestSaveToAtRevisionRejectsExternalChange(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "IdleTrigger.toml")
+	if err := saveTo(path, DefaultConfig()); err != nil {
+		t.Fatal(err)
+	}
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	external := append(append([]byte(nil), original...), []byte("\n# external edit\n")...)
+	if err := os.WriteFile(path, external, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := saveToAtRevision(path, DefaultConfig(), configRevision(original)); !errors.Is(err, ErrConfigChanged) {
+		t.Fatalf("saveToAtRevision error = %v, want ErrConfigChanged", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(external) {
+		t.Fatal("external config was overwritten by a stale revision")
 	}
 }
 

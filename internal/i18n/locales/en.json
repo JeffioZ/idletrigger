@@ -213,6 +213,11 @@
   "automation_runtime_note": "State actions are temporary. Tasks work only while IdleTrigger runs; system actions can be cancelled.",
   "automation_rule_enabled": "Enabled",
   "automation_rule_disabled": "Disabled",
+  "automation_rule_invalid": "Invalid",
+  "automation_changed_external": "Tasks changed outside this window. Discard this edit to load the latest version.",
+  "automation_save_conflict": "Tasks changed outside this window. The latest version was kept; review it before saving again.",
+  "automation_save_rejected": "The task was not saved: %s",
+  "automation_save_failed": "Could not save automatic tasks: %s",
   "automation_invalid_detail": "Check the date, time, days, process selection, and numeric ranges. System-action warnings must be at least 10 seconds.",
   "automation_delete_title": "Delete Automatic Task",
   "automation_delete_confirm": "Delete “%s”? This cannot be undone.",
@@ -261,7 +266,7 @@
   "tip_automation_days_workdays": "Quickly select Monday through Friday.",
   "tip_automation_days_everyday": "Quickly select all seven days.",
   "tip_process_logic": "Any needs one match; All needs every selected process.",
-  "tip_choose_processes": "Choose running process names or browse to a specific EXE file.",
+  "tip_choose_processes": "Choose up to 64 running process names, or browse to a specific EXE file.",
   "tip_keep_screen": "Stay Awake normally prevents system sleep only. Enable this to also keep the display on.",
   "tip_idle_minutes": "Idle duration used when this task enables idle monitoring.",
   "tip_warning_seconds": "Show a cancellable countdown of at least 10 seconds before any system action.",
@@ -285,6 +290,7 @@
   "process_picker_confirm": "OK",
   "process_picker_error": "Could not read the process list: %s",
   "process_picker_status_results": "%d shown · %d selected",
+  "process_picker_limit": "You can select up to %d process targets. Remove one before adding another.",
   "process_picker_empty": "No processes are available. Refresh in a moment.",
   "process_picker_no_results": "No matches. Clear the search and try again.",
   "process_picker_load_failed": "The process list could not be read. Select Refresh to try again.",
@@ -300,5 +306,5 @@
   "tip_process_refresh": "Scan current processes now without clearing selections. The list also refreshes when this window becomes active again.",
   "tip_process_browse": "Choose a specific EXE file for matching. The file is never launched.",
   "tip_process_cancel": "Close without changing the process selection.",
-  "tip_process_confirm": "Save this selection. PIDs are never stored."
+  "tip_process_confirm": "Save up to 64 process targets. PIDs are never stored."
 }
