@@ -23,16 +23,19 @@ func TestParse(t *testing.T) {
 		{"single", []string{"screenshot", "--language", "en", "--theme", "dark", "--output", "out.png"}, false},
 		{"automation", []string{"screenshot", "--surface", "automation", "--language", "zh-CN", "--theme", "light", "--output", "out.png"}, false},
 		{"automation editor", []string{"screenshot", "--surface", "automation-editor", "--language", "en", "--theme", "dark", "--output", "out.png"}, false},
-		{"all", []string{"screenshot", "--all", "--output", "images"}, false},
+		{"readme set", []string{"screenshot", "--readme-set", "--output", "images"}, false},
+		{"review set", []string{"screenshot", "--review-set", "--output", "images"}, false},
+		{"ambiguous all", []string{"screenshot", "--all", "--output", "images"}, true},
 		{"missing language", []string{"screenshot", "--theme", "dark", "--output", "out.png"}, true},
 		{"missing theme", []string{"screenshot", "--language", "en", "--output", "out.png"}, true},
 		{"invalid language", []string{"screenshot", "--language", "fr", "--theme", "dark", "--output", "out.png"}, true},
 		{"invalid theme", []string{"screenshot", "--language", "en", "--theme", "blue", "--output", "out.png"}, true},
 		{"invalid surface", []string{"screenshot", "--surface", "picker", "--language", "en", "--theme", "dark", "--output", "out.png"}, true},
-		{"all conflict", []string{"screenshot", "--all", "--language", "en", "--output", "images"}, true},
-		{"all surface conflict", []string{"screenshot", "--all", "--surface", "automation", "--output", "images"}, true},
+		{"set conflict", []string{"screenshot", "--review-set", "--language", "en", "--output", "images"}, true},
+		{"set surface conflict", []string{"screenshot", "--readme-set", "--surface", "automation", "--output", "images"}, true},
+		{"multiple sets", []string{"screenshot", "--readme-set", "--review-set", "--output", "images"}, true},
 		{"single png", []string{"screenshot", "--language", "en", "--theme", "light", "--output", "out.jpg"}, true},
-		{"all output", []string{"screenshot", "--all"}, true},
+		{"set output", []string{"screenshot", "--review-set"}, true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -62,7 +65,7 @@ func TestSingleScreenshotSurfaceDefaultsAndOverrides(t *testing.T) {
 }
 
 func TestAllJobsUseStableReadmeOrder(t *testing.T) {
-	opts, err := parse([]string{"screenshot", "--all", "--output", "docs/images"})
+	opts, err := parse([]string{"screenshot", "--readme-set", "--output", "docs/images"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,6 +81,38 @@ func TestAllJobsUseStableReadmeOrder(t *testing.T) {
 		if got := filepath.Base(jobs[i].path); got != name {
 			t.Errorf("job %d = %q, want %q", i, got, name)
 		}
+	}
+}
+
+func TestReviewSetCoversEverySurfaceLanguageAndTheme(t *testing.T) {
+	opts, err := parse([]string{"screenshot", "--review-set", "--output", "dist/ui-review"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobs, err := opts.jobs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs) != 16 {
+		t.Fatalf("review job count = %d, want 16", len(jobs))
+	}
+	want := map[string]bool{}
+	for _, theme := range []string{"light", "dark"} {
+		for _, language := range []string{"en", "zh-CN"} {
+			for _, surface := range []string{"control", "automation", "automation-editor", "process-picker"} {
+				want[surface+"-"+language+"-"+theme+".png"] = true
+			}
+		}
+	}
+	for _, job := range jobs {
+		name := filepath.Base(job.path)
+		if !want[name] {
+			t.Errorf("unexpected review job %q", name)
+		}
+		delete(want, name)
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing review jobs: %v", want)
 	}
 }
 

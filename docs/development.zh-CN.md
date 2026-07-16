@@ -159,6 +159,17 @@ devtools EXE、重新生成四张受版本管理的图片、校验 PNG 尺寸，
 .\tools\capture-screenshots.ps1 -OutputDirectory (Join-Path $env:TEMP "IdleTrigger-screenshots")
 ```
 
+如需审查全部原生界面，可一次生成主界面、自动任务管理器、任务编辑器和进程选择器的
+中英文、深浅色共 16 张图片。默认输出到已忽略的 `dist/ui-review/`，不会覆盖 README
+现有四张公开截图：
+
+```powershell
+.\tools\capture-screenshots.ps1 -CaptureSet Review
+```
+
+底层 devtools 命令明确区分 `screenshot --readme-set` 与
+`screenshot --review-set`；含义模糊的旧 `--all` 参数会被拒绝。
+
 正式 EXE 明确不包含 `screenshot` 命令及其 PNG/压缩依赖。
 
 ## 离线构建

@@ -54,11 +54,11 @@ var screenshotShadows = [...]screenshotShadow{
 }
 
 type options struct {
-	all      bool
-	surface  string
-	language string
-	theme    controlpanel.Theme
-	output   string
+	captureSet string
+	surface    string
+	language   string
+	theme      controlpanel.Theme
+	output     string
 }
 
 type job struct {
@@ -106,7 +106,7 @@ var (
 // IsCommand reports whether args select the isolated screenshot execution path.
 func IsCommand(args []string) bool { return len(args) > 0 && args[0] == "screenshot" }
 
-// Run captures deterministic README panel images without starting the normal app.
+// Run captures deterministic UI reference images without starting the normal app.
 func Run(args []string) error {
 	if len(args) == 2 && args[1] == "--help" {
 		fmt.Fprintln(os.Stdout, usage())
@@ -308,11 +308,13 @@ func parse(args []string) (options, error) {
 	var opts options
 	for i := 1; i < len(args); i++ {
 		switch args[i] {
-		case "--all":
-			if opts.all {
-				return options{}, fmt.Errorf("screenshot --all specified more than once")
+		case "--readme-set", "--review-set":
+			if opts.captureSet != "" {
+				return options{}, fmt.Errorf("screenshot capture set specified more than once")
 			}
-			opts.all = true
+			opts.captureSet = strings.TrimSuffix(strings.TrimPrefix(args[i], "--"), "-set")
+		case "--all":
+			return options{}, fmt.Errorf("screenshot --all is ambiguous; use --readme-set or --review-set")
 		case "--surface", "--language", "--theme", "--output":
 			if i+1 >= len(args) {
 				return options{}, fmt.Errorf("screenshot option %q needs a value", args[i])
@@ -358,12 +360,12 @@ func parse(args []string) (options, error) {
 			return options{}, fmt.Errorf("unknown screenshot option %q", args[i])
 		}
 	}
-	if opts.all {
+	if opts.captureSet != "" {
 		if opts.surface != "" || opts.language != "" || opts.theme != controlpanel.ThemeFollowSystem {
-			return options{}, fmt.Errorf("screenshot --all cannot be combined with --surface, --language, or --theme")
+			return options{}, fmt.Errorf("screenshot --%s-set cannot be combined with --surface, --language, or --theme", opts.captureSet)
 		}
 		if opts.output == "" {
-			return options{}, fmt.Errorf("screenshot --all requires --output DIRECTORY")
+			return options{}, fmt.Errorf("screenshot --%s-set requires --output DIRECTORY", opts.captureSet)
 		}
 		return opts, nil
 	}
@@ -380,19 +382,34 @@ func parse(args []string) (options, error) {
 }
 
 func usage() string {
-	return "usage:\n  IdleTrigger.exe screenshot --all --output DIRECTORY\n  IdleTrigger.exe screenshot [--surface control|automation|automation-editor|process-picker] --language en|zh-CN --theme light|dark --output FILE.png"
+	return "usage:\n  IdleTrigger.exe screenshot --readme-set --output DIRECTORY\n  IdleTrigger.exe screenshot --review-set --output DIRECTORY\n  IdleTrigger.exe screenshot [--surface control|automation|automation-editor|process-picker] --language en|zh-CN --theme light|dark --output FILE.png"
 }
 
 func (opts options) jobs() ([]job, error) {
-	if !opts.all {
+	if opts.captureSet == "" {
 		return []job{{surface: opts.surface, language: opts.language, theme: opts.theme, path: opts.output}}, nil
 	}
-	return []job{
-		{surface: "control", language: "en", theme: controlpanel.ThemeLight, path: filepath.Join(opts.output, "panel-en-light.png")},
-		{surface: "control", language: "en", theme: controlpanel.ThemeDark, path: filepath.Join(opts.output, "panel-en-dark.png")},
-		{surface: "control", language: "zh-CN", theme: controlpanel.ThemeLight, path: filepath.Join(opts.output, "panel-zh-light.png")},
-		{surface: "control", language: "zh-CN", theme: controlpanel.ThemeDark, path: filepath.Join(opts.output, "panel-zh-dark.png")},
-	}, nil
+	if opts.captureSet == "readme" {
+		return []job{
+			{surface: "control", language: "en", theme: controlpanel.ThemeLight, path: filepath.Join(opts.output, "panel-en-light.png")},
+			{surface: "control", language: "en", theme: controlpanel.ThemeDark, path: filepath.Join(opts.output, "panel-en-dark.png")},
+			{surface: "control", language: "zh-CN", theme: controlpanel.ThemeLight, path: filepath.Join(opts.output, "panel-zh-light.png")},
+			{surface: "control", language: "zh-CN", theme: controlpanel.ThemeDark, path: filepath.Join(opts.output, "panel-zh-dark.png")},
+		}, nil
+	}
+	var jobs []job
+	for _, theme := range []struct {
+		value controlpanel.Theme
+		name  string
+	}{{controlpanel.ThemeLight, "light"}, {controlpanel.ThemeDark, "dark"}} {
+		for _, language := range []string{"en", "zh-CN"} {
+			for _, surface := range []string{"control", "automation", "automation-editor", "process-picker"} {
+				name := fmt.Sprintf("%s-%s-%s.png", surface, language, theme.name)
+				jobs = append(jobs, job{surface: surface, language: language, theme: theme.value, path: filepath.Join(opts.output, name)})
+			}
+		}
+	}
+	return jobs, nil
 }
 
 func fixedSnapshot(language string, theme controlpanel.Theme) controlpanel.State {

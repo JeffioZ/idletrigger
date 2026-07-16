@@ -187,6 +187,19 @@ temporary output directory:
 .\tools\capture-screenshots.ps1 -OutputDirectory (Join-Path $env:TEMP "IdleTrigger-screenshots")
 ```
 
+For visual review of every native surface, generate the control panel,
+automatic-task manager, task editor, and process picker in both languages and
+themes. This writes 16 ignored images to `dist/ui-review/` by default and does
+not replace the four README images:
+
+```powershell
+.\tools\capture-screenshots.ps1 -CaptureSet Review
+```
+
+The underlying devtools command names the two sets explicitly as
+`screenshot --readme-set` and `screenshot --review-set`; the ambiguous legacy
+`--all` option is rejected.
+
 The normal release EXE deliberately does not contain the `screenshot` command
 or its PNG/compression dependencies.
 
