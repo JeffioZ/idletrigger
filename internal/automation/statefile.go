@@ -39,7 +39,7 @@ func SaveRuntimeState(path string, state RuntimeState) error {
 		return fmt.Errorf("encode automation state: %w", err)
 	}
 	data = append(data, '\n')
-	temporary, err := os.CreateTemp(filepath.Dir(path), ".IdleTrigger-state-*.tmp")
+	temporary, err := os.CreateTemp(filepath.Dir(path), ".IdleTrigger-state-*.json.tmp")
 	if err != nil {
 		return fmt.Errorf("create automation state: %w", err)
 	}

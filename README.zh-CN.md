@@ -43,14 +43,14 @@ IdleTrigger 是一个仅依赖 Windows 系统 DLL 的单文件程序。它驻留
 
 ## 界面截图
 
-<img src="docs/images/panel-zh-light.png" alt="IdleTrigger 简体中文浅色控制浮层" width="420">
+<img src="docs/images/control-panel-zh-CN-light.png" alt="IdleTrigger 简体中文浅色控制浮层" width="420">
 
 <details>
 <summary>更多主题与语言</summary>
 
 | 简体中文深色 | 英文浅色 | 英文深色 |
 | --- | --- | --- |
-| <img src="docs/images/panel-zh-dark.png" alt="IdleTrigger 简体中文深色控制浮层" width="260"> | <img src="docs/images/panel-en-light.png" alt="IdleTrigger 英文浅色控制浮层" width="260"> | <img src="docs/images/panel-en-dark.png" alt="IdleTrigger 英文深色控制浮层" width="260"> |
+| <img src="docs/images/control-panel-zh-CN-dark.png" alt="IdleTrigger 简体中文深色控制浮层" width="260"> | <img src="docs/images/control-panel-en-light.png" alt="IdleTrigger 英文浅色控制浮层" width="260"> | <img src="docs/images/control-panel-en-dark.png" alt="IdleTrigger 英文深色控制浮层" width="260"> |
 
 </details>
 

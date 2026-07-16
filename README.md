@@ -43,14 +43,14 @@ The control panel follows Windows light/dark mode, responds to DPI changes, and 
 
 ## Screenshots
 
-<img src="docs/images/panel-en-light.png" alt="IdleTrigger control panel in English light mode" width="420">
+<img src="docs/images/control-panel-en-light.png" alt="IdleTrigger control panel in English light mode" width="420">
 
 <details>
 <summary>More themes and languages</summary>
 
 | English dark | Simplified Chinese light | Simplified Chinese dark |
 | --- | --- | --- |
-| <img src="docs/images/panel-en-dark.png" alt="IdleTrigger control panel in English dark mode" width="260"> | <img src="docs/images/panel-zh-light.png" alt="IdleTrigger control panel in Simplified Chinese light mode" width="260"> | <img src="docs/images/panel-zh-dark.png" alt="IdleTrigger control panel in Simplified Chinese dark mode" width="260"> |
+| <img src="docs/images/control-panel-en-dark.png" alt="IdleTrigger control panel in English dark mode" width="260"> | <img src="docs/images/control-panel-zh-CN-light.png" alt="IdleTrigger control panel in Simplified Chinese light mode" width="260"> | <img src="docs/images/control-panel-zh-CN-dark.png" alt="IdleTrigger control panel in Simplified Chinese dark mode" width="260"> |
 
 </details>
 

@@ -391,10 +391,10 @@ func (opts options) jobs() ([]job, error) {
 	}
 	if opts.captureSet == "readme" {
 		return []job{
-			{surface: "control", language: "en", theme: controlpanel.ThemeLight, path: filepath.Join(opts.output, "panel-en-light.png")},
-			{surface: "control", language: "en", theme: controlpanel.ThemeDark, path: filepath.Join(opts.output, "panel-en-dark.png")},
-			{surface: "control", language: "zh-CN", theme: controlpanel.ThemeLight, path: filepath.Join(opts.output, "panel-zh-light.png")},
-			{surface: "control", language: "zh-CN", theme: controlpanel.ThemeDark, path: filepath.Join(opts.output, "panel-zh-dark.png")},
+			{surface: "control", language: "en", theme: controlpanel.ThemeLight, path: filepath.Join(opts.output, "control-panel-en-light.png")},
+			{surface: "control", language: "en", theme: controlpanel.ThemeDark, path: filepath.Join(opts.output, "control-panel-en-dark.png")},
+			{surface: "control", language: "zh-CN", theme: controlpanel.ThemeLight, path: filepath.Join(opts.output, "control-panel-zh-CN-light.png")},
+			{surface: "control", language: "zh-CN", theme: controlpanel.ThemeDark, path: filepath.Join(opts.output, "control-panel-zh-CN-dark.png")},
 		}, nil
 	}
 	var jobs []job
@@ -404,12 +404,23 @@ func (opts options) jobs() ([]job, error) {
 	}{{controlpanel.ThemeLight, "light"}, {controlpanel.ThemeDark, "dark"}} {
 		for _, language := range []string{"en", "zh-CN"} {
 			for _, surface := range []string{"control", "automation", "automation-editor", "process-picker"} {
-				name := fmt.Sprintf("%s-%s-%s.png", surface, language, theme.name)
+				name := fmt.Sprintf("%s-%s-%s.png", screenshotSurfaceFilename(surface), language, theme.name)
 				jobs = append(jobs, job{surface: surface, language: language, theme: theme.value, path: filepath.Join(opts.output, name)})
 			}
 		}
 	}
 	return jobs, nil
+}
+
+func screenshotSurfaceFilename(surface string) string {
+	switch surface {
+	case "control":
+		return "control-panel"
+	case "automation":
+		return "automation-manager"
+	default:
+		return surface
+	}
 }
 
 func fixedSnapshot(language string, theme controlpanel.Theme) controlpanel.State {
@@ -593,7 +604,7 @@ func writePNGWith(path string, img image.Image, encode func(io.Writer, image.Ima
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		return fmt.Errorf("create screenshot output directory: %w", err)
 	}
-	temporary, err := os.CreateTemp(directory, ".idletrigger-screenshot-*.tmp")
+	temporary, err := os.CreateTemp(directory, ".IdleTrigger-screenshot-*.png.tmp")
 	if err != nil {
 		return fmt.Errorf("create temporary screenshot PNG: %w", err)
 	}

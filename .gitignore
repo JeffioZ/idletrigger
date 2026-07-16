@@ -13,9 +13,12 @@ coverage.out
 # Runtime config and logs generated next to the EXE
 IdleTrigger.toml
 IdleTrigger.toml.bak
+IdleTrigger.state.json
 IdleTrigger.log
 IdleTrigger.log.*
 .IdleTrigger-*.toml.tmp
+.IdleTrigger-state-*.json.tmp
+.IdleTrigger-screenshot-*.png.tmp
 
 # Editor backup files
 *.swp

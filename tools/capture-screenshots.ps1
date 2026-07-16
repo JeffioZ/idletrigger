@@ -15,17 +15,18 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     $OutputDirectory = if ($CaptureSet -eq 'Readme') { Join-Path $repoRoot 'docs\images' } else { Join-Path $repoRoot 'dist\ui-review' }
 }
 $outputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
-$temporaryDirectory = Join-Path (Join-Path $repoRoot 'dist') ('.screenshot-build-' + $PID)
+$temporaryDirectory = Join-Path (Join-Path $repoRoot 'dist') ('.IdleTrigger-screenshot-build-' + $PID)
 $captureDirectory = Join-Path $temporaryDirectory 'captured'
-$exePath = Join-Path $temporaryDirectory 'IdleTrigger-screenshot.exe'
+$exePath = Join-Path $temporaryDirectory 'IdleTrigger-x64-screenshot.exe'
+$reviewFilePrefixes = @('control-panel', 'automation-manager', 'automation-editor', 'process-picker')
 $files = if ($CaptureSet -eq 'Readme') {
-    @('panel-en-light.png', 'panel-en-dark.png', 'panel-zh-light.png', 'panel-zh-dark.png')
+    @('control-panel-en-light.png', 'control-panel-en-dark.png', 'control-panel-zh-CN-light.png', 'control-panel-zh-CN-dark.png')
 } else {
     @('light', 'dark') | ForEach-Object {
         $theme = $_
         @('en', 'zh-CN') | ForEach-Object {
             $language = $_
-            @('control', 'automation', 'automation-editor', 'process-picker') | ForEach-Object { "$_-$language-$theme.png" }
+            $reviewFilePrefixes | ForEach-Object { "$_-$language-$theme.png" }
         }
     }
 }
@@ -70,14 +71,14 @@ try {
         Write-Output "$name $($size[0])x$($size[1])"
     }
     if ($CaptureSet -eq 'Readme') {
-        if ($sizes['panel-en-light.png'][1] -ne $sizes['panel-en-dark.png'][1]) { throw 'English light/dark heights differ' }
-        if ($sizes['panel-zh-light.png'][1] -ne $sizes['panel-zh-dark.png'][1]) { throw 'Chinese light/dark heights differ' }
+        if ($sizes['control-panel-en-light.png'][1] -ne $sizes['control-panel-en-dark.png'][1]) { throw 'English light/dark heights differ' }
+        if ($sizes['control-panel-zh-CN-light.png'][1] -ne $sizes['control-panel-zh-CN-dark.png'][1]) { throw 'Chinese light/dark heights differ' }
     } else {
         foreach ($language in @('en', 'zh-CN')) {
-            foreach ($surface in @('control', 'automation', 'automation-editor', 'process-picker')) {
-                $light = $sizes["$surface-$language-light.png"]
-                $dark = $sizes["$surface-$language-dark.png"]
-                if ($light[0] -ne $dark[0] -or $light[1] -ne $dark[1]) { throw "$surface $language light/dark sizes differ" }
+            foreach ($prefix in $reviewFilePrefixes) {
+                $light = $sizes["$prefix-$language-light.png"]
+                $dark = $sizes["$prefix-$language-dark.png"]
+                if ($light[0] -ne $dark[0] -or $light[1] -ne $dark[1]) { throw "$prefix $language light/dark sizes differ" }
             }
         }
     }

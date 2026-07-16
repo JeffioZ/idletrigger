@@ -73,7 +73,7 @@ func TestAllJobsUseStableReadmeOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"panel-en-light.png", "panel-en-dark.png", "panel-zh-light.png", "panel-zh-dark.png"}
+	want := []string{"control-panel-en-light.png", "control-panel-en-dark.png", "control-panel-zh-CN-light.png", "control-panel-zh-CN-dark.png"}
 	if len(jobs) != len(want) {
 		t.Fatalf("job count = %d", len(jobs))
 	}
@@ -99,7 +99,7 @@ func TestReviewSetCoversEverySurfaceLanguageAndTheme(t *testing.T) {
 	want := map[string]bool{}
 	for _, theme := range []string{"light", "dark"} {
 		for _, language := range []string{"en", "zh-CN"} {
-			for _, surface := range []string{"control", "automation", "automation-editor", "process-picker"} {
+			for _, surface := range []string{"control-panel", "automation-manager", "automation-editor", "process-picker"} {
 				want[surface+"-"+language+"-"+theme+".png"] = true
 			}
 		}
