@@ -215,8 +215,10 @@ cmd /c .\dist\IdleTrigger-x64-devtools.exe diagnostics idle
 PowerShell 直接运行 GUI 子系统 EXE 时，可能在输出完成绑定前就返回。
 `diagnostics`、截图和本机测试环境变量等维护能力只存在于 devtools 构建。
 
-用于少量代表性人工验收的启动脚本统一纳管在 `tools/devtools/`。它们要求
-PowerShell 7，默认使用 `dist/IdleTrigger-x64-devtools.exe`，会拒绝正式构建和已有的
+4 个面向使用者的人工验收启动脚本作为明确例外受版本管理，并放在本地构建旁边的
+`dist/`，因此可以把 devtools EXE 直接拖到脚本上；公共实现仍集中在
+`tools/devtools/`，不会形成重复逻辑。它们要求 PowerShell 7，默认使用
+`dist/IdleTrigger-x64-devtools.exe`，会拒绝正式构建和已有的
 IdleTrigger 实例，并确保开发变量只在子进程中生效：
 
 ```text
@@ -226,7 +228,7 @@ Start-IdleTrigger-Devtools-UI-Capture.bat [devtools.exe]
 Start-IdleTrigger-Devtools-Warning-Preview.bat [devtools.exe]
 ```
 
-可以直接运行对应模式脚本，也可以将 devtools EXE 拖到脚本上。共享 BAT 桥接脚本和
-PowerShell 实现属于内部实现，不应直接运行。
+可以直接运行对应模式脚本，也可以将 devtools EXE 拖到脚本上。`dist/` 中的其他文件
+仍是忽略的构建产物；共享 BAT 桥接脚本和 PowerShell 实现属于内部实现，不应直接运行。
 
 发布构建保持未加壳、自包含。不要使用 UPX 或同类加壳工具，以免增加诊断和杀毒软件分析成本。

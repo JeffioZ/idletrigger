@@ -1,6 +1,10 @@
 # Build artifacts
 /IdleTrigger*.exe
-/dist/
+/dist/*
+!/dist/Start-IdleTrigger-Devtools-Idle-Monitor-Test.bat
+!/dist/Start-IdleTrigger-Devtools-Input-Trace.bat
+!/dist/Start-IdleTrigger-Devtools-UI-Capture.bat
+!/dist/Start-IdleTrigger-Devtools-Warning-Preview.bat
 /cmd/idletrigger/rsrc_windows_*.syso
 *.test
 *.prof
