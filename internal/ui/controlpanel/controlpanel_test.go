@@ -377,12 +377,21 @@ func TestPopupMetricsUseOneDPITransform(t *testing.T) {
 	}
 }
 
-func TestCaptureHostPreservesScaledClientBounds(t *testing.T) {
-	const scale = 1.5
+func TestPositionPreservesScaledClientBounds(t *testing.T) {
+	const (
+		scale            = 1.5
+		testClientHeight = 300
+	)
 	err := Capture(State{}, func(key string) string { return key }, scale, func(hwnd windows.Handle) error {
 		p := panelFor(hwnd)
 		if p == nil {
 			t.Fatal("capture panel is not registered")
+		}
+		// Keep the real capture scale while using a height that fits the smaller
+		// virtual desktop exposed by GitHub's Windows runners.
+		p.clientH = testClientHeight
+		if err := p.position(p.style, p.exStyle); err != nil {
+			t.Fatal(err)
 		}
 		width, height, err := nativeform.ClientSize(hwnd)
 		if err != nil {
