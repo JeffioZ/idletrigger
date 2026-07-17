@@ -17,6 +17,27 @@ var (
 
 const regPath = `Software\Microsoft\Windows\CurrentVersion\Themes\Personalize`
 
+// DetectSupport verifies that the current Windows profile exposes writable
+// light/dark Personalize settings. It deliberately does not change either
+// value, so capability detection cannot cause a visible theme switch.
+func DetectSupport() error {
+	k, err := registry.OpenKey(registry.CURRENT_USER, regPath, registry.QUERY_VALUE|registry.SET_VALUE)
+	if err != nil {
+		return fmt.Errorf("open Windows Personalize settings: %w", err)
+	}
+	defer k.Close()
+	for _, name := range []string{"AppsUseLightTheme", "SystemUsesLightTheme"} {
+		value, valueType, err := k.GetIntegerValue(name)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", name, err)
+		}
+		if valueType != registry.DWORD || value > 1 {
+			return fmt.Errorf("%s is not a valid Windows light/dark setting", name)
+		}
+	}
+	return nil
+}
+
 // Mode is the target theme mode.
 type Mode int
 
@@ -31,7 +52,7 @@ func Switch(mode Mode) error {
 	if mode == ModeLight {
 		val = 1
 	}
-	k, err := registry.OpenKey(registry.CURRENT_USER, regPath, registry.SET_VALUE)
+	k, err := registry.OpenKey(registry.CURRENT_USER, regPath, registry.QUERY_VALUE|registry.SET_VALUE)
 	if err != nil {
 		return err
 	}
@@ -41,6 +62,15 @@ func Switch(mode Mode) error {
 	}
 	if err := k.SetDWordValue("SystemUsesLightTheme", val); err != nil {
 		return fmt.Errorf("set SystemUsesLightTheme: %w", err)
+	}
+	for _, name := range []string{"AppsUseLightTheme", "SystemUsesLightTheme"} {
+		actual, valueType, err := k.GetIntegerValue(name)
+		if err != nil {
+			return fmt.Errorf("verify %s: %w", name, err)
+		}
+		if valueType != registry.DWORD || uint32(actual) != val {
+			return fmt.Errorf("verify %s: Windows did not retain the requested value", name)
+		}
 	}
 
 	notifyThemeChanged()

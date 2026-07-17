@@ -126,10 +126,13 @@ func (p *panel) applyDependentStates() {
 	p.setDisabled(idIdleWarning, !monitorEnabled)
 	p.setDisabled(idIdleEnhanced, !monitorEnabled)
 	p.setDisabled(idTestWarning, !monitorEnabled)
-	themeEnabled := p.toggles[idTheme]
+	themeEnabled := p.toggles[idTheme] && !p.themeUnavailable
+	p.setDisabled(idTheme, p.themeUnavailable)
 	p.setDisabled(idFullscreen, !themeEnabled)
 	p.setDisabled(idBattery, !themeEnabled)
 	p.setDisabled(idIPLocation, !themeEnabled)
+	p.setDisabled(idThemeSwitch, p.themeUnavailable)
+	p.setDisabled(idThemeRepair, p.themeUnavailable)
 }
 
 func (p *panel) setKeyboardNavigation(active bool) {

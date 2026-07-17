@@ -64,6 +64,13 @@ func (p *panel) refreshTooltip(id uint16) {
 }
 
 func (p *panel) tooltipText(id uint16) string {
+	if p.themeUnavailable && isThemeControl(id) {
+		body := p.text("tip_theme_unavailable")
+		if p.themeUnavailableDetail != "" {
+			body += "\n" + p.themeUnavailableDetail
+		}
+		return body
+	}
 	key := ""
 	switch id {
 	case idQuickActions:
@@ -132,6 +139,15 @@ func (p *panel) tooltipText(id uint16) string {
 		return ""
 	}
 	return p.withStateTooltip(id, p.text(key))
+}
+
+func isThemeControl(id uint16) bool {
+	switch id {
+	case idTheme, idFullscreen, idBattery, idIPLocation, idThemeSwitch, idThemeRepair:
+		return true
+	default:
+		return false
+	}
 }
 
 func (p *panel) withPowerStatusTooltip(id uint16, runtimeStatus, body string) string {

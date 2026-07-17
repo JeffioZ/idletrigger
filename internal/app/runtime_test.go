@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -285,6 +286,32 @@ func TestStatusLineUsesLocalizedPunctuation(t *testing.T) {
 	state := runtimeState{lang: "zh-CN"}
 	if got := state.statusLine("status_power", "交流电源"); got != "电源：交流电源" {
 		t.Fatalf("localized status line = %q", got)
+	}
+}
+
+func TestThemeCapabilityDisablesScheduleAndIPLookupWithoutChangingConfig(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.ThemeSwitchEnabled = true
+	cfg.ThemeIPLocationEnabled = true
+	state := runtimeState{
+		cfg:                 cfg,
+		lang:                "zh-CN",
+		themeSupportChecked: true,
+		themeSupported:      false,
+		themeSupportErr:     errors.New("access denied"),
+	}
+
+	if state.themeAvailable() {
+		t.Fatal("unsupported theme capability reported as available")
+	}
+	if state.themeIPLocationLookupEnabled() {
+		t.Fatal("IP location remained active while the theme feature is unavailable")
+	}
+	if got := state.themeScheduleText(true); got != "当前系统不支持昼夜模式" {
+		t.Fatalf("unsupported schedule text = %q", got)
+	}
+	if !state.cfg.ThemeSwitchEnabled || !state.cfg.ThemeIPLocationEnabled {
+		t.Fatal("capability detection must preserve the saved user configuration")
 	}
 }
 

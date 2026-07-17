@@ -14,7 +14,7 @@ import (
 // battery-aware feature is enabled. Windows power broadcasts still deliver
 // immediate changes; this loop catches battery-percentage threshold crossings.
 func (s *runtimeState) syncBatteryLoop() {
-	if s.noSleepRequested() || s.cfg.ThemeSwitchEnabled {
+	if s.noSleepRequested() || (s.cfg.ThemeSwitchEnabled && s.themeAvailable()) {
 		if s.batteryStop != nil {
 			return
 		}

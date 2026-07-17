@@ -103,6 +103,8 @@ type State struct {
 	IdleWarningSeconds                                int
 	IdleAction                                        string
 	ThemeSwitchEnabled, DarkOnBattery, SkipFullscreen bool
+	ThemeUnavailable                                  bool
+	ThemeUnavailableDetail                            string
 	IPLocationEnabled                                 bool
 	HotkeysEnabled, AutostartEnabled, LoggingEnabled  bool
 	IsChinese                                         bool
@@ -388,6 +390,8 @@ type panel struct {
 	quickMenuOpen           bool
 	languageMenuOpen        bool
 	themeSchedule           string
+	themeUnavailable        bool
+	themeUnavailableDetail  string
 	ipLocationLabel         string
 	timeoutOptions          []timeoutChoice
 	choice                  choiceSurface

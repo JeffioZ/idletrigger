@@ -21,13 +21,14 @@ import (
 var saveConfigAtRevision = config.SaveAtRevision
 
 func (s *runtimeState) reloadConfig() error {
-	wasIPLocationEligible := ipLocationLookupEnabled(s.cfg)
+	wasIPLocationEligible := s.themeIPLocationLookupEnabled()
 	previousLanguage := s.cfg.Language
 	newCfg, err := config.Load()
 	if err != nil {
 		return err
 	}
 	s.cfg = newCfg
+	s.detectThemeSupport()
 	if enabled, updated, err := autostart.EnsureCurrent(); err == nil {
 		s.cfg.AutostartEnabled = enabled
 		if updated {

@@ -85,6 +85,8 @@ func createPanelForHost(state State, onAction OnAction, langFn LangFunc, capture
 		theme:                   state.Theme,
 		metrics:                 newPanelMetrics(defaultPanelStyle, 1),
 		themeSchedule:           state.ThemeSchedule,
+		themeUnavailable:        state.ThemeUnavailable,
+		themeUnavailableDetail:  state.ThemeUnavailableDetail,
 		ipLocationLabel:         state.IPLocationLabel,
 		appVersion:              state.AppVersion,
 		noSleepStatus:           state.NoSleepStatus,

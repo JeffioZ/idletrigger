@@ -70,6 +70,9 @@ func shortMinuteUnit(lang string) string {
 }
 
 func (s *runtimeState) themeTooltipValueShort() string {
+	if !s.themeAvailable() {
+		return i18n.T(s.lang, "status_unsupported")
+	}
 	if !s.cfg.ThemeSwitchEnabled {
 		return i18n.T(s.lang, "status_short_off")
 	}
@@ -91,6 +94,9 @@ func compactThemeSchedule(schedule string) string {
 }
 
 func (s *runtimeState) themeScheduleText(showSource bool) string {
+	if !s.themeAvailable() {
+		return i18n.T(s.lang, "theme_unavailable")
+	}
 	loc := theme.LocationInfo{Latitude: s.cfg.ThemeLatitude, Longitude: s.cfg.ThemeLongitude, Source: theme.LocationSourceConfigured}
 	if s.cfg.ThemeMode == "sunrise" {
 		loc = s.themeLocationInfo(false)

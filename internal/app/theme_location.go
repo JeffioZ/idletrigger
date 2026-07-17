@@ -26,7 +26,7 @@ func (s *runtimeState) startIPLocationCycle() {
 	s.cancelIPLocationRetry()
 	s.ipLocationGeneration++
 	s.ipLocationRetried = false
-	if !ipLocationLookupEnabled(s.cfg) {
+	if !s.themeIPLocationLookupEnabled() {
 		return
 	}
 	s.queryIPLocationInBackground(s.ipLocationGeneration)
@@ -39,7 +39,7 @@ func (s *runtimeState) stopIPLocationCycle() {
 }
 
 func (s *runtimeState) syncIPLocationCycle(wasEligible bool) {
-	isEligible := ipLocationLookupEnabled(s.cfg)
+	isEligible := s.themeIPLocationLookupEnabled()
 	if !isEligible {
 		s.stopIPLocationCycle()
 		return
@@ -53,7 +53,7 @@ func (s *runtimeState) queryIPLocationInBackground(generation uint64) {
 	go func() {
 		loc := theme.AutoLocationInfo(true, true)
 		s.post(func() {
-			if generation != s.ipLocationGeneration || !ipLocationLookupEnabled(s.cfg) {
+			if generation != s.ipLocationGeneration || !s.themeIPLocationLookupEnabled() {
 				return
 			}
 			if loc.Source != theme.LocationSourceIP {
@@ -70,6 +70,10 @@ func (s *runtimeState) queryIPLocationInBackground(generation uint64) {
 
 func ipLocationLookupEnabled(cfg config.Config) bool {
 	return cfg.ThemeIPLocationEnabled && cfg.ThemeMode == "sunrise" && cfg.ThemeLatitude == 0 && cfg.ThemeLongitude == 0
+}
+
+func (s *runtimeState) themeIPLocationLookupEnabled() bool {
+	return s.themeAvailable() && ipLocationLookupEnabled(s.cfg)
 }
 
 func (s *runtimeState) handleIPLocationFailure(generation uint64) {
@@ -106,7 +110,10 @@ func (s *runtimeState) cancelIPLocationRetry() {
 func (s *runtimeState) runThemeOperation(actionKey string, fn func() error, onSuccess func()) {
 	go func() {
 		if err := fn(); err != nil {
-			s.post(func() { s.showError(actionKey, err) })
+			s.post(func() {
+				s.disableThemeForRuntime(err)
+				s.showError(actionKey, err)
+			})
 			return
 		}
 		s.post(func() {

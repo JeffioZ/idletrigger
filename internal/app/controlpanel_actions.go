@@ -91,6 +91,13 @@ func (s *runtimeState) handleIdleControlAction(action controlpanel.Action, value
 }
 
 func (s *runtimeState) handleThemeControlAction(action controlpanel.Action) bool {
+	if !s.themeAvailable() {
+		switch action {
+		case controlpanel.ActThemeToggle, controlpanel.ActBatteryToggle, controlpanel.ActFullscreenToggle,
+			controlpanel.ActIPLocationToggle, controlpanel.ActSwitchTheme, controlpanel.ActRepairTheme:
+			return true
+		}
+	}
 	switch action {
 	case controlpanel.ActThemeToggle:
 		s.cfg.ThemeSwitchEnabled = !s.cfg.ThemeSwitchEnabled

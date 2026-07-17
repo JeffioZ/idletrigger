@@ -50,6 +50,8 @@ func (s *runtimeState) prepareControlPanel(refresh bool) {
 				IdleWarningSeconds:      s.cfg.IdleWarningSeconds,
 				IdleAction:              string(s.cfg.IdleAction),
 				ThemeSwitchEnabled:      s.cfg.ThemeSwitchEnabled,
+				ThemeUnavailable:        !s.themeAvailable(),
+				ThemeUnavailableDetail:  s.themeUnavailableDetail(),
 				DarkOnBattery:           s.cfg.ThemeDarkOnBattery,
 				SkipFullscreen:          s.cfg.ThemeSkipFullscreen,
 				IPLocationEnabled:       s.cfg.ThemeIPLocationEnabled,

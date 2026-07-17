@@ -446,6 +446,22 @@ func TestControlStateCombinesModelAndNativeState(t *testing.T) {
 	}
 }
 
+func TestUnavailableThemeDisablesEveryThemeControl(t *testing.T) {
+	p := &panel{
+		themeUnavailable: true,
+		toggles:          map[uint16]bool{idTheme: true},
+		disabled:         map[uint16]bool{},
+		controls:         map[uint16]windows.Handle{},
+		tooltips:         map[uint16][]uint16{},
+	}
+	p.applyDependentStates()
+	for _, id := range []uint16{idTheme, idFullscreen, idBattery, idIPLocation, idThemeSwitch, idThemeRepair} {
+		if !p.disabled[id] {
+			t.Fatalf("theme control %d remained enabled", id)
+		}
+	}
+}
+
 func TestMenuAndChoiceTriggersIgnoreStaleNativeHotlight(t *testing.T) {
 	p := &panel{
 		toggles:  map[uint16]bool{},

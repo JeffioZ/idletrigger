@@ -25,7 +25,7 @@ It uses Windows power requests and the system's last-input time instead of simul
 
 - Windows 10 / Windows Server 2016 or later
 - x64 build for most PCs; x86 build for 32-bit Windows
-- Theme switching requires Windows Personalize settings. It may be unavailable on Server Core or policy-managed desktops.
+- Theme switching requires writable Windows Personalize light/dark settings. IdleTrigger detects unavailable or policy-restricted profiles and disables the entire Day/Night section without discarding its saved configuration.
 
 Windows 7 is intentionally not supported by the main build. See [development guide](docs/development.md) for the compatibility rationale.
 

@@ -70,6 +70,9 @@ type runtimeState struct {
 	automationWarningOpen bool
 	automationGeneration  uint64
 	themeSched            *theme.Scheduler
+	themeSupportChecked   bool
+	themeSupported        bool
+	themeSupportErr       error
 	batteryStop           chan struct{}
 	batteryDone           chan struct{}
 	ipLocationRetry       *time.Timer
@@ -102,6 +105,7 @@ func Run(cfg config.Config, cbs Callbacks) {
 		devtools:  cbs.DeveloperTools,
 		requestCh: make(chan runtimeRequest, 64),
 	}
+	s.detectThemeSupport()
 	stateReady := make(chan struct{})
 	var stateReadyOnce sync.Once
 	go func() {
