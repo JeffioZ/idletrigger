@@ -289,31 +289,25 @@ func (t *winTray) getVisibleItemIndex(parent, val uint32) int {
 }
 
 // loadIconResource loads and caches an owned HICON from the executable's
-// RT_GROUP_ICON resources. LoadImageW chooses the best image for the current
-// system small-icon metrics.
-func (t *winTray) loadIconResource(resourceID uint16) (windows.Handle, error) {
+// RT_GROUP_ICON resources. LoadImageW uses an exact frame when one exists and
+// otherwise scales the nearest resource to the Shell-reported dimensions.
+func (t *winTray) loadIconResource(key loadedImageKey) (windows.Handle, error) {
 	const IMAGE_ICON = 1
-	const (
-		smCxSmallIcon = 49
-		smCySmallIcon = 50
-	)
+	if key.width == 0 || key.height == 0 {
+		return 0, fmt.Errorf("invalid icon size %dx%d", key.width, key.height)
+	}
 
 	// Save and reuse handles of loaded resources.
 	t.muLoadedImages.RLock()
-	h, ok := t.loadedImages[resourceID]
+	h, ok := t.loadedImages[key]
 	t.muLoadedImages.RUnlock()
 	if !ok {
-		cx, _, _ := pGetSystemMetrics.Call(smCxSmallIcon)
-		cy, _, _ := pGetSystemMetrics.Call(smCySmallIcon)
-		if cx == 0 || cy == 0 {
-			return 0, fmt.Errorf("get system small icon size")
-		}
 		res, _, err := pLoadImage.Call(
 			uintptr(t.instance),
-			uintptr(resourceID),
+			uintptr(key.resourceID),
 			IMAGE_ICON,
-			cx,
-			cy,
+			uintptr(key.width),
+			uintptr(key.height),
 			0,
 		)
 		if res == 0 {
@@ -321,10 +315,23 @@ func (t *winTray) loadIconResource(resourceID uint16) (windows.Handle, error) {
 		}
 		h = windows.Handle(res)
 		t.muLoadedImages.Lock()
-		t.loadedImages[resourceID] = h
+		t.loadedImages[key] = h
 		t.muLoadedImages.Unlock()
 	}
 	return h, nil
+}
+
+func systemSmallIconKey(resourceID uint16) (loadedImageKey, error) {
+	const (
+		smCxSmallIcon = 49
+		smCySmallIcon = 50
+	)
+	cx, _, _ := pGetSystemMetrics.Call(smCxSmallIcon)
+	cy, _, _ := pGetSystemMetrics.Call(smCySmallIcon)
+	if cx == 0 || cy == 0 {
+		return loadedImageKey{}, fmt.Errorf("get system small icon size")
+	}
+	return loadedImageKey{resourceID: resourceID, width: uint32(cx), height: uint32(cy)}, nil
 }
 
 func (t *winTray) iconToBitmap(hIcon windows.Handle) (windows.Handle, error) {

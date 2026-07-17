@@ -77,7 +77,12 @@ func (item *MenuItem) parentId() uint32 {
 // SetIconResource sets a menu item's icon from an RT_GROUP_ICON resource
 // embedded in the current executable.
 func (item *MenuItem) SetIconResource(resourceID uint16) {
-	h, err := wt.loadIconResource(resourceID)
+	key, err := systemSmallIconKey(resourceID)
+	if err != nil {
+		reportError("Unable to resolve menu icon size: %v", err)
+		return
+	}
+	h, err := wt.loadIconResource(key)
 	if err != nil {
 		reportError("Unable to load menu icon resource: %v", err)
 		return

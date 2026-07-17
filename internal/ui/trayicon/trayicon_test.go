@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -87,6 +88,68 @@ func TestThemeChangeMessageScope(t *testing.T) {
 	}
 }
 
+func TestTrayIconRefreshMessageScope(t *testing.T) {
+	for _, message := range []uint32{wmSettingChange, wmDisplayChange, wmDPIChanged} {
+		if !isTrayIconRefreshMessage(message) {
+			t.Fatalf("display message %#x was not recognized", message)
+		}
+	}
+	if isTrayIconRefreshMessage(wmThemeChanged) {
+		t.Fatal("theme-only messages must not reload the same tray icon")
+	}
+}
+
+func TestTrayIconSideUsesShellReportedBounds(t *testing.T) {
+	tests := []struct {
+		name string
+		rect rect
+		want uint32
+	}{
+		{name: "24px icon", rect: rect{Left: 100, Top: 20, Right: 124, Bottom: 44}, want: 24},
+		{name: "square inside taller slot", rect: rect{Left: 100, Top: 20, Right: 132, Bottom: 60}, want: 32},
+		{name: "empty", rect: rect{}, want: 0},
+		{name: "smaller than a tray icon", rect: rect{Right: 8, Bottom: 8}, want: 0},
+		{name: "reversed", rect: rect{Left: 20, Top: 20, Right: 10, Bottom: 10}, want: 0},
+		{name: "implausibly large", rect: rect{Right: 300, Bottom: 300}, want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := trayIconSide(tt.rect); got != tt.want {
+				t.Fatalf("trayIconSide(%+v) = %d, want %d", tt.rect, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNotifyIconIdentifierMatchesWindowsLayout(t *testing.T) {
+	want := uintptr(28)
+	appBarWant := uintptr(36)
+	if unsafe.Sizeof(uintptr(0)) == 8 {
+		want = 40
+		appBarWant = 48
+	}
+	if got := unsafe.Sizeof(notifyIconIdentifier{}); got != want {
+		t.Fatalf("NOTIFYICONIDENTIFIER size = %d, want %d", got, want)
+	}
+	if got := unsafe.Sizeof(rect{}); got != 16 {
+		t.Fatalf("RECT size = %d, want 16", got)
+	}
+	if got := unsafe.Sizeof(appBarData{}); got != appBarWant {
+		t.Fatalf("APPBARDATA size = %d, want %d", got, appBarWant)
+	}
+}
+
+func TestSmallIconSideForScale(t *testing.T) {
+	tests := map[uint32]uint32{
+		0: 0, 100: 16, 125: 20, 150: 24, 175: 28, 200: 32, 300: 48, 400: 64, 600: 0,
+	}
+	for scale, want := range tests {
+		if got := smallIconSideForScale(scale); got != want {
+			t.Errorf("smallIconSideForScale(%d) = %d, want %d", scale, got, want)
+		}
+	}
+}
+
 func TestTrayHostWindowCannotExposeANormalFrame(t *testing.T) {
 	const (
 		wsVisible = 0x10000000
@@ -97,7 +160,7 @@ func TestTrayHostWindowCannotExposeANormalFrame(t *testing.T) {
 		t.Fatal("tray host must remain a top-level popup for broadcast messages")
 	}
 	if trayHostWindowStyle&(wsVisible|wsCaption) != 0 {
-		t.Fatalf("tray host style %#x can expose a visible framed window", trayHostWindowStyle)
+		t.Fatalf("tray host style %#x can expose a visible framed window", uint32(trayHostWindowStyle))
 	}
 	if trayHostWindowCoordinate > -30000 {
 		t.Fatalf("tray host creation coordinate %d is not safely outside the desktop", trayHostWindowCoordinate)
@@ -105,10 +168,10 @@ func TestTrayHostWindowCannotExposeANormalFrame(t *testing.T) {
 }
 
 func TestTakeLoadedIconsForReleaseTransfersHandlesOnce(t *testing.T) {
-	tray := &winTray{loadedImages: map[uint16]windows.Handle{
-		1: 101,
-		2: 202,
-		3: 0,
+	tray := &winTray{loadedImages: map[loadedImageKey]windows.Handle{
+		{resourceID: 1, width: 16, height: 16}: 101,
+		{resourceID: 2, width: 32, height: 32}: 202,
+		{resourceID: 3, width: 48, height: 48}: 0,
 	}}
 	first := tray.takeLoadedIconsForRelease()
 	if len(first) != 2 || !tray.iconsReleased || tray.loadedImages != nil {

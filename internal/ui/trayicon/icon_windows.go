@@ -9,11 +9,40 @@ import (
 // Loads an icon resource embedded in the executable and shows it in the tray.
 // Shell_NotifyIcon: https://msdn.microsoft.com/en-us/library/windows/desktop/bb762159(v=vs.85).aspx
 func (t *winTray) setIcon(resourceID uint16) error {
-	const NIF_ICON = 0x00000002
+	side := t.desiredTrayIconSide()
+	width, height := uintptr(side), uintptr(side)
+	if err := t.setIconAtSize(resourceID, width, height); err != nil {
+		return err
+	}
+	t.requestTrayIconConvergence()
+	return nil
+}
+
+func (t *winTray) desiredTrayIconSide() uint32 {
+	if iconRect, ok := t.notificationIconRect(); ok {
+		if side := trayIconSide(iconRect); side != 0 {
+			return side
+		}
+	}
+	if side := taskbarSmallIconSide(); side != 0 {
+		return side
+	}
+	return 64 // largest supplied tray frame: downscale safely, never upscale a small frame
+}
+
+func (t *winTray) setIconAtSize(resourceID uint16, width, height uintptr) error {
 	t.muIconLifecycle.Lock()
 	defer t.muIconLifecycle.Unlock()
+	return t.setIconAtSizeLocked(resourceID, width, height)
+}
 
-	h, err := t.loadIconResource(resourceID)
+func (t *winTray) setIconAtSizeLocked(resourceID uint16, width, height uintptr) error {
+	const NIF_ICON = 0x00000002
+	key := loadedImageKey{resourceID: resourceID, width: uint32(width), height: uint32(height)}
+	if t.trayIconKey == key {
+		return nil
+	}
+	h, err := t.loadIconResource(key)
 	if err != nil {
 		return err
 	}
@@ -24,7 +53,138 @@ func (t *winTray) setIcon(resourceID uint16) error {
 	t.nid.Flags |= NIF_ICON
 	t.nid.Size = uint32(unsafe.Sizeof(*t.nid))
 
-	return t.nid.modify()
+	if err := t.nid.modify(); err != nil {
+		return err
+	}
+	t.trayIconKey = key
+	return nil
+}
+
+func (t *winTray) notificationIconRect() (rect, bool) {
+	t.muNID.RLock()
+	if t.nid == nil {
+		t.muNID.RUnlock()
+		return rect{}, false
+	}
+	identifier := notifyIconIdentifier{Wnd: t.nid.Wnd, ID: t.nid.ID}
+	t.muNID.RUnlock()
+	identifier.Size = uint32(unsafe.Sizeof(identifier))
+	var iconRect rect
+	hr, _, _ := pShellNotifyIconGetRect.Call(
+		uintptr(unsafe.Pointer(&identifier)),
+		uintptr(unsafe.Pointer(&iconRect)),
+	)
+	return iconRect, int32(hr) == 0
+}
+
+func trayIconSide(iconRect rect) uint32 {
+	width := iconRect.Right - iconRect.Left
+	height := iconRect.Bottom - iconRect.Top
+	if width < 16 || height < 16 || width > 256 || height > 256 {
+		return 0
+	}
+	if width < height {
+		return uint32(width)
+	}
+	return uint32(height)
+}
+
+func taskbarSmallIconSide() uint32 {
+	const (
+		abmGetTaskbarPos        = 0x00000005
+		monitorDefaultToNearest = 0x00000002
+	)
+	data := appBarData{}
+	data.Size = uint32(unsafe.Sizeof(data))
+	result, _, _ := pSHAppBarMessage.Call(abmGetTaskbarPos, uintptr(unsafe.Pointer(&data)))
+	if result == 0 {
+		return 0
+	}
+	monitor, _, _ := pMonitorFromRect.Call(uintptr(unsafe.Pointer(&data.Rect)), monitorDefaultToNearest)
+	if monitor == 0 {
+		return 0
+	}
+	var scale uint32
+	hr, _, _ := pGetScaleFactorForMonitor.Call(
+		monitor,
+		uintptr(unsafe.Pointer(&scale)),
+	)
+	if int32(hr) != 0 {
+		return 0
+	}
+	return smallIconSideForScale(scale)
+}
+
+func smallIconSideForScale(scale uint32) uint32 {
+	if scale < 100 || scale > 500 {
+		return 0
+	}
+	return (16*scale + 50) / 100
+}
+
+func (t *winTray) refreshTrayIconFromShell() {
+	side := t.desiredTrayIconSide()
+	t.muIconLifecycle.Lock()
+	resourceID := t.trayIconKey.resourceID
+	if resourceID == 0 {
+		t.muIconLifecycle.Unlock()
+		return
+	}
+	err := t.setIconAtSizeLocked(resourceID, uintptr(side), uintptr(side))
+	t.muIconLifecycle.Unlock()
+	if err != nil {
+		reportError("Unable to refresh tray icon: %v", err)
+	}
+}
+
+const (
+	trayIconProbeTimerID  = 0x51A1
+	trayIconProbeInterval = 125
+	trayIconProbeLimit    = 16 // two seconds; no persistent polling
+)
+
+func (t *winTray) requestTrayIconConvergence() {
+	t.muUITasks.Lock()
+	window := t.window
+	closing := t.uiClosing
+	t.muUITasks.Unlock()
+	if window == 0 || closing {
+		return
+	}
+	pPostMessage.Call(uintptr(window), wmStartTrayIconConvergence, 0, 0)
+}
+
+func (t *winTray) startTrayIconConvergence() {
+	t.muUITasks.Lock()
+	window := t.window
+	closing := t.uiClosing
+	t.muUITasks.Unlock()
+	if window == 0 || closing {
+		return
+	}
+	t.trayIconProbeAttempt = 0
+	t.refreshTrayIconFromShell()
+	if timer, _, _ := pSetTimer.Call(uintptr(window), trayIconProbeTimerID, trayIconProbeInterval, 0); timer == 0 {
+		reportError("Unable to start tray icon size probe")
+	}
+}
+
+func (t *winTray) continueTrayIconConvergence() {
+	t.trayIconProbeAttempt++
+	t.refreshTrayIconFromShell()
+	if t.trayIconProbeAttempt >= trayIconProbeLimit {
+		t.stopTrayIconConvergence()
+	}
+}
+
+func (t *winTray) stopTrayIconConvergence() {
+	t.muUITasks.Lock()
+	window := t.window
+	t.muUITasks.Unlock()
+	if window != 0 {
+		pKillTimer.Call(uintptr(window), trayIconProbeTimerID)
+	}
+	t.trayIconProbeAttempt = 0
 }
 
 // releaseLoadedIcons destroys only the HICON values created by LoadImageW in
@@ -62,6 +222,7 @@ func (t *winTray) takeLoadedIconsForRelease() []windows.Handle {
 func (t *winTray) removeNotificationIcon() {
 	t.muIconLifecycle.Lock()
 	defer t.muIconLifecycle.Unlock()
+	t.trayIconKey = loadedImageKey{}
 	t.muNID.Lock()
 	nid := t.nid
 	t.nid = nil
@@ -126,4 +287,7 @@ func trimTooltipSuffix(src string) string {
 
 var wt winTray
 
-const wmRunUITask = 0x8001
+const (
+	wmRunUITask                = 0x8001
+	wmStartTrayIconConvergence = 0x8002
+)

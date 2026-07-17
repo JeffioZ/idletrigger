@@ -14,6 +14,7 @@ func (t *winTray) wndProc(hWnd windows.Handle, message uint32, wParam, lParam ui
 		WM_RBUTTONUP      = 0x0205
 		WM_LBUTTONUP      = 0x0202
 		WM_COMMAND        = 0x0111
+		WM_TIMER          = 0x0113
 		WM_ENDSESSION     = 0x0016
 		WM_POWERBROADCAST = 0x0218
 		WM_CLOSE          = 0x0010
@@ -22,6 +23,17 @@ func (t *winTray) wndProc(hWnd windows.Handle, message uint32, wParam, lParam ui
 	switch message {
 	case wmSettingChange, wmSysColorChange, wmThemeChanged:
 		notifyThemeChange()
+		if isTrayIconRefreshMessage(message) {
+			t.startTrayIconConvergence()
+		}
+	case wmDisplayChange, wmDPIChanged:
+		t.startTrayIconConvergence()
+	case wmStartTrayIconConvergence:
+		t.startTrayIconConvergence()
+	case WM_TIMER:
+		if wParam == trayIconProbeTimerID {
+			t.continueTrayIconConvergence()
+		}
 	case wmRunUITask:
 		t.drainUITasks()
 	case WM_COMMAND:
@@ -39,10 +51,12 @@ func (t *winTray) wndProc(hWnd windows.Handle, message uint32, wParam, lParam ui
 		pDestroyWindow.Call(uintptr(t.window))
 		t.wcex.unregister()
 	case WM_DESTROY:
+		t.stopTrayIconConvergence()
 		t.shutdown()
 		pPostQuitMessage.Call(uintptr(int32(0)))
 	case WM_ENDSESSION:
 		if wParam != 0 {
+			t.stopTrayIconConvergence()
 			t.shutdown()
 		}
 	case t.wmSystrayMessage:
@@ -65,6 +79,7 @@ func (t *winTray) wndProc(hWnd windows.Handle, message uint32, wParam, lParam ui
 		}
 		t.muNID.Unlock()
 		t.muIconLifecycle.Unlock()
+		t.startTrayIconConvergence()
 	default:
 		// Calls the default window procedure to provide default processing for any window messages that an application does not process.
 		// https://msdn.microsoft.com/en-us/library/windows/desktop/ms633572(v=vs.85).aspx
@@ -111,9 +126,11 @@ func (t *winTray) initInstance() error {
 	t.wmTaskbarCreated = uint32(res)
 
 	t.muLoadedImages.Lock()
-	t.loadedImages = make(map[uint16]windows.Handle)
+	t.loadedImages = make(map[loadedImageKey]windows.Handle)
 	t.iconsReleased = false
 	t.muLoadedImages.Unlock()
+	t.trayIconKey = loadedImageKey{}
+	t.trayIconProbeAttempt = 0
 
 	instanceHandle, _, err := pGetModuleHandle.Call(0)
 	if instanceHandle == 0 {

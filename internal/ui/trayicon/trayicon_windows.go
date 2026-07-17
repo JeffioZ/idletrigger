@@ -17,8 +17,13 @@ var (
 	k32              = windows.NewLazySystemDLL("Kernel32.dll")
 	pGetModuleHandle = k32.NewProc("GetModuleHandleW")
 
-	s32              = windows.NewLazySystemDLL("Shell32.dll")
-	pShellNotifyIcon = s32.NewProc("Shell_NotifyIconW")
+	s32                     = windows.NewLazySystemDLL("Shell32.dll")
+	pSHAppBarMessage        = s32.NewProc("SHAppBarMessage")
+	pShellNotifyIcon        = s32.NewProc("Shell_NotifyIconW")
+	pShellNotifyIconGetRect = s32.NewProc("Shell_NotifyIconGetRect")
+
+	shcore                    = windows.NewLazySystemDLL("Shcore.dll")
+	pGetScaleFactorForMonitor = shcore.NewProc("GetScaleFactorForMonitor")
 
 	u32                    = windows.NewLazySystemDLL("User32.dll")
 	pCreateMenu            = u32.NewProc("CreateMenu")
@@ -36,10 +41,12 @@ var (
 	pIsDialogMessage       = u32.NewProc("IsDialogMessageW")
 	pGetSystemMetrics      = u32.NewProc("GetSystemMetrics")
 	pInsertMenuItem        = u32.NewProc("InsertMenuItemW")
+	pKillTimer             = u32.NewProc("KillTimer")
 	pLoadCursor            = u32.NewProc("LoadCursorW")
 	pDestroyIcon           = u32.NewProc("DestroyIcon")
 	pLoadIcon              = u32.NewProc("LoadIconW")
 	pLoadImage             = u32.NewProc("LoadImageW")
+	pMonitorFromRect       = u32.NewProc("MonitorFromRect")
 	pPostMessage           = u32.NewProc("PostMessageW")
 	pPostQuitMessage       = u32.NewProc("PostQuitMessage")
 	pRegisterClass         = u32.NewProc("RegisterClassExW")
@@ -48,6 +55,7 @@ var (
 	pSetForegroundWindow   = u32.NewProc("SetForegroundWindow")
 	pSetMenuInfo           = u32.NewProc("SetMenuInfo")
 	pSetMenuItemInfo       = u32.NewProc("SetMenuItemInfoW")
+	pSetTimer              = u32.NewProc("SetTimer")
 	pTrackPopupMenu        = u32.NewProc("TrackPopupMenu")
 	pTranslateMessage      = u32.NewProc("TranslateMessage")
 	pUnregisterClass       = u32.NewProc("UnregisterClassW")
@@ -94,11 +102,17 @@ var themeChangePending atomic.Bool
 const (
 	wmSysColorChange = 0x0015
 	wmSettingChange  = 0x001A
+	wmDisplayChange  = 0x007E
+	wmDPIChanged     = 0x02E0
 	wmThemeChanged   = 0x031A
 )
 
 func isThemeChangeMessage(message uint32) bool {
 	return message == wmSettingChange || message == wmSysColorChange || message == wmThemeChanged
+}
+
+func isTrayIconRefreshMessage(message uint32) bool {
+	return message == wmSettingChange || message == wmDisplayChange || message == wmDPIChanged
 }
 
 func notifyThemeChange() {
@@ -303,17 +317,45 @@ type point struct {
 	X, Y int32
 }
 
+type rect struct {
+	Left, Top, Right, Bottom int32
+}
+
+type notifyIconIdentifier struct {
+	Size     uint32
+	Wnd      windows.Handle
+	ID       uint32
+	GuidItem windows.GUID
+}
+
+type appBarData struct {
+	Size            uint32
+	Wnd             windows.Handle
+	CallbackMessage uint32
+	Edge            uint32
+	Rect            rect
+	LParam          uintptr
+}
+
 // Contains information about loaded resources
+type loadedImageKey struct {
+	resourceID uint16
+	width      uint32
+	height     uint32
+}
+
 type winTray struct {
 	instance,
 	icon,
 	cursor,
 	window windows.Handle
 
-	loadedImages    map[uint16]windows.Handle
-	muLoadedImages  sync.RWMutex
-	iconsReleased   bool
-	muIconLifecycle sync.Mutex
+	loadedImages         map[loadedImageKey]windows.Handle
+	muLoadedImages       sync.RWMutex
+	iconsReleased        bool
+	muIconLifecycle      sync.Mutex
+	trayIconKey          loadedImageKey
+	trayIconProbeAttempt int
 	// menus keeps track of the submenus keyed by the menu item ID, plus 0
 	// which corresponds to the main popup menu.
 	menus   map[uint32]windows.Handle
