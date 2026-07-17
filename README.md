@@ -6,6 +6,21 @@
 
 IdleTrigger is a single executable with no runtime dependencies beyond Windows system DLLs. It stays out of the way in the notification area and keeps its settings in a readable TOML file beside the executable.
 
+**[Download x64 for most PCs](https://github.com/JeffioZ/idletrigger/releases/latest/download/IdleTrigger-x64.exe)** · [Download x86 for 32-bit Windows](https://github.com/JeffioZ/idletrigger/releases/latest/download/IdleTrigger-x86.exe) · [Release notes and checksums](https://github.com/JeffioZ/idletrigger/releases/latest)
+
+## When IdleTrigger Helps
+
+- Keep downloads, renders, backups, or remote sessions awake without changing your usual Windows sleep settings.
+- Lock, sleep, hibernate, or shut down after real keyboard and mouse inactivity.
+- Enable or pause Stay Awake and Idle Monitoring automatically while selected apps are running or during a time window.
+- Switch Windows light and dark themes on a schedule or around sunrise and sunset.
+
+## How It Differs
+
+Windows power settings are best for persistent display and sleep timeouts. [PowerToys Awake](https://learn.microsoft.com/windows/powertoys/awake) focuses on temporarily keeping a PC awake. IdleTrigger combines stay-awake control with actions after real keyboard and mouse inactivity, plus time- and process-based automation, in one portable tray app.
+
+It uses Windows power requests and the system's last-input time instead of simulating mouse or keyboard activity.
+
 ## What It Does
 
 - **Idle Monitoring**: after a chosen period without keyboard or mouse input, lock, sleep, hibernate, or shut down the PC.
@@ -26,12 +41,17 @@ Windows 7 is intentionally not supported by the main build. See [development gui
 
 ## Quick Start
 
-1. Download `IdleTrigger-x64.exe` from [Releases](https://github.com/JeffioZ/idletrigger/releases).
-2. Run it. The app appears in the notification area without opening a main window.
-3. Left-click the tray icon to open or close the control panel. Right-click it for the native **Open** and **Exit** menu.
-4. Use the panel for common settings; edit `IdleTrigger.toml` beside the EXE for advanced settings.
+1. Create a writable folder you intend to keep, such as `%LOCALAPPDATA%\IdleTrigger`.
+2. Download the x64 build above for most PCs, or x86 only for 32-bit Windows, and place the EXE in that folder.
+3. Run it. The app appears in the notification area without opening a main window.
+4. Left-click the tray icon to open or close the control panel. Right-click it for the native **Open** and **Exit** menu.
+5. Use the panel for common settings; edit `IdleTrigger.toml` beside the EXE for advanced settings.
 
 The control panel follows Windows light/dark mode, responds to DPI changes, and stays open until you close it or left-click the tray icon again. Tooltips explain each available option.
+
+### Updating or Moving
+
+Exit IdleTrigger before replacing its EXE. Keep `IdleTrigger.toml` and `IdleTrigger.state.json` beside the EXE to preserve settings and automatic-task state. If you move the app, move those files together and launch it once from the new location before relying on automatic startup.
 
 ## Using the Control Panel
 

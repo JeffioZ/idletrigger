@@ -6,6 +6,21 @@
 
 IdleTrigger 是一个仅依赖 Windows 系统 DLL 的单文件程序。它驻留在通知区域，常用设置在浮层中完成，完整配置保存在 EXE 同目录的可读 TOML 文件中。
 
+**[下载 x64（适合大多数电脑）](https://github.com/JeffioZ/idletrigger/releases/latest/download/IdleTrigger-x64.exe)** · [下载 x86（32 位 Windows）](https://github.com/JeffioZ/idletrigger/releases/latest/download/IdleTrigger-x86.exe) · [最新版说明与校验文件](https://github.com/JeffioZ/idletrigger/releases/latest)
+
+## 适合这些场景
+
+- 下载、渲染、备份或远程连接期间保持电脑唤醒，同时不改变平时使用的 Windows 睡眠设置。
+- 键盘、鼠标持续无操作后，自动锁定、睡眠、休眠或关机。
+- 在指定应用运行期间或特定时间段，自动启用或暂停保持唤醒和空闲监测。
+- 按固定时间或日出日落自动切换 Windows 深浅色主题。
+
+## 与系统设置及常见工具的区别
+
+Windows 电源设置适合长期调整屏幕和睡眠超时；[PowerToys Awake](https://learn.microsoft.com/zh-cn/windows/powertoys/awake) 主要解决临时保持电脑唤醒。IdleTrigger 将保持唤醒、真实键鼠空闲后的动作，以及按时间或进程自动控制组合在一个便携托盘程序中。
+
+它使用 Windows 电源请求和系统最后输入时间，不通过模拟鼠标或键盘操作维持运行。
+
 ## 能做什么
 
 - **空闲监测**：键盘、鼠标无操作达到设定时长后，锁定、睡眠、休眠或关机。
@@ -26,12 +41,17 @@ IdleTrigger 是一个仅依赖 Windows 系统 DLL 的单文件程序。它驻留
 
 ## 快速开始
 
-1. 从 [Releases](https://github.com/JeffioZ/idletrigger/releases) 下载 `IdleTrigger-x64.exe`。
-2. 双击运行，程序会驻留在通知区域，不显示主窗口。
-3. 左键托盘图标打开或关闭浮层；右键使用原生的“打开”和“退出”菜单。
-4. 常用设置在浮层中完成；高级设置可编辑 EXE 同目录的 `IdleTrigger.toml`。
+1. 新建一个准备长期保留且可写的目录，例如 `%LOCALAPPDATA%\IdleTrigger`。
+2. 大多数电脑下载上方的 x64 版本；只有 32 位 Windows 才选择 x86。将 EXE 放入该目录。
+3. 双击运行，程序会驻留在通知区域，不显示主窗口。
+4. 左键托盘图标打开或关闭浮层；右键使用原生的“打开”和“退出”菜单。
+5. 常用设置在浮层中完成；高级设置可编辑 EXE 同目录的 `IdleTrigger.toml`。
 
 浮层会跟随 Windows 深浅色和 DPI 变化，直到手动关闭或再次左键托盘图标才会收起。每项功能入口均有 tooltip 说明。
+
+### 升级或移动
+
+替换 EXE 前先退出 IdleTrigger。保留 EXE 同目录的 `IdleTrigger.toml` 和 `IdleTrigger.state.json`，即可保留设置和自动任务状态。如果移动程序，请将这些文件一起移动，并从新位置启动一次后再依赖开机自启动。
 
 ## 使用控制浮层
 
