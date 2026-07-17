@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/JeffioZ/idletrigger/internal/ui/colors"
+	"github.com/JeffioZ/idletrigger/internal/ui/nativeform"
 	"golang.org/x/sys/windows"
 )
 
@@ -373,6 +374,29 @@ func TestPopupMetricsUseOneDPITransform(t *testing.T) {
 	}
 	if got := metrics.px(metrics.style.Control.ToggleBoxSize); got != 24 {
 		t.Fatalf("scaled toggle box = %d, want 24", got)
+	}
+}
+
+func TestCaptureHostPreservesScaledClientBounds(t *testing.T) {
+	const scale = 1.5
+	err := Capture(State{}, func(key string) string { return key }, scale, func(hwnd windows.Handle) error {
+		p := panelFor(hwnd)
+		if p == nil {
+			t.Fatal("capture panel is not registered")
+		}
+		width, height, err := nativeform.ClientSize(hwnd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantWidth := p.sc(p.metrics.style.Layout.PanelWidth)
+		wantHeight := p.sc(p.clientH)
+		if width != wantWidth || height != wantHeight {
+			t.Fatalf("capture client = %dx%d, want %dx%d", width, height, wantWidth, wantHeight)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

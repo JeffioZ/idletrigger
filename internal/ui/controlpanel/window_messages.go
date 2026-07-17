@@ -101,11 +101,12 @@ func cursorWorkArea(fallback windows.Handle) (rect, bool) {
 }
 
 func (p *panel) position(style, exStyle uint32) error {
-	r := rect{Right: int32(p.sc(p.metrics.style.Layout.PanelWidth)), Bottom: int32(p.sc(p.clientH))}
-	if result, _, callErr := pAdjustWindowRect.Call(uintptr(unsafe.Pointer(&r)), uintptr(style), 0, uintptr(exStyle)); result == 0 {
-		return fmt.Errorf("calculate control panel bounds: %w", callErr)
+	clientWidth, clientHeight := p.sc(p.metrics.style.Layout.PanelWidth), p.sc(p.clientH)
+	windowDPI := uint32(dpiForWindow(p.hwnd)*96 + 0.5)
+	width, height, err := nativeform.WindowSizeForClient(clientWidth, clientHeight, uintptr(style), uintptr(exStyle), windowDPI)
+	if err != nil {
+		return fmt.Errorf("calculate control panel bounds: %w", err)
 	}
-	width, height := r.Right-r.Left, r.Bottom-r.Top
 	work, ok := cursorWorkArea(p.hwnd)
 	if !ok {
 		return fmt.Errorf("locate control panel monitor work area")

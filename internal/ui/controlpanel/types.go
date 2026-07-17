@@ -283,7 +283,6 @@ var (
 	pMonitorFromWindow     = user32.NewProc("MonitorFromWindow")
 	pMonitorFromRect       = user32.NewProc("MonitorFromRect")
 	pGetMonitorInfo        = user32.NewProc("GetMonitorInfoW")
-	pAdjustWindowRect      = user32.NewProc("AdjustWindowRectEx")
 	pGetDpiForWindow       = user32.NewProc("GetDpiForWindow")
 	pGetDpiForSystem       = user32.NewProc("GetDpiForSystem")
 	pSetForeground         = user32.NewProc("SetForegroundWindow")
