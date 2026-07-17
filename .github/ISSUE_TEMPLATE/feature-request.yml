@@ -1,0 +1,38 @@
+name: Feature request / 功能建议
+description: Propose an improvement based on a real use case / 基于真实使用场景提出改进建议
+title: "[Feature] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please describe the problem first. This helps evaluate a small, maintainable solution instead of collecting a feature list.
+
+        请先描述需要解决的问题，以便评估范围小、可维护的解决方案。
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use case / 使用场景
+      description: What are you trying to accomplish, and when does the need occur? / 你想完成什么事情，这个需求会在什么情况下出现？
+    validations:
+      required: true
+
+  - type: textarea
+    id: current-solution
+    attributes:
+      label: Current workaround / 当前替代方式
+      description: How do you handle this today? / 目前如何处理？
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed improvement / 建议方案
+      description: Describe the smallest change that would solve the use case. / 请描述能够解决该场景的最小改动。
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context / 补充信息
+      description: Add examples, screenshots, or related tools when useful. / 可按需补充示例、截图或相关工具。

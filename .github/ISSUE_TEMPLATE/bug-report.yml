@@ -1,0 +1,69 @@
+name: Bug report / 缺陷报告
+description: Report a reproducible IdleTrigger problem / 报告可复现的 IdleTrigger 问题
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. Please remove private information before attaching configuration or logs.
+
+        感谢反馈问题。附加配置或日志前，请先移除隐私信息。
+
+  - type: input
+    id: version
+    attributes:
+      label: IdleTrigger version / IdleTrigger 版本
+      placeholder: "For example: v1.7.0"
+    validations:
+      required: true
+
+  - type: input
+    id: windows-version
+    attributes:
+      label: Windows version / Windows 版本
+      placeholder: "For example: Windows 11 24H2"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: architecture
+    attributes:
+      label: Architecture / 架构
+      options:
+        - x64
+        - x86
+        - Unknown / 不确定
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / 问题描述
+      description: What happened? / 发生了什么？
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce / 复现步骤
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior / 预期行为
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Additional context / 补充信息
+      description: Add screenshots or sanitized configuration and log excerpts when useful. / 可按需附上截图，以及脱敏后的配置和日志片段。

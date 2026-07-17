@@ -57,9 +57,10 @@ jobs:
           }
           Set-Content -Encoding ascii SHA256SUMS.txt $lines
 
-      - name: Create Release
+      - name: Create Draft Release
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3
         with:
+          draft: true
           fail_on_unmatched_files: true
           files: |
             dist/IdleTrigger-x86.exe
