@@ -13,23 +13,13 @@ IdleTrigger is a single executable with no runtime dependencies beyond Windows s
 - Keep downloads, renders, backups, or remote sessions awake without changing your usual Windows sleep settings.
 - Lock, sleep, hibernate, or shut down after real keyboard and mouse inactivity.
 - Enable or pause Stay Awake and Idle Monitoring automatically while selected apps are running or during a time window.
-- Switch Windows light and dark themes on a schedule or around sunrise and sunset.
+- Switch Windows light and dark themes on a schedule or around sunrise and sunset, with optional battery and fullscreen-aware behavior.
 
 ## How It Differs
 
 Windows power settings are best for persistent display and sleep timeouts. [PowerToys Awake](https://learn.microsoft.com/windows/powertoys/awake) focuses on temporarily keeping a PC awake. IdleTrigger combines stay-awake control with actions after real keyboard and mouse inactivity, plus time- and process-based automation, in one portable tray app.
 
 It uses Windows power requests and the system's last-input time instead of simulating mouse or keyboard activity.
-
-## What It Does
-
-- **Idle Monitoring**: after a chosen period without keyboard or mouse input, lock, sleep, hibernate, or shut down the PC.
-- **Pre-action reminder**: show a non-activating reminder before an idle action; mouse or keyboard input, or closing the reminder, cancels the pending action.
-- **Stay Awake**: prevent automatic sleep, optionally keeping the display on.
-- **Automatic tasks**: combine time windows, one-time/daily/weekly schedules, or process conditions with supported built-in actions.
-- **Day/Night theme**: switch Windows themes at fixed times or from calculated sunrise and sunset; optionally use dark mode on battery and pause switching during fullscreen apps, presentations, or foreground games.
-- **System controls**: lock, sleep, hibernate, shut down, or restart from the control panel or command line.
-- **Running-instance control**: control the active tray instance through a per-session named pipe.
 
 ## Requirements
 
@@ -55,11 +45,10 @@ Exit IdleTrigger before replacing its EXE. Keep `IdleTrigger.toml` and `IdleTrig
 
 ## Using the Control Panel
 
-- Blue controls are enabled or selected; neutral controls are available but not selected. **Exit** is red because it stops all IdleTrigger features.
-- Hover **System Controls** or **Language Settings** to open their menus. **System Controls** run immediately; save your work before choosing Sleep, Hibernate, Shut Down, or Restart.
-- Use the mouse or `Tab` / `Shift+Tab` to move between controls, then press `Space` to activate the focused control. The keyboard focus has a visible outline.
-- **Power Management** groups Stay Awake, Idle Monitoring, and their related settings. Its two primary toggles show manual configuration; automatic tasks never rewrite them, and each tooltip shows both the manual setting and current runtime status.
-- **Automatic Tasks** is an independent section that shows the enabled-task count and next scheduled time. Enable or pause all tasks directly from the main panel, or open **Manage Automatic Tasks** to manage rules and choose processes without editing TOML; pausing does not delete rules. While its manager is open, the control panel is temporarily unavailable and resumes when the manager closes. Use **Edit Config** for advanced settings such as location and detailed theme rules.
+- **Power Management** contains Stay Awake and Idle Monitoring. Their toggles show manual settings; automatic tasks may change the current runtime state without rewriting those settings.
+- **Automatic Tasks** shows the enabled count and next scheduled time. You can pause all tasks or manage individual rules and process conditions without editing TOML.
+- **System Controls** run immediately, so save your work before choosing Sleep, Hibernate, Shut Down, or Restart.
+- The panel supports mouse and keyboard navigation. Use `Tab` / `Shift+Tab` to move and `Space` to activate the focused control.
 
 ## Screenshots
 
@@ -80,23 +69,19 @@ Idle Monitoring is enabled by default with a 30-minute idle time and Sleep as it
 
 `1, 2, 3, 5, 10, 15, 30 minutes; 1, 2, 5 hours`.
 
-The monitor uses Windows `GetLastInputInfo` to observe real keyboard and mouse activity. A newly started or re-enabled monitor begins a fresh idle window; it never acts immediately because the machine had already been idle before IdleTrigger started. After an action is triggered, the idle window is reset before monitoring continues.
+The monitor uses Windows `GetLastInputInfo` to observe real keyboard and mouse activity. Starting or re-enabling it begins a fresh idle window, so pre-existing idle time never triggers an immediate action. The timer resets after each action.
 
 The **Enable Pre-action Reminder** switch shows a non-activating prompt before the action. Any keyboard or mouse input cancels the pending action; closing the prompt does the same. Set `idle_warning_seconds = 0` for silent operation.
 
-If a device, driver, or app refreshes Windows idle time at a fixed interval and prevents system sleep or idle actions, use the **Enable Enhanced Monitoring** switch. It is off by default; when enabled, IdleTrigger first logs and learns a stable reset pattern, then keeps a more robust idle timer. Normal keyboard or mouse input still resets idle time, and logs continue to record why each reset was accepted or ignored.
+If a device, driver, or app repeatedly resets Windows idle time and prevents idle actions, try **Enable Enhanced Monitoring**. It learns stable reset patterns while continuing to treat normal keyboard and mouse input as activity.
 
 ## Automatic Tasks
 
-Open the manager from the control panel's independent **Automatic Tasks** section to create, edit, delete, enable, or disable rules. An empty list explains how to create the first task; Edit, Delete, and Enable/Disable are unavailable without a selection, and deletion requires confirmation. The editor progressively shows only the fields required by its **Basics**, **Trigger Conditions**, and **Action Options** sections. Task names have an input cue and can still be generated automatically; active days use multi-select buttons plus **Weekdays** and **Every day** shortcuts. Validation explains and focuses the first invalid field. The manager is modal to the control panel, and the process picker is modal to the task editor. Closing the editor returns to the task list and confirms before discarding changes. Supported state actions are enable or pause Stay Awake and enable or pause Idle Monitoring; system actions are Lock, Sleep, Hibernate, Shut Down, and Restart. State actions can run while selected processes are running or during a time window. A pause temporarily overrides the corresponding manual setting and releases it when the task condition ends. System actions can run once, daily, weekly, when any selected process starts, or after all selected processes exit; a scheduled system action can also require a process condition.
+Use **Manage Automatic Tasks** to create rules without editing TOML. A rule can temporarily enable or pause Stay Awake or Idle Monitoring while selected processes are running or during a time window. It can also lock, sleep, hibernate, shut down, or restart once, on a daily or weekly schedule, when a selected process starts, or after all selected processes exit.
 
-The process picker loads names first and fills descriptions in the background, stays within a bounded scrolling window, and provides a search cue plus explicit **Refresh** and **Browse** buttons. When a stale picker becomes active again, it refreshes process names and instance counts, then resolves descriptions only for newly seen names; known successes and failures are cached for that window session. Search, sorting, checks, and the visible position are preserved where possible. Manual **Refresh** performs a full rescan and retries unresolved metadata. Choice popups, the task list, the process list, and the current-selection preview share the same themed scrollbar. Its sortable Process, Description, and Instances columns contain one row per executable name; clicking the checkbox or process name selects every same-name instance. Use **Browse** to choose a specific Windows EXE instead. Exact-file choices appear only in the current-selection preview, so paths are not mixed into the running-process list. PIDs and descriptions are never stored as rule identity.
+Processes can be matched by executable name or by a specific EXE. State is sampled every five seconds: processes already running when IdleTrigger starts do not backfill a start event, and a process that starts and exits between samples may be missed. Exit rules wait for every matching instance to close and use a five-second grace period to avoid firing during brief restarts.
 
-A **When any process starts** task fires only when the selected set changes from none running to at least one running. Processes already running when IdleTrigger starts do not backfill an event, and later same-name instances do not trigger duplicates. A process-exit task waits until every matching instance has exited, then applies a 5-second grace period; brief exits or restarts inside that grace period do not produce repeated actions. Process state is sampled every five seconds, so a process that starts and exits entirely between samples may not be observed.
-
-Process discovery uses the Windows Toolhelp process list. Name matching does not open processes. Description enrichment opens at most one accessible instance per executable name with `PROCESS_QUERY_LIMITED_INFORMATION`; exact-path rules request the same limited access only for matching names. Protected processes remain available by name when Windows denies metadata access. Browsed files are validated and read for description only; IdleTrigger never launches them. IdleTrigger does not request debug privilege, read process memory, inject code, terminate processes, install a service, or create Windows Task Scheduler entries.
-
-Every automatic system action displays a cancellable countdown of at least 10 seconds. If multiple system actions become due together, confirming one clears the remaining queued actions for that occurrence instead of cascading through them. Rules work only while IdleTrigger is running, and scheduled occurrences missed while Windows is asleep are not replayed after resume. Rules can invoke built-in actions only—custom commands, scripts, and arbitrary program launches are intentionally unsupported. Manual panel settings and automatic-task requests remain independent; ending a task does not rewrite a manual toggle.
+System actions always show a cancellable countdown of at least 10 seconds. Tasks work only while IdleTrigger is running, and schedules missed during sleep are not replayed after resume. Rules can use built-in actions only; they cannot run custom commands or launch programs. Process matching does not inject code, terminate processes, install a service, or create Windows Task Scheduler entries.
 
 ## Command Line
 
@@ -116,13 +101,13 @@ IdleTrigger status
 IdleTrigger version
 ```
 
-Commands that change `nosleep` or `monitor` state, plus `config:reload`, forward to the active tray instance through `\\.\pipe\IdleTrigger-<session>` and require the tray app to be running. Status queries still return a result when the tray app is not running. One-shot power actions execute directly.
+Commands that change `nosleep` or `monitor` state, plus `config:reload`, require the tray app to be running. Status queries and one-shot power actions also work without it.
 
 ## Configuration
 
-IdleTrigger creates and maintains `IdleTrigger.toml` next to the EXE. It adds missing keys and refreshed comments when the bundled configuration template changes, while retaining valid existing values. It does not rewrite the file on every run. Automatic rules are stored in this TOML file; occurrence bookkeeping is kept separately in `IdleTrigger.state.json` so normal scheduler ticks never rewrite user settings.
+IdleTrigger creates and maintains `IdleTrigger.toml` next to the EXE while preserving valid existing values. Automatic rules are stored there; scheduler state is kept separately in `IdleTrigger.state.json`.
 
-Use [IdleTrigger.example.toml](IdleTrigger.example.toml) as the bilingual top-level configuration reference. Automatic-task tables are normally created and maintained by the task manager. Saved changes apply automatically within a few seconds. To apply a change immediately, restart IdleTrigger or run:
+Use [IdleTrigger.example.toml](IdleTrigger.example.toml) as the bilingual configuration reference. Changes apply automatically within a few seconds; to reload immediately, restart IdleTrigger or run:
 
 ```powershell
 .\IdleTrigger-x64.exe config:reload
@@ -132,33 +117,11 @@ Auto-start is stored in the current user's Windows Run registry key and is manag
 
 ## Logging
 
-Enable **Debug Log** in the panel or set `logging_enabled = true`. The log is written next to the EXE, with `%TEMP%` as a fallback. It rotates at 5 MiB and retains one previous file as `IdleTrigger.log.1`.
-
-Each line includes a startup session identifier, making separate runs easy to distinguish:
-
-```text
-[2026-07-11 12:34:56.789] [session:18a0f0-2b4c] Idle monitoring started
-```
+Enable **Debug Log** in the panel or set `logging_enabled = true`. The log is written next to the EXE, with `%TEMP%` as a fallback. It rotates at 5 MiB, retains one previous file, and includes a session identifier on each line.
 
 ## Build and Development
 
 See [development guide](docs/development.md) for prerequisites, dual-architecture builds, resource generation, and verification commands.
-
-## Project Layout
-
-```text
-cmd/idletrigger/            Application entry point and generated Windows resources
-build/windows/              Manifest and checked-in application/tray icons
-docs/                       Development guide, roadmap, and README screenshots
-internal/app/               Serialized application state and feature coordination
-internal/automation/        Automatic-task model, validation, and runtime state file
-internal/feature/           Idle, keep-awake, automatic-rule, and theme features
-internal/ui/                Control panel, task/process dialogs, warnings, and tray icon
-internal/platform/windows/  Native Windows integrations, process metadata, and system actions
-internal/config/            TOML load, validation, migration, and atomic save
-internal/devtools/          Build-tagged diagnostics and screenshot support
-tools/                      Checks, generators, and screenshot automation
-```
 
 ## Acknowledgments
 
