@@ -120,7 +120,7 @@ func buttonVisual(palette colors.Palette, state ControlState) (fill, border, tex
 	return fill, border, textColor
 }
 
-func DrawChoice(dc windows.Handle, bounds Rect, font windows.Handle, label string, palette colors.Palette, background uint32, state ControlState, radius, scale int32) {
+func DrawChoice(dc windows.Handle, bounds Rect, font windows.Handle, label string, palette colors.Palette, background uint32, state ControlState, radius int32, scale float64) {
 	fill, border, textColor, arrowColor := palette.Surface, palette.Border, palette.PrimaryText, palette.SecondaryText
 	if state.Hovered || state.Open {
 		fill, border, arrowColor = palette.HoverSurface, palette.Accent, palette.Accent
@@ -136,9 +136,9 @@ func DrawChoice(dc windows.Handle, bounds Rect, font windows.Handle, label strin
 	}
 	DrawSurface(dc, bounds, palette, background, fill, border, radius)
 	textBounds := bounds
-	textBounds.Right -= 30 * scale
+	textBounds.Right -= scaledPixels(30, scale)
 	drawLabel(dc, textBounds, font, label, textColor, true, 10, 4)
-	drawArrow(dc, bounds.Right-18*scale, (bounds.Top+bounds.Bottom)/2, state.Open, arrowColor, scale)
+	drawArrow(dc, bounds.Right-scaledPixels(18, scale), (bounds.Top+bounds.Bottom)/2, state.Open, arrowColor, scale)
 }
 
 func DrawCheckbox(dc windows.Handle, bounds Rect, font windows.Handle, label string, palette colors.Palette, background uint32, state ControlState, scale float64) {
@@ -280,14 +280,14 @@ func drawLabel(dc windows.Handle, bounds Rect, font windows.Handle, label string
 	controlSelectObject.Call(uintptr(dc), old)
 }
 
-func drawArrow(dc windows.Handle, x, y int32, up bool, color uint32, scale int32) {
-	penWidth := uintptr(max32(1, scale))
+func drawArrow(dc windows.Handle, x, y int32, up bool, color uint32, scale float64) {
+	penWidth := uintptr(max32(1, scaledPixels(1, scale)))
 	pen, _, _ := controlCreatePen.Call(drawPSolid, penWidth, uintptr(color))
 	if pen == 0 {
 		return
 	}
 	old, _, _ := controlSelectObject.Call(uintptr(dc), pen)
-	halfW, halfH := 4*scale, 2*scale
+	halfW, halfH := scaledPixels(4, scale), scaledPixels(2, scale)
 	if up {
 		controlMoveToEx.Call(uintptr(dc), uintptr(x-halfW), uintptr(y+halfH), 0)
 		controlLineTo.Call(uintptr(dc), uintptr(x), uintptr(y-halfH))

@@ -154,10 +154,6 @@ func (p *panel) drawStyledOwnerItemDirect(value *drawItem) bool {
 	}
 	id := uint16(value.CtlID)
 	bounds := nativeform.Rect{Left: value.Rect.Left, Top: value.Rect.Top, Right: value.Rect.Right, Bottom: value.Rect.Bottom}
-	scale := int32(p.scale() + 0.5)
-	if scale < 1 {
-		scale = 1
-	}
 	radius := int32(6*p.scale() + 0.5)
 	if radius < 3 {
 		radius = 3
@@ -187,7 +183,7 @@ func (p *panel) drawStyledOwnerItemDirect(value *drawItem) bool {
 	}
 	if _, ok := p.choices[id]; ok {
 		state.Open = p.choiceOpen == id
-		nativeform.DrawChoice(value.HDC, bounds, p.font, p.labels[id], p.palette, p.palette.WindowBackground, state, radius, scale)
+		nativeform.DrawChoice(value.HDC, bounds, p.font, p.labels[id], p.palette, p.palette.WindowBackground, state, radius, p.scale())
 		return true
 	}
 	if id == idKeepScreen {

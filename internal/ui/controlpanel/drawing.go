@@ -3,6 +3,7 @@ package controlpanel
 import (
 	"github.com/JeffioZ/idletrigger/internal/platform/windows/gdiplus"
 	"github.com/JeffioZ/idletrigger/internal/ui/colors"
+	"github.com/JeffioZ/idletrigger/internal/ui/nativeform"
 	"golang.org/x/sys/windows"
 	"unsafe"
 )
@@ -117,6 +118,10 @@ func (p *panel) drawButton(item *drawItem) {
 	}
 	if id == idProjectHome {
 		p.drawProjectHomeLink(item, state)
+		return
+	}
+	if id != idExit {
+		nativeform.DrawButton(item.HDC, nativeRect(item.Rect), p.font, p.labels[id], p.palette, p.palette.WindowBackground, nativeControlState(state), int32(p.sc(p.metrics.style.Control.CornerRadius)/2), false)
 		return
 	}
 	selected := state.Active
@@ -236,52 +241,19 @@ func projectHomeLinkColor(palette colors.Palette, dark bool, state buttonVisualS
 }
 
 func (p *panel) drawChoiceButton(item *drawItem, state buttonVisualState) {
-	brush := p.surfaceBrush
-	border := p.palette.Border
-	textColor := p.palette.PrimaryText
-	arrowColor := p.palette.SecondaryText
-	open := p.triggerOpen(uint16(item.CtlID))
-	if state.Hovered {
-		brush = p.hoverBrush
-		arrowColor = p.palette.Accent
-	}
-	if open {
-		brush = p.hoverBrush
-		border = p.palette.Accent
-		arrowColor = p.palette.Accent
-	}
-	if state.Pressed {
-		brush = p.pressedBrush
-		if !open {
-			border = p.palette.AccentPressed
-		}
-		textColor = p.palette.AccentText
-		arrowColor = p.palette.AccentText
-	}
-	if state.Disabled {
-		brush, border = p.disabledBrush, p.palette.SubtleBorder
-		textColor, arrowColor = p.palette.DisabledText, p.palette.DisabledText
-	}
-	pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&item.Rect)), uintptr(p.backgroundBrush))
-	p.roundRect(item.HDC, item.Rect, brush, border, p.sc(p.metrics.style.Control.CornerRadius))
-	arrowResult := p.drawDisclosureArrow(item.HDC, item.Rect, open, arrowColor)
-	if arrowResult != gdiplus.DrawCompleted {
-		if arrowResult == gdiplus.DrawMayBeDirty {
-			p.roundRect(item.HDC, item.Rect, brush, border, p.sc(p.metrics.style.Control.CornerRadius))
-		}
-		p.drawDisclosureArrowGDI(item.HDC, item.Rect, open, arrowColor)
-	}
-	text, _ := windows.UTF16PtrFromString(p.labels[uint16(item.CtlID)])
-	old, _, _ := pSelectObject.Call(uintptr(item.HDC), uintptr(p.font))
-	pSetTextColor.Call(uintptr(item.HDC), uintptr(textColor))
-	pSetBkMode.Call(uintptr(item.HDC), transparent)
-	r := item.Rect
-	r.Left += int32(p.sc(8))
-	r.Right -= int32(p.sc(34))
-	pDrawText.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(text)), ^uintptr(0), uintptr(unsafe.Pointer(&r)), dtLeft|dtVCenter|dtSingleLine)
-	pSelectObject.Call(uintptr(item.HDC), old)
-	if state.Focused {
-		p.roundRectFocusRing(item.HDC, item.Rect, p.palette.Focus)
+	controlState := nativeControlState(state)
+	controlState.Open = p.triggerOpen(uint16(item.CtlID))
+	nativeform.DrawChoice(item.HDC, nativeRect(item.Rect), p.font, p.labels[uint16(item.CtlID)], p.palette, p.palette.WindowBackground, controlState, int32(p.sc(p.metrics.style.Control.CornerRadius)/2), p.metrics.scale)
+}
+
+func nativeRect(bounds rect) nativeform.Rect {
+	return nativeform.Rect{Left: bounds.Left, Top: bounds.Top, Right: bounds.Right, Bottom: bounds.Bottom}
+}
+
+func nativeControlState(state buttonVisualState) nativeform.ControlState {
+	return nativeform.ControlState{
+		Hovered: state.Hovered, Pressed: state.Pressed, Focused: state.Focused,
+		Disabled: state.Disabled, Active: state.Active,
 	}
 }
 
