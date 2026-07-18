@@ -13,38 +13,25 @@ import (
 type panelResources struct {
 	font, sectionFont, subtitleFont, choiceSelectedFont windows.Handle
 
-	backgroundBrush, elevatedBrush windows.Handle
-	surfaceBrush                   windows.Handle
-	hoverBrush                     windows.Handle
-	borderBrush                    windows.Handle
-	subtleBorderBrush              windows.Handle
-	accentBrush                    windows.Handle
-	accentHoverBrush               windows.Handle
-	pressedBrush                   windows.Handle
-	selectedBrush                  windows.Handle
-	selectedHoverBrush             windows.Handle
-	disabledBrush                  windows.Handle
-	focusBrush                     windows.Handle
-	focusOnAccentBrush             windows.Handle
-	dangerBrush                    windows.Handle
-	dangerHoverBrush               windows.Handle
-	dangerPressedBrush             windows.Handle
-	dangerBorderBrush              windows.Handle
-	dangerHoverBorderBrush         windows.Handle
-	dangerPressedBorderBrush       windows.Handle
-	dangerFocusBrush               windows.Handle
+	backgroundBrush    windows.Handle
+	surfaceBrush       windows.Handle
+	hoverBrush         windows.Handle
+	subtleBorderBrush  windows.Handle
+	accentBrush        windows.Handle
+	pressedBrush       windows.Handle
+	disabledBrush      windows.Handle
+	dangerBrush        windows.Handle
+	dangerHoverBrush   windows.Handle
+	dangerPressedBrush windows.Handle
 
 	largeIcon, smallIcon windows.Handle
 }
 
 func (p *panel) ownedBrushes() []windows.Handle {
 	return []windows.Handle{
-		p.backgroundBrush, p.elevatedBrush, p.surfaceBrush, p.hoverBrush,
-		p.borderBrush, p.subtleBorderBrush, p.accentBrush, p.accentHoverBrush,
-		p.pressedBrush, p.selectedBrush, p.selectedHoverBrush, p.disabledBrush,
-		p.focusBrush, p.focusOnAccentBrush, p.dangerBrush, p.dangerHoverBrush,
-		p.dangerPressedBrush, p.dangerBorderBrush, p.dangerHoverBorderBrush,
-		p.dangerPressedBorderBrush, p.dangerFocusBrush,
+		p.backgroundBrush, p.surfaceBrush, p.hoverBrush, p.subtleBorderBrush,
+		p.accentBrush, p.pressedBrush, p.disabledBrush, p.dangerBrush,
+		p.dangerHoverBrush, p.dangerPressedBrush,
 	}
 }
 
@@ -55,51 +42,29 @@ func (p *panel) releaseBrushes() {
 		}
 	}
 	p.backgroundBrush = 0
-	p.elevatedBrush = 0
 	p.surfaceBrush = 0
 	p.hoverBrush = 0
-	p.borderBrush = 0
 	p.subtleBorderBrush = 0
 	p.accentBrush = 0
-	p.accentHoverBrush = 0
 	p.pressedBrush = 0
-	p.selectedBrush = 0
-	p.selectedHoverBrush = 0
 	p.disabledBrush = 0
-	p.focusBrush = 0
-	p.focusOnAccentBrush = 0
 	p.dangerBrush = 0
 	p.dangerHoverBrush = 0
 	p.dangerPressedBrush = 0
-	p.dangerBorderBrush = 0
-	p.dangerHoverBorderBrush = 0
-	p.dangerPressedBorderBrush = 0
-	p.dangerFocusBrush = 0
 }
 
 func (p *panel) rebuildBrushes(palette colors.Palette) {
 	p.releaseBrushes()
 	p.backgroundBrush = makeBrush(palette.WindowBackground)
-	p.elevatedBrush = makeBrush(palette.ElevatedSurface)
 	p.surfaceBrush = makeBrush(palette.Surface)
 	p.hoverBrush = makeBrush(palette.HoverSurface)
-	p.borderBrush = makeBrush(palette.Border)
 	p.subtleBorderBrush = makeBrush(palette.SubtleBorder)
 	p.accentBrush = makeBrush(palette.Accent)
-	p.accentHoverBrush = makeBrush(palette.AccentHover)
 	p.pressedBrush = makeBrush(palette.AccentPressed)
-	p.selectedBrush = makeBrush(palette.Selected)
-	p.selectedHoverBrush = makeBrush(palette.SelectedHover)
 	p.disabledBrush = makeBrush(palette.DisabledSurface)
-	p.focusBrush = makeBrush(palette.Focus)
-	p.focusOnAccentBrush = makeBrush(palette.FocusOnAccent)
 	p.dangerBrush = makeBrush(palette.DangerBackground)
 	p.dangerHoverBrush = makeBrush(palette.DangerHover)
 	p.dangerPressedBrush = makeBrush(palette.DangerPressed)
-	p.dangerBorderBrush = makeBrush(palette.DangerBorder)
-	p.dangerHoverBorderBrush = makeBrush(palette.DangerHoverBorder)
-	p.dangerPressedBorderBrush = makeBrush(palette.DangerPressedBorder)
-	p.dangerFocusBrush = makeBrush(palette.DangerFocus)
 }
 
 func (p *panel) releaseFonts() {

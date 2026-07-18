@@ -233,15 +233,6 @@ func TestButtonRoleMappingCoversEveryPanelAction(t *testing.T) {
 	}
 }
 
-func TestFocusOutlineKeepsSelectedButtonsDistinct(t *testing.T) {
-	if focusOutlineUsesLightOnAccent(false) {
-		t.Fatal("inactive button should use the standard focus outline")
-	}
-	if !focusOutlineUsesLightOnAccent(true) {
-		t.Fatal("active button should use the dedicated selected-control focus outline")
-	}
-}
-
 func TestFocusOutlineIsVisibleOnlyDuringKeyboardNavigation(t *testing.T) {
 	p := &panel{}
 	if p.shouldDrawFocusOutline(odsFocus) {
@@ -328,26 +319,23 @@ func TestPanelFallbackCoordinateCannotReachTheDesktop(t *testing.T) {
 
 func TestOwnedBrushesIncludesEveryPanelBrush(t *testing.T) {
 	p := &panel{}
-	p.dangerPressedBorderBrush = windows.Handle(21)
+	p.dangerPressedBrush = windows.Handle(10)
 	brushes := p.ownedBrushes()
-	if len(brushes) != 21 {
-		t.Fatalf("owned brush count = %d, want 21", len(brushes))
+	if len(brushes) != 10 {
+		t.Fatalf("owned brush count = %d, want 10", len(brushes))
 	}
 	for _, brush := range brushes {
-		if brush == p.dangerPressedBorderBrush {
+		if brush == p.dangerPressedBrush {
 			return
 		}
 	}
-	t.Fatal("danger pressed border brush is missing from the release inventory")
+	t.Fatal("danger pressed brush is missing from the release inventory")
 }
 
 func TestPopupMetricsUseOneDPITransform(t *testing.T) {
 	metrics := newPanelMetrics(defaultPanelStyle, 1.5)
 	if got := metrics.px(metrics.style.Layout.PanelWidth); got != 708 {
 		t.Fatalf("scaled panel width = %d, want 708", got)
-	}
-	if got := metrics.px(metrics.style.Control.ToggleBoxSize); got != 24 {
-		t.Fatalf("scaled toggle box = %d, want 24", got)
 	}
 }
 

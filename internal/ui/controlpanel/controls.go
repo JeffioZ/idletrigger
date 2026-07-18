@@ -314,8 +314,6 @@ func (p *panel) controlState(id uint16, itemState uint32) buttonVisualState {
 	return state
 }
 
-func focusOutlineUsesLightOnAccent(active bool) bool { return active }
-
 func isMenuTrigger(id uint16) bool { return id == idQuickActions || id == idLanguage }
 
 func actionTranslationKey(value string) string {

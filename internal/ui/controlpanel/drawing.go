@@ -124,7 +124,6 @@ func (p *panel) drawButton(item *drawItem) {
 		nativeform.DrawButton(item.HDC, nativeRect(item.Rect), p.font, p.labels[id], p.palette, p.palette.WindowBackground, nativeControlState(state), int32(p.sc(p.metrics.style.Control.CornerRadius)/2), false)
 		return
 	}
-	selected := state.Active
 	danger := id == idExit
 	brush, borderColor, textColor := p.surfaceBrush, p.palette.Border, p.palette.PrimaryText
 	if state.Hovered {
@@ -134,12 +133,6 @@ func (p *panel) drawButton(item *drawItem) {
 		brush, borderColor, textColor = p.dangerBrush, p.palette.DangerBorder, p.palette.DangerText
 		if state.Hovered {
 			brush, borderColor = p.dangerHoverBrush, p.palette.DangerHoverBorder
-		}
-	}
-	if selected {
-		brush, textColor = p.selectedBrush, p.palette.AccentText
-		if state.Hovered {
-			brush = p.selectedHoverBrush
 		}
 	}
 	if state.Pressed {
@@ -166,8 +159,6 @@ func (p *panel) drawButton(item *drawItem) {
 		focusColor := p.palette.Focus
 		if danger {
 			focusColor = p.palette.DangerFocus
-		} else if focusOutlineUsesLightOnAccent(selected) {
-			focusColor = p.palette.FocusOnAccent
 		}
 		p.roundRectFocusRing(item.HDC, item.Rect, focusColor)
 	}
@@ -348,18 +339,12 @@ func (p *panel) cardFillColor(brush windows.Handle) (uint32, bool) {
 		return 0, false
 	}
 	switch brush {
-	case p.elevatedBrush:
-		return p.palette.ElevatedSurface, true
 	case p.surfaceBrush:
 		return p.palette.Surface, true
 	case p.hoverBrush:
 		return p.palette.HoverSurface, true
 	case p.pressedBrush:
 		return p.palette.AccentPressed, true
-	case p.selectedBrush:
-		return p.palette.Selected, true
-	case p.selectedHoverBrush:
-		return p.palette.SelectedHover, true
 	case p.disabledBrush:
 		return p.palette.DisabledSurface, true
 	case p.dangerBrush:

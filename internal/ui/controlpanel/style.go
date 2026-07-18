@@ -27,12 +27,10 @@ type fontTokens struct {
 }
 
 type controlTokens struct {
-	CornerRadius, ToggleBoxSize                     int
-	ButtonTextInset, ToggleTextGap, ToggleLeftInset int
-	FocusInset, FocusRingWidth                      int
-	ArrowWidth, ArrowHeight                         int
-	MenuSurfaceInset                                int
-	IconLarge, IconSmall                            int
+	CornerRadius, ButtonTextInset int
+	FocusInset, FocusRingWidth    int
+	ArrowWidth, ArrowHeight       int
+	IconLarge, IconSmall          int
 }
 
 // panelStyle is a fixed visual vocabulary for IdleTrigger's control panel,
@@ -53,9 +51,9 @@ var defaultPanelStyle = panelStyle{
 		BodyWeight: 400, SectionWeight: 700, SubtitleWeight: 600,
 	},
 	Control: controlTokens{
-		CornerRadius: nativeform.CornerRadius, ToggleBoxSize: 16, ButtonTextInset: 8, ToggleTextGap: 8, ToggleLeftInset: 2,
+		CornerRadius: nativeform.CornerRadius, ButtonTextInset: 8,
 		FocusInset: 2, FocusRingWidth: 2,
-		ArrowWidth: 8, ArrowHeight: 4, MenuSurfaceInset: nativeform.MenuSurfaceInset,
+		ArrowWidth: 8, ArrowHeight: 4,
 		IconLarge: 32, IconSmall: 16,
 	},
 }
