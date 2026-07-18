@@ -148,6 +148,9 @@ func (p *picker) setText(id uint16, value string) {
 	if p.controls[id] == 0 {
 		return
 	}
+	if p.labels[id] == value {
+		return
+	}
 	p.labels[id] = value
 	text, _ := windows.UTF16PtrFromString(value)
 	pSetWindowText.Call(uintptr(p.controls[id]), uintptr(unsafe.Pointer(text)))
@@ -161,6 +164,9 @@ func (p *picker) show(id uint16, visible bool) {
 	pShowWindow.Call(uintptr(p.controls[id]), command)
 }
 func (p *picker) enable(id uint16, enabled bool) {
+	if p.controls[id] == 0 || p.controlEnabled(id) == enabled {
+		return
+	}
 	value := uintptr(0)
 	if enabled {
 		value = 1
@@ -256,24 +262,24 @@ func (p *picker) layout() {
 		browseWidth = remaining - refreshWidth
 	}
 
-	p.place(idHeading, pad, 16, contentWidth, 20)
-	p.place(idHelper, pad, 40, contentWidth, 30)
-	p.place(idSearchSurface, pad, 78, searchWidth, 34)
-	p.place(idSearch, pad+2, 85, max(1, searchWidth-4), 20)
-	p.place(idRefresh, pad+searchWidth+gap, 78, refreshWidth, 34)
-	p.place(idBrowse, pad+searchWidth+gap+refreshWidth+gap, 78, browseWidth, 34)
-	p.place(idListSurface, pad, 120, contentWidth, 180)
-	p.place(idList, pad+2, 122, max(1, contentWidth-4), 176)
-	p.place(idEmpty, pad+24, 180, max(1, contentWidth-48), 40)
-	p.place(idStatus, pad, 308, contentWidth, 20)
-	p.place(idPreviewTitle, pad, 336, contentWidth, 20)
-	p.place(idPreviewSurface, pad, 360, contentWidth, 58)
-	p.place(idPreview, pad+2, 362, max(1, contentWidth-4), 54)
-	p.place(idPrivacy, pad, 426, contentWidth, 22)
+	p.place(idHeading, pad, pickerHeadingY, contentWidth, pickerTextHeight)
+	p.place(idHelper, pad, pickerHelperY, contentWidth, pickerTextHeight)
+	p.place(idSearchSurface, pad, pickerSearchY, searchWidth, pickerFieldHeight)
+	p.place(idSearch, pad+2, pickerSearchY+7, max(1, searchWidth-4), 20)
+	p.place(idRefresh, pad+searchWidth+gap, pickerSearchY, refreshWidth, pickerFieldHeight)
+	p.place(idBrowse, pad+searchWidth+gap+refreshWidth+gap, pickerSearchY, browseWidth, pickerFieldHeight)
+	p.place(idListSurface, pad, pickerListY, contentWidth, pickerListHeight)
+	p.place(idList, pad+2, pickerListY+2, max(1, contentWidth-4), pickerListHeight-4)
+	p.place(idEmpty, pad+24, pickerListY+(pickerListHeight-pickerTextHeight)/2, max(1, contentWidth-48), pickerTextHeight)
+	p.place(idStatus, pad, pickerStatusY, contentWidth, pickerTextHeight)
+	p.place(idPreviewTitle, pad, pickerPreviewTitleY, contentWidth, pickerTextHeight)
+	p.place(idPreviewSurface, pad, pickerPreviewY, contentWidth, pickerPreviewHeight)
+	p.place(idPreview, pad+2, pickerPreviewY+2, max(1, contentWidth-4), pickerPreviewHeight-4)
+	p.place(idPrivacy, pad, pickerPrivacyY, contentWidth, pickerTextHeight)
 	buttonGap := gap
 	buttonWidth := min(106, max(1, (contentWidth-buttonGap)/2))
-	p.place(idCancel, pad+contentWidth-2*buttonWidth-buttonGap, 456, buttonWidth, 36)
-	p.place(idConfirm, pad+contentWidth-buttonWidth, 456, buttonWidth, 36)
+	p.place(idCancel, pad+contentWidth-2*buttonWidth-buttonGap, pickerButtonsY, buttonWidth, nativeform.ButtonHeight)
+	p.place(idConfirm, pad+contentWidth-buttonWidth, pickerButtonsY, buttonWidth, nativeform.ButtonHeight)
 	p.resizeColumns()
 	p.syncListScrollbarBounds()
 	p.syncListScrollbar()
@@ -415,7 +421,7 @@ func (p *picker) applyListTheme() {
 	header, _, _ := pSendMessage.Call(uintptr(list), lvmGetHeader, 0, 0)
 	if header != 0 {
 		nativeform.ApplyControl(windows.Handle(header), p.themeDark)
-		pInvalidateRect.Call(header, 0, 0)
+		nativeform.PresentControl(windows.Handle(header), true)
 	}
 }
 
@@ -488,7 +494,7 @@ func wndProc(hwnd windows.Handle, message uint32, wParam, lParam uintptr) uintpt
 	}
 	switch message {
 	case wmActivate:
-		if uint16(wParam) != 0 && !p.captureHost && shouldAutoRefreshProcessPicker(p.lastSnapshot, time.Now(), p.lastScanDuration, p.viewPhase == pickerViewLoading) {
+		if uint16(wParam) != 0 && !p.captureHost && shouldAutoRefreshProcessPicker(p.lastSnapshot, time.Now(), p.lastScanDuration, p.loadInFlight) {
 			p.startLoad(processLoadAutomatic)
 		}
 	case wmClose:

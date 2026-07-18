@@ -180,6 +180,31 @@ func DrawPopupHeader(dc windows.Handle, bounds Rect, font windows.Handle, label 
 	drawLabel(dc, bounds, font, label, palette.SecondaryText, true, 10*scale, 6*scale)
 }
 
+// DrawTableHeaderCell gives native report headers the same semantic theme as
+// the surrounding form while preserving the header's native hit testing,
+// sorting, keyboard behavior and custom-draw state notifications.
+func DrawTableHeaderCell(dc windows.Handle, bounds Rect, font windows.Handle, label string, palette colors.Palette, state ControlState, scale float64) {
+	fill, textColor, dividerColor := tableHeaderVisual(palette, state)
+	fillRect(dc, bounds, fill)
+	divider := max32(1, scaledPixels(1, scale))
+	fillRect(dc, Rect{Left: bounds.Left, Top: bounds.Bottom - divider, Right: bounds.Right, Bottom: bounds.Bottom}, dividerColor)
+	fillRect(dc, Rect{Left: bounds.Right - divider, Top: bounds.Top, Right: bounds.Right, Bottom: bounds.Bottom}, palette.SubtleBorder)
+	if label != "" {
+		drawLabel(dc, bounds, font, label, textColor, true, scaledPixels(8, scale), scaledPixels(6, scale))
+	}
+}
+
+func tableHeaderVisual(palette colors.Palette, state ControlState) (fill, text, divider uint32) {
+	fill, text, divider = palette.ElevatedSurface, palette.PrimaryText, palette.SubtleBorder
+	if state.Hovered {
+		fill, divider = palette.HoverSurface, palette.Accent
+	}
+	if state.Pressed {
+		fill, text, divider = palette.AccentPressed, palette.AccentText, palette.AccentPressed
+	}
+	return fill, text, divider
+}
+
 // DrawMenuOption is shared by form-window choice popups and follows the main
 // control panel's menu language: quiet rows, a slim selected marker, a
 // slightly stronger selected label, and stable hover/press surfaces.

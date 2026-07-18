@@ -127,6 +127,87 @@ func TestProcessPickerStatusHoldDelay(t *testing.T) {
 	}
 }
 
+func TestSamePickerItemsDetectsOnlyVisibleProcessChanges(t *testing.T) {
+	target := automation.ProcessTarget{Match: automation.MatchName, Executable: "player.exe"}
+	base := []item{{target: target, name: "player.exe", description: "Player", count: "1", search: "player.exe player"}}
+	if !samePickerItems(base, append([]item(nil), base...)) {
+		t.Fatal("identical process rows should keep a silent activation refresh invisible")
+	}
+	changed := append([]item(nil), base...)
+	changed[0].count = "2"
+	if samePickerItems(base, changed) {
+		t.Fatal("an instance-count change should publish the refreshed process rows")
+	}
+}
+
+func TestBuildItemsKeepsMissingSelectedTargetsDeterministic(t *testing.T) {
+	alpha := automation.ProcessTarget{Match: automation.MatchName, Executable: "Alpha.exe"}
+	zeta := automation.ProcessTarget{Match: automation.MatchName, Executable: "zeta.exe"}
+	selected := map[string]automation.ProcessTarget{
+		zeta.Key():  zeta,
+		alpha.Key(): alpha,
+	}
+	text := func(string) string { return "Not running" }
+	first := buildItems(nil, selected, text)
+	second := buildItems(nil, selected, text)
+	if len(first) != 2 || first[0].target.Key() != alpha.Key() || first[1].target.Key() != zeta.Key() {
+		t.Fatalf("missing selected process order = %+v, want Alpha.exe then zeta.exe", first)
+	}
+	if !samePickerItems(first, second) {
+		t.Fatal("identical missing selected processes should keep automatic refresh silent")
+	}
+}
+
+func TestProcessPickerPreviewIsAReadOnlyNeutralSurface(t *testing.T) {
+	requireNativeIntegration(t)
+	if err := Capture(testPickerOptions(), nil, 1, false, func(hwnd windows.Handle) error {
+		p := activePickerForTest(t, hwnd)
+		preview := p.controls[idPreview]
+		pSendMessage.Call(uintptr(preview), 0x0200, 0, 0) // WM_MOUSEMOVE
+		pSendMessage.Call(uintptr(preview), 0x0007, 0, 0) // WM_SETFOCUS
+		if state := p.interaction.State(preview); state != (nativeform.InteractionState{}) {
+			t.Fatalf("read-only preview exposed interactive field state: %+v", state)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestProcessPickerHeaderTracksHoverAndPressedStates(t *testing.T) {
+	requireNativeIntegration(t)
+	if err := Capture(testPickerOptions(), nil, 1, false, func(hwnd windows.Handle) error {
+		p := activePickerForTest(t, hwnd)
+		var first rect
+		if ok, _, _ := pSendMessage.Call(uintptr(p.header), hdmGetItemRect, 0, uintptr(unsafe.Pointer(&first))); ok == 0 {
+			t.Fatal("read first process header item")
+		}
+		x := uint16((first.Left + first.Right) / 2)
+		y := uint16((first.Top + first.Bottom) / 2)
+		point := uintptr(x) | uintptr(y)<<16
+
+		pSendMessage.Call(uintptr(p.header), headerMouseMove, 0, point)
+		if p.headerHover != 1 || p.headerPressed != 0 {
+			t.Fatalf("header mouse move state = hover %d pressed %d, want 1/0", p.headerHover, p.headerPressed)
+		}
+		pSendMessage.Call(uintptr(p.header), headerLButtonDown, 0, point)
+		if p.headerHover != 1 || p.headerPressed != 1 {
+			t.Fatalf("header mouse down state = hover %d pressed %d, want 1/1", p.headerHover, p.headerPressed)
+		}
+		pSendMessage.Call(uintptr(p.header), headerLButtonUp, 0, point)
+		if p.headerHover != 1 || p.headerPressed != 0 {
+			t.Fatalf("header mouse up state = hover %d pressed %d, want 1/0", p.headerHover, p.headerPressed)
+		}
+		pSendMessage.Call(uintptr(p.header), headerMouseLeave, 0, 0)
+		if p.headerHover != 0 || p.headerPressed != 0 {
+			t.Fatalf("header mouse leave state = hover %d pressed %d, want 0/0", p.headerHover, p.headerPressed)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestProcessPickerCompletedLoadCommitsListHeaderAndPreviewPaint(t *testing.T) {
 	requireNativeIntegration(t)
 	err := Capture(testPickerOptions(), nil, 1, false, func(hwnd windows.Handle) error {
@@ -150,6 +231,41 @@ func TestProcessPickerCompletedLoadCommitsListHeaderAndPreviewPaint(t *testing.T
 		return nil
 	})
 	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUnchangedAutomaticRefreshDoesNotRepaintVisibleProcessState(t *testing.T) {
+	requireNativeIntegration(t)
+	groups := []processcatalog.Group{
+		{Executable: "alpha.exe", Description: "Alpha", Count: 1},
+		{Executable: "beta.exe", Description: "Beta", Count: 2},
+	}
+	instances := []processcatalog.Instance{
+		{Executable: "alpha.exe", Description: "Alpha", PID: 1},
+		{Executable: "beta.exe", Description: "Beta", PID: 2},
+		{Executable: "beta.exe", Description: "Beta", PID: 3},
+	}
+	if err := Capture(testPickerOptions(), groups, 1, false, func(hwnd windows.Handle) error {
+		p := activePickerForTest(t, hwnd)
+		p.repaint()
+		generation := nextGeneration.Add(1)
+		p.generation = generation
+		p.loadMode = processLoadAutomatic
+		p.loadInFlight = true
+		p.finishLoad(generation, instances, nil, true, time.Millisecond)
+		if p.loadInFlight {
+			t.Fatal("completed automatic refresh remained in flight")
+		}
+		for name, control := range map[string]windows.Handle{
+			"status": p.controls[idStatus], "list": p.controls[idList], "preview": p.controls[idPreview],
+		} {
+			if pending, _, _ := pickerTestGetUpdateRect.Call(uintptr(control), 0, 0); pending != 0 {
+				t.Fatalf("unchanged automatic refresh invalidated %s", name)
+			}
+		}
+		return nil
+	}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -456,6 +572,40 @@ func TestProcessColumnWidthsNeverRequireHorizontalScrolling(t *testing.T) {
 	wide := processColumnWidths(996, 1)
 	if wide[1] != 310 || wide[0] <= wide[1] {
 		t.Fatalf("wide process picker should keep description compact and give spare room to process names: %v", wide)
+	}
+}
+
+func TestProcessPickerSpacingUsesSharedRhythm(t *testing.T) {
+	if pickerPreviewHeight%4 != 0 {
+		t.Fatal("selection preview height should follow the shared 4 px size grid")
+	}
+	if pickerHelperY-(pickerHeadingY+pickerTextHeight) != pickerLabelGap {
+		t.Fatal("heading and helper should use the compact related-text gap")
+	}
+	if pickerSearchY-(pickerHelperY+pickerTextHeight) != pickerRelatedGap ||
+		pickerListY-(pickerSearchY+pickerFieldHeight) != pickerRelatedGap ||
+		pickerStatusY-(pickerListY+pickerListHeight) != pickerRelatedGap ||
+		pickerPreviewTitleY-(pickerStatusY+pickerTextHeight) != pickerRelatedGap {
+		t.Fatal("process picker related controls should use the shared 8 px gap")
+	}
+	if pickerPreviewY-(pickerPreviewTitleY+pickerTextHeight) != pickerLabelGap {
+		t.Fatal("selection labels should use the shared 4 px label gap")
+	}
+	privacyTopGap := pickerPrivacyY - (pickerPreviewY + pickerPreviewHeight)
+	privacyBottomGap := pickerButtonsY - (pickerPrivacyY + pickerTextHeight)
+	if privacyTopGap != pickerRelatedGap-pickerTextOpticalBias ||
+		privacyBottomGap != pickerRelatedGap+pickerTextOpticalBias ||
+		privacyTopGap+privacyBottomGap != 2*pickerRelatedGap {
+		t.Fatal("process picker footer text should be optically centered within the shared 8 px rhythm")
+	}
+	if difference := privacyBottomGap - privacyTopGap; difference < -2 || difference > 2 {
+		t.Fatalf("process picker footer gaps differ by %d px, want at most 2 px", difference)
+	}
+	if windowHeight-(pickerButtonsY+nativeform.ButtonHeight) != pickerBottomPadding {
+		t.Fatal("process picker buttons should keep the shared bottom inset")
+	}
+	if emptyY := pickerListY + (pickerListHeight-pickerTextHeight)/2; emptyY*2+pickerTextHeight != pickerListY*2+pickerListHeight {
+		t.Fatal("empty-state text should be vertically centered in the process list")
 	}
 }
 

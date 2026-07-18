@@ -291,7 +291,7 @@
   "process_picker_loading": "Reading processes…",
   "process_picker_loading_descriptions": "The list is ready. Loading descriptions…",
   "process_picker_search_hint": "Search process name or description",
-  "process_picker_privacy": "Reads process names and EXE descriptions only. PIDs are not saved, and selected files are never launched.",
+  "process_picker_privacy": "Reads process names and EXE descriptions. PIDs aren't saved; files are never launched.",
   "process_picker_confirm": "OK",
   "process_picker_error": "Could not read the process list: %s",
   "process_picker_status_results": "%d shown · %d selected",

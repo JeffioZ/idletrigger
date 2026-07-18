@@ -182,12 +182,16 @@ type picker struct {
 	themeOverride    *bool
 	generation       uint64
 	viewPhase        pickerViewPhase
+	loadMode         processLoadMode
+	loadInFlight     bool
 	closed           atomic.Bool
 	cleanupOnce      sync.Once
 	workers          sync.WaitGroup
 	interaction      nativeform.InteractionTracker
 	stateImages      windows.Handle
 	header           windows.Handle
+	headerHover      int
+	headerPressed    int
 	scrollbar        *nativeform.Scrollbar
 	previewScroll    *nativeform.ListboxScrollbar
 	contentScroll    *nativeform.Scrollbar
@@ -212,7 +216,27 @@ type picker struct {
 const (
 	windowClass           = "IdleTriggerProcessPicker"
 	windowWidth           = 700
-	windowHeight          = 510
+	pickerTopPadding      = 16
+	pickerBottomPadding   = 16
+	pickerTextHeight      = 18
+	pickerLabelGap        = 4
+	pickerRelatedGap      = 8
+	pickerTextOpticalBias = 1
+	pickerFieldHeight     = 34
+	pickerListHeight      = 180
+	pickerPreviewHeight   = 60
+	pickerHeadingY        = pickerTopPadding
+	pickerHelperY         = pickerHeadingY + pickerTextHeight + pickerLabelGap
+	pickerSearchY         = pickerHelperY + pickerTextHeight + pickerRelatedGap
+	pickerListY           = pickerSearchY + pickerFieldHeight + pickerRelatedGap
+	pickerStatusY         = pickerListY + pickerListHeight + pickerRelatedGap
+	pickerPreviewTitleY   = pickerStatusY + pickerTextHeight + pickerRelatedGap
+	pickerPreviewY        = pickerPreviewTitleY + pickerTextHeight + pickerLabelGap
+	// GDI STATIC reserves slightly more descent below its visible glyphs. Shift
+	// the text box up by 1 px while keeping the combined footer gaps at 16 px.
+	pickerPrivacyY        = pickerPreviewY + pickerPreviewHeight + pickerRelatedGap - pickerTextOpticalBias
+	pickerButtonsY        = pickerPrivacyY + pickerTextHeight + pickerRelatedGap + pickerTextOpticalBias
+	windowHeight          = pickerButtonsY + nativeform.ButtonHeight + pickerBottomPadding
 	processScrollbarLane  = 24
 	idSearch              = 101
 	idRefresh             = 102
@@ -728,11 +752,11 @@ func (p *picker) create() (err error) {
 	if ok, _, callErr := pInitCommonControls.Call(uintptr(unsafe.Pointer(&init))); ok == 0 {
 		return fmt.Errorf("initialize process picker controls: %w", callErr)
 	}
-	p.child("STATIC", p.text("process_picker_heading"), wsChild|wsVisible|ssLeft, 18, 16, 664, 20, idHeading)
-	p.child("STATIC", p.text("process_picker_helper"), wsChild|wsVisible|ssLeft, 18, 40, 664, 30, idHelper)
-	searchSurface := p.child("STATIC", "", formSurfaceStyle|wsVisible, 18, 78, 370, 34, idSearchSurface)
+	p.child("STATIC", p.text("process_picker_heading"), wsChild|wsVisible|ssLeft, 18, pickerHeadingY, 664, pickerTextHeight, idHeading)
+	p.child("STATIC", p.text("process_picker_helper"), wsChild|wsVisible|ssLeft, 18, pickerHelperY, 664, pickerTextHeight, idHelper)
+	searchSurface := p.child("STATIC", "", formSurfaceStyle|wsVisible, 18, pickerSearchY, 370, pickerFieldHeight, idSearchSurface)
 	pSetWindowPos.Call(uintptr(searchSurface), 1, 0, 0, 0, 0, swpNoMove|swpNoSize|swpNoActivate)
-	search := p.child("EDIT", "", wsChild|wsVisible|wsTabStop|wsClipSiblings|esAutoHScroll, 20, 85, 366, 20, idSearch)
+	search := p.child("EDIT", "", wsChild|wsVisible|wsTabStop|wsClipSiblings|esAutoHScroll, 20, pickerSearchY+7, 366, 20, idSearch)
 	if p.createErr != nil {
 		return p.createErr
 	}
@@ -743,11 +767,11 @@ func (p *picker) create() (err error) {
 	}); err != nil {
 		return err
 	}
-	p.child("BUTTON", p.text("process_picker_refresh"), wsChild|wsVisible|wsTabStop|bsOwnerDraw, 396, 78, 132, 34, idRefresh)
-	p.child("BUTTON", p.text("process_picker_browse"), wsChild|wsVisible|wsTabStop|bsOwnerDraw, 536, 78, 146, 34, idBrowse)
-	listSurface := p.child("STATIC", "", formSurfaceStyle|wsVisible, 18, 120, 664, 180, idListSurface)
+	p.child("BUTTON", p.text("process_picker_refresh"), wsChild|wsVisible|wsTabStop|bsOwnerDraw, 396, pickerSearchY, 132, pickerFieldHeight, idRefresh)
+	p.child("BUTTON", p.text("process_picker_browse"), wsChild|wsVisible|wsTabStop|bsOwnerDraw, 536, pickerSearchY, 146, pickerFieldHeight, idBrowse)
+	listSurface := p.child("STATIC", "", formSurfaceStyle|wsVisible, 18, pickerListY, 664, pickerListHeight, idListSurface)
 	pSetWindowPos.Call(uintptr(listSurface), 1, 0, 0, 0, 0, swpNoMove|swpNoSize|swpNoActivate)
-	list := p.child("SysListView32", "", wsChild|wsVisible|wsTabStop|wsClipChildren|wsClipSiblings|lvsReport|lvsSingleSel|lvsShowSelAlways, 20, 122, 660, 176, idList)
+	list := p.child("SysListView32", "", wsChild|wsVisible|wsTabStop|wsClipChildren|wsClipSiblings|lvsReport|lvsSingleSel|lvsShowSelAlways, 20, pickerListY+2, 660, pickerListHeight-4, idList)
 	if p.createErr != nil {
 		return p.createErr
 	}
@@ -778,17 +802,17 @@ func (p *picker) create() (err error) {
 	p.syncListScrollbarBounds()
 	p.syncListScrollbar()
 	p.resizeColumns()
-	p.child("STATIC", p.text("process_picker_loading"), wsChild|ssLeft, 42, 180, 616, 40, idEmpty)
-	p.child("STATIC", p.text("process_picker_loading"), wsChild|wsVisible|ssLeft, 18, 308, 664, 20, idStatus)
-	p.child("STATIC", p.text("process_picker_selection_title"), wsChild|wsVisible|ssLeft, 18, 336, 664, 20, idPreviewTitle)
-	previewSurface := p.child("STATIC", "", formSurfaceStyle|wsVisible, 18, 360, 664, 58, idPreviewSurface)
+	p.child("STATIC", p.text("process_picker_loading"), wsChild|ssLeft, 42, pickerListY+(pickerListHeight-pickerTextHeight)/2, 616, pickerTextHeight, idEmpty)
+	p.child("STATIC", p.text("process_picker_loading"), wsChild|wsVisible|ssLeft, 18, pickerStatusY, 664, pickerTextHeight, idStatus)
+	p.child("STATIC", p.text("process_picker_selection_title"), wsChild|wsVisible|ssLeft, 18, pickerPreviewTitleY, 664, pickerTextHeight, idPreviewTitle)
+	previewSurface := p.child("STATIC", "", formSurfaceStyle|wsVisible, 18, pickerPreviewY, 664, pickerPreviewHeight, idPreviewSurface)
 	pSetWindowPos.Call(uintptr(previewSurface), 1, 0, 0, 0, 0, swpNoMove|swpNoSize|swpNoActivate)
-	preview := p.child("LISTBOX", "", wsChild|wsVisible|wsVScroll|wsClipSiblings|lbsNoSelection|lbsNoIntegralHeight, 20, 362, 660, 54, idPreview)
+	preview := p.child("LISTBOX", "", wsChild|wsVisible|wsVScroll|wsClipSiblings|lbsNoSelection|lbsNoIntegralHeight, 20, pickerPreviewY+2, 660, pickerPreviewHeight-4, idPreview)
 	if p.createErr != nil {
 		return p.createErr
 	}
 	if _, err := p.surfaces.Add(nativeform.ControlSurfaceOptions{
-		ControlID: idPreview, SurfaceID: idPreviewSurface, Control: preview, Surface: previewSurface, Tracker: &p.interaction,
+		ControlID: idPreview, SurfaceID: idPreviewSurface, Control: preview, Surface: previewSurface,
 	}); err != nil {
 		return err
 	}
@@ -800,9 +824,9 @@ func (p *picker) create() (err error) {
 	}
 	p.previewScroll = previewScroll
 	p.syncPreviewScrollbarBounds()
-	p.child("STATIC", p.text("process_picker_privacy"), wsChild|wsVisible|ssLeft, 18, 426, 664, 22, idPrivacy)
-	p.child("BUTTON", p.text("common_cancel"), wsChild|wsVisible|wsTabStop|bsOwnerDraw, 462, 456, 106, 36, idCancel)
-	p.child("BUTTON", p.text("process_picker_confirm"), wsChild|wsVisible|wsTabStop|bsOwnerDraw, 576, 456, 106, 36, idConfirm)
+	p.child("STATIC", p.text("process_picker_privacy"), wsChild|wsVisible|ssLeft, 18, pickerPrivacyY, 664, pickerTextHeight, idPrivacy)
+	p.child("BUTTON", p.text("common_cancel"), wsChild|wsVisible|wsTabStop|bsOwnerDraw, 462, pickerButtonsY, 106, nativeform.ButtonHeight, idCancel)
+	p.child("BUTTON", p.text("process_picker_confirm"), wsChild|wsVisible|wsTabStop|bsOwnerDraw, 576, pickerButtonsY, 106, nativeform.ButtonHeight, idConfirm)
 	if p.createErr != nil {
 		return p.createErr
 	}
@@ -871,6 +895,11 @@ func (p *picker) resizeColumns() {
 	if list == 0 {
 		return
 	}
+	// Hide the native lane before measuring. At some fractional DPI values the
+	// ListView reports a client width that already excludes its transient
+	// system scrollbar, while the header still spans the full control width.
+	// Measuring that narrower client would reserve both lanes in the header.
+	pShowScrollBar.Call(uintptr(list), sbVert, 0)
 	var client rect
 	pGetClientRect.Call(uintptr(list), uintptr(unsafe.Pointer(&client)))
 	widths := processColumnWidths(int(client.Right-client.Left), p.scale())

@@ -46,3 +46,26 @@ func TestButtonVisualStatePriority(t *testing.T) {
 		})
 	}
 }
+
+func TestTableHeaderVisualUsesSemanticThemeStates(t *testing.T) {
+	palette := colors.ForTheme(true)
+	tests := []struct {
+		name     string
+		state    ControlState
+		wantFill uint32
+		wantText uint32
+		wantLine uint32
+	}{
+		{"rest", ControlState{}, palette.ElevatedSurface, palette.PrimaryText, palette.SubtleBorder},
+		{"hover", ControlState{Hovered: true}, palette.HoverSurface, palette.PrimaryText, palette.Accent},
+		{"pressed", ControlState{Hovered: true, Pressed: true}, palette.AccentPressed, palette.AccentText, palette.AccentPressed},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fill, text, line := tableHeaderVisual(palette, test.state)
+			if fill != test.wantFill || text != test.wantText || line != test.wantLine {
+				t.Fatalf("tableHeaderVisual(%+v) = (%06x, %06x, %06x), want (%06x, %06x, %06x)", test.state, fill, text, line, test.wantFill, test.wantText, test.wantLine)
+			}
+		})
+	}
+}

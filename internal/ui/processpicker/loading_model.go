@@ -22,14 +22,23 @@ func (p *picker) startLoad(mode processLoadMode) {
 	if p.closed.Load() || p.hwnd == 0 {
 		return
 	}
-	p.captureSelection()
+	if mode == processLoadAutomatic && p.loadInFlight {
+		return
+	}
+	if mode != processLoadAutomatic {
+		p.captureSelection()
+	}
 	p.captureViewAnchors()
+	p.loadMode = mode
+	p.loadInFlight = true
 	if mode == processLoadManual {
 		p.beginManualStatusHold()
 	} else {
 		p.clearStatusHold()
 	}
-	p.transitionView(pickerViewLoading, "")
+	if mode != processLoadAutomatic {
+		p.transitionView(pickerViewLoading, "")
+	}
 	generation := nextGeneration.Add(1)
 	p.generation = generation
 	var exactTargets []automation.ProcessTarget
@@ -166,6 +175,11 @@ func (p *picker) finishLoad(generation uint64, instances []processcatalog.Instan
 		return
 	}
 	if err != nil {
+		p.loadInFlight = false
+		if p.loadMode == processLoadAutomatic {
+			p.anchorTopKey, p.anchorFocusKey = "", ""
+			return
+		}
 		p.transitionView(pickerViewError, fmt.Sprintf(p.text("process_picker_error"), err.Error()))
 		p.anchorTopKey, p.anchorFocusKey = "", ""
 		p.repaint()
@@ -184,10 +198,22 @@ func (p *picker) finishLoad(generation uint64, instances []processcatalog.Instan
 			groups[index].Description = cached
 		}
 	}
-	p.items = buildItems(groups, p.selected, p.options.Text)
+	nextItems := buildItems(groups, p.selected, p.options.Text)
+	unchangedSilentRefresh := p.loadMode == processLoadAutomatic && samePickerItems(p.items, nextItems)
+	p.items = nextItems
 	phase := pickerViewReady
-	if !final {
+	if !final && p.loadMode != processLoadAutomatic {
 		phase = pickerViewEnriching
+	}
+	if final {
+		p.loadInFlight = false
+	}
+	if unchangedSilentRefresh {
+		p.viewPhase = phase
+		if final {
+			p.anchorTopKey, p.anchorFocusKey = "", ""
+		}
+		return
 	}
 	p.transitionView(phase, "")
 	p.applyFilter()
@@ -341,6 +367,22 @@ func shouldAutoRefreshProcessPicker(last, now time.Time, scanDuration time.Durat
 	return !loading && !last.IsZero() && now.Sub(last) >= processPickerRefreshAge(scanDuration)
 }
 
+func samePickerItems(left, right []item) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index].target.Key() != right[index].target.Key() ||
+			left[index].name != right[index].name ||
+			left[index].description != right[index].description ||
+			left[index].count != right[index].count ||
+			left[index].search != right[index].search {
+			return false
+		}
+	}
+	return true
+}
+
 func buildItems(groups []processcatalog.Group, selected map[string]automation.ProcessTarget, text func(string) string) []item {
 	items := make([]item, 0, len(groups)+len(selected))
 	present := make(map[string]struct{})
@@ -356,6 +398,7 @@ func buildItems(groups []processcatalog.Group, selected map[string]automation.Pr
 		})
 		present[target.Key()] = struct{}{}
 	}
+	missingSelected := make([]automation.ProcessTarget, 0, len(selected))
 	for key, target := range selected {
 		if target.Match == automation.MatchPath {
 			continue
@@ -363,6 +406,17 @@ func buildItems(groups []processcatalog.Group, selected map[string]automation.Pr
 		if _, ok := present[key]; ok {
 			continue
 		}
+		missingSelected = append(missingSelected, target)
+	}
+	sort.Slice(missingSelected, func(i, j int) bool {
+		leftName := strings.ToLower(missingSelected[i].Executable)
+		rightName := strings.ToLower(missingSelected[j].Executable)
+		if leftName != rightName {
+			return leftName < rightName
+		}
+		return missingSelected[i].Key() < missingSelected[j].Key()
+	})
+	for _, target := range missingSelected {
 		description := text("process_picker_not_running")
 		items = append(items, item{target: target, name: target.Executable, description: description, search: strings.ToLower(target.Executable + " " + description)})
 	}
