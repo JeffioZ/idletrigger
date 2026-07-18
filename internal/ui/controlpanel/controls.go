@@ -301,6 +301,7 @@ func (p *panel) visualState(id uint16) buttonVisualState {
 // current Win32 draw notification and never escapes into tray business state.
 func (p *panel) controlState(id uint16, itemState uint32) buttonVisualState {
 	state := p.visualState(id)
+	state.Disabled = state.Disabled || itemState&odsDisabled != 0
 	state.Hovered = p.hoverID == id || itemState&odsHotlight != 0
 	// Native BUTTON hotlight can outlive WM_MOUSELEAVE on owner-drawn menu and
 	// choice triggers. Those controls use the panel's tracked hover state

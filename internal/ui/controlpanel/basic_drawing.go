@@ -1,7 +1,6 @@
 package controlpanel
 
 import (
-	"github.com/JeffioZ/idletrigger/internal/platform/windows/gdiplus"
 	"github.com/JeffioZ/idletrigger/internal/ui/nativeform"
 	"github.com/JeffioZ/idletrigger/internal/ui/trayicon"
 	"golang.org/x/sys/windows"
@@ -10,75 +9,7 @@ import (
 
 func (p *panel) drawToggle(item *drawItem) {
 	state := p.controlState(uint16(item.CtlID), item.ItemState)
-	pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&item.Rect)), uintptr(p.backgroundBrush))
-	boxSize := int32(p.sc(p.metrics.style.Control.ToggleBoxSize))
-	box := rect{
-		Left:   item.Rect.Left + int32(p.sc(p.metrics.style.Control.ToggleLeftInset)),
-		Top:    item.Rect.Top + (item.Rect.Bottom-item.Rect.Top-boxSize)/2,
-		Right:  item.Rect.Left + int32(p.sc(p.metrics.style.Control.ToggleLeftInset)) + boxSize,
-		Bottom: item.Rect.Top + (item.Rect.Bottom-item.Rect.Top-boxSize)/2 + boxSize,
-	}
-	brush, border, textColor := p.surfaceBrush, p.borderBrush, p.palette.PrimaryText
-	// Keep label text stable for every interactive state. The checkbox box
-	// alone communicates hover, press, and checked state in the quiet native
-	// control language; disabled is the only text de-emphasis case.
-	if state.Disabled || item.ItemState&odsDisabled != 0 {
-		brush, border, textColor = p.disabledBrush, p.subtleBorderBrush, p.palette.DisabledText
-	} else if state.Pressed {
-		if state.Active {
-			brush, border = p.pressedBrush, p.pressedBrush
-		} else {
-			brush, border = p.elevatedBrush, p.pressedBrush
-		}
-	} else if state.Active && state.Hovered {
-		brush, border = p.accentHoverBrush, p.accentHoverBrush
-	} else if state.Active {
-		brush, border = p.accentBrush, p.accentBrush
-	} else if state.Hovered {
-		brush, border = p.hoverBrush, p.accentHoverBrush
-	}
-	p.drawToggleBox(item.HDC, box, brush, border)
-	old, _, _ := pSelectObject.Call(uintptr(item.HDC), uintptr(p.font))
-	defer pSelectObject.Call(uintptr(item.HDC), old)
-	pSetBkMode.Call(uintptr(item.HDC), transparent)
-	if state.Active {
-		check, _ := windows.UTF16PtrFromString("✓")
-		checkColor := p.palette.AccentText
-		if state.Disabled || item.ItemState&odsDisabled != 0 {
-			// White on the light disabled surface has insufficient contrast.
-			checkColor = p.palette.MutedText
-		}
-		checkResult := gdiplus.DrawCheck(item.HDC, box.Left, box.Top, box.Right, box.Bottom, checkColor, int32(p.sc(2)))
-		if checkResult != gdiplus.DrawCompleted {
-			if checkResult == gdiplus.DrawMayBeDirty {
-				p.drawToggleBox(item.HDC, box, brush, border)
-			}
-			pSetTextColor.Call(uintptr(item.HDC), uintptr(checkColor))
-			pDrawText.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(check)), ^uintptr(0), uintptr(unsafe.Pointer(&box)), dtCenter|dtVCenter|dtSingleLine)
-		}
-	}
-	if state.Focused {
-		focus := item.Rect
-		inset := int32(p.sc(p.metrics.style.Control.FocusInset))
-		focus.Left += inset
-		focus.Top += inset
-		focus.Right -= inset
-		focus.Bottom -= inset
-		if focus.Left < focus.Right && focus.Top < focus.Bottom {
-			pFrameRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&focus)), uintptr(p.focusBrush))
-		}
-	}
-	text, _ := windows.UTF16PtrFromString(p.labels[uint16(item.CtlID)])
-	bounds := item.Rect
-	bounds.Left = box.Right + int32(p.sc(p.metrics.style.Control.ToggleTextGap))
-	bounds.Right -= int32(p.sc(p.metrics.style.Control.MenuSurfaceInset))
-	pSetTextColor.Call(uintptr(item.HDC), uintptr(textColor))
-	drawTextLeftCentered(item.HDC, text, bounds)
-}
-
-func (p *panel) drawToggleBox(dc windows.Handle, box rect, brush, border windows.Handle) {
-	pFillRect.Call(uintptr(dc), uintptr(unsafe.Pointer(&box)), uintptr(brush))
-	pFrameRect.Call(uintptr(dc), uintptr(unsafe.Pointer(&box)), uintptr(border))
+	nativeform.DrawCheckbox(item.HDC, nativeRect(item.Rect), p.font, p.labels[uint16(item.CtlID)], p.palette, p.palette.WindowBackground, nativeControlState(state), p.metrics.scale)
 }
 
 func (p *panel) drawStatic(item *drawItem) {

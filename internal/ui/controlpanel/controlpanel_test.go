@@ -150,6 +150,13 @@ func TestControlStateRetainsInteractiveFlags(t *testing.T) {
 	}
 }
 
+func TestControlStateIncludesNativeDisabledFlag(t *testing.T) {
+	p := &panel{toggles: map[uint16]bool{}, selected: map[uint16]bool{}, disabled: map[uint16]bool{}}
+	if state := p.controlState(idConfig, odsDisabled); !state.Disabled {
+		t.Fatalf("native disabled flag was lost: %#v", state)
+	}
+}
+
 func TestMenuTriggersAreLimitedToClickMenus(t *testing.T) {
 	for _, id := range []uint16{idQuickActions, idLanguage} {
 		if !isMenuTrigger(id) {
