@@ -183,17 +183,35 @@ func (p *panel) show(id uint16, visible bool) {
 		p.layoutVisibility[id] = visible
 		return
 	}
+	if p.rebuildSuspended {
+		if p.rebuildVisibility == nil {
+			p.rebuildVisibility = make(map[uint16]bool)
+		}
+		p.rebuildVisibility[id] = visible
+		return
+	}
 	p.applyVisibility(id, visible)
 }
 
 func (p *panel) applyVisibility(id uint16, visible bool) {
+	control := p.controls[id]
+	if control == 0 {
+		return
+	}
 	command := uintptr(0)
 	if visible {
 		command = 5
 	}
-	pShowWindow.Call(uintptr(p.controls[id]), command)
+	parentVisible, _, _ := pIsWindowVisible.Call(uintptr(p.hwnd))
+	current, _, _ := pIsWindowVisible.Call(uintptr(control))
+	if parentVisible == 0 || (current != 0) != visible {
+		pShowWindow.Call(uintptr(control), command)
+	}
 	if field, ok := p.surfaces.ForControl(id); ok {
-		pShowWindow.Call(uintptr(field.Surface), command)
+		current, _, _ = pIsWindowVisible.Call(uintptr(field.Surface))
+		if parentVisible == 0 || (current != 0) != visible {
+			pShowWindow.Call(uintptr(field.Surface), command)
+		}
 	}
 }
 

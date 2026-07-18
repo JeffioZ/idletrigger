@@ -215,7 +215,7 @@
   "automation_blocked_policy": "If processes do not match",
   "automation_max_wait": "Max wait (minutes)",
   "automation_no_action_options": "This action has no additional options.",
-  "automation_runtime_note": "State actions are temporary. Tasks work only while IdleTrigger runs; system actions can be cancelled.",
+  "automation_runtime_note": "State changes are temporary; tasks need IdleTrigger running; system actions can be cancelled.",
   "automation_rule_enabled": "Enabled",
   "automation_rule_disabled": "Disabled",
   "automation_rule_invalid": "Invalid",

@@ -48,11 +48,13 @@ func (p *panel) showEditorDraft(index int, draft automation.Rule) {
 	p.setText(idIdleMinutes, strconv.Itoa(p.draft.IdleMinutes))
 	p.setText(idWarningSeconds, strconv.Itoa(p.draft.WarningSeconds))
 	p.setText(idMaxWait, strconv.Itoa(p.draft.MaxWaitMinutes))
-	validation := ""
+	status := p.t("automation_runtime_note")
+	p.editorStatusError = false
 	if issue, invalid := p.issueForRule(index); invalid {
-		validation = issue.Message
+		status = issue.Message
+		p.editorStatusError = true
 	}
-	p.setText(idValidation, validation)
+	p.setText(idValidation, status)
 	for dayIndex, day := range editorWeekdays {
 		p.setChecked(idWeekdayBase+uint16(dayIndex), containsDay(p.draft.Days, day))
 	}
@@ -82,9 +84,9 @@ func (p *panel) createEditorControls() {
 	p.namedLabel(idDateLabel, p.t("automation_date"), p.font)
 	p.edit(idDate, "")
 	p.namedLabel(idTimeLabel, p.t("automation_time"), p.font)
-	p.edit(idTime, "")
+	p.timeEdit(idTime, "")
 	p.namedLabel(idEndTimeLabel, p.t("automation_end_time"), p.font)
-	p.edit(idEndTime, "")
+	p.timeEdit(idEndTime, "")
 	p.namedLabel(idDaysLabel, p.t("automation_days"), p.font)
 	p.child("BUTTON", p.t("automation_days_workdays"), wsChild|wsTabStop|bsOwnerDraw, 0, 0, 1, 1, idDaysWorkdays, p.font)
 	p.child("BUTTON", p.t("automation_days_everyday"), wsChild|wsTabStop|bsOwnerDraw, 0, 0, 1, 1, idDaysEveryday, p.font)
@@ -112,8 +114,7 @@ func (p *panel) createEditorControls() {
 	p.namedLabel(idMaxWaitLabel, p.t("automation_max_wait"), p.font)
 	p.edit(idMaxWait, "")
 	p.namedLabel(idNoOptions, p.t("automation_no_action_options"), p.font)
-	p.namedLabel(idRuntimeNote, p.t("automation_runtime_note"), p.font)
-	p.namedLabel(idValidation, "", p.font)
+	p.namedLabel(idValidation, p.t("automation_runtime_note"), p.font)
 	p.child("BUTTON", p.t("common_cancel"), wsChild|wsTabStop|bsOwnerDraw, 0, 0, 1, 1, idCancel, p.font)
 	p.child("BUTTON", p.t("common_save"), wsChild|wsTabStop|bsOwnerDraw, 0, 0, 1, 1, idSave, p.font)
 	for id, key := range map[uint16]string{idName: "tip_automation_name", idAction: "tip_automation_action", idTrigger: "tip_automation_trigger", idDate: "tip_automation_date", idTime: "tip_automation_time", idEndTime: "tip_automation_end_time", idProcessLogic: "tip_process_logic", idChooseProcesses: "tip_choose_processes", idKeepScreen: "tip_keep_screen", idIdleMinutes: "tip_idle_minutes", idWarningSeconds: "tip_warning_seconds", idBlockedPolicy: "tip_blocked_policy", idMaxWait: "tip_max_wait", idSave: "tip_automation_save", idCancel: "tip_automation_cancel"} {
@@ -243,7 +244,7 @@ func (p *panel) layoutEditorContent(layoutWidth int) int {
 	action := actionAt(p.comboIndex(idAction))
 	trigger := p.triggerValue()
 	p.setText(idTimeLabel, p.t(automationTimeLabelKey(trigger)))
-	const pad, gap, fieldH, labelH = nativeform.FormPadding, nativeform.ControlGap, nativeform.FieldHeight, 18
+	const pad, gap, fieldH, labelH = nativeform.FormPadding, nativeform.ControlGap, nativeform.FieldHeight, formTextHeight
 	reserve := 0
 	if p.clientHeight > p.viewportHeight {
 		reserve = nativeform.ScrollbarWidth + 4
@@ -253,34 +254,41 @@ func (p *panel) layoutEditorContent(layoutWidth int) int {
 	for _, id := range editorControlIDs() {
 		p.show(id, false)
 	}
-	p.place(idBasicsTitle, pad, 16, contentW, 24, true)
-	p.place(idNameLabel, pad, 48, contentW, labelH, true)
-	p.place(idName, pad, 70, contentW, fieldH, true)
-	p.place(idNameHint, pad, 108, contentW, 20, true)
-	p.place(idActionLabel, pad, 144, columnW, labelH, true)
-	p.place(idTriggerLabel, pad+columnW+gap, 144, columnW, labelH, true)
-	p.placeCombo(idAction, pad, 166, columnW, true)
-	p.placeCombo(idTrigger, pad+columnW+gap, 166, columnW, true)
-	p.place(idTriggerTitle, pad, 216, contentW, 24, true)
-	y := 248
+	y := formEdgePadding
+	p.place(idBasicsTitle, pad, y, contentW, labelH, true)
+	y += labelH + formContentGap
+	p.place(idNameLabel, pad, y, contentW, labelH, true)
+	y += labelH + formLabelGap
+	p.place(idName, pad, y, contentW, fieldH, true)
+	y += fieldH + formLabelGap
+	p.place(idNameHint, pad, y, contentW, labelH, true)
+	y += labelH + formSectionGap
+	p.place(idActionLabel, pad, y, columnW, labelH, true)
+	p.place(idTriggerLabel, pad+columnW+gap, y, columnW, labelH, true)
+	y += labelH + formLabelGap
+	p.placeCombo(idAction, pad, y, columnW, true)
+	p.placeCombo(idTrigger, pad+columnW+gap, y, columnW, true)
+	y += fieldH + formSectionGap
+	p.place(idTriggerTitle, pad, y, contentW, labelH, true)
+	y += labelH + formContentGap
 	rowFields := func(leftLabel, leftControl, rightLabel, rightControl uint16) {
 		p.place(leftLabel, pad, y, columnW, labelH, true)
 		p.place(rightLabel, pad+columnW+gap, y, columnW, labelH, true)
-		p.place(leftControl, pad, y+22, columnW, fieldH, true)
-		p.place(rightControl, pad+columnW+gap, y+22, columnW, fieldH, true)
-		y += 64
+		p.place(leftControl, pad, y+labelH+formLabelGap, columnW, fieldH, true)
+		p.place(rightControl, pad+columnW+gap, y+labelH+formLabelGap, columnW, fieldH, true)
+		y += labelH + formLabelGap + fieldH + formRelatedGap
 	}
 	switch trigger {
 	case automation.TriggerOnce:
 		rowFields(idDateLabel, idDate, idTimeLabel, idTime)
 	case automation.TriggerDaily:
 		p.place(idTimeLabel, pad, y, columnW, labelH, true)
-		p.place(idTime, pad, y+22, columnW, fieldH, true)
-		y += 64
+		p.place(idTime, pad, y+labelH+formLabelGap, columnW, fieldH, true)
+		y += labelH + formLabelGap + fieldH + formRelatedGap
 	case automation.TriggerWeekly:
 		p.place(idTimeLabel, pad, y, columnW, labelH, true)
-		p.place(idTime, pad, y+22, columnW, fieldH, true)
-		y += 64
+		p.place(idTime, pad, y+labelH+formLabelGap, columnW, fieldH, true)
+		y += labelH + formLabelGap + fieldH + formRelatedGap
 		y = p.layoutWeekdays(y, contentW)
 	case automation.TriggerTimeWindow:
 		rowFields(idTimeLabel, idTime, idEndTimeLabel, idEndTime)
@@ -293,7 +301,7 @@ func (p *panel) layoutEditorContent(layoutWidth int) int {
 		p.setText(idProcessLogicLabel, p.t("automation_process_condition"))
 	}
 	p.place(idProcessLogicLabel, pad, y, contentW, labelH, true)
-	y += 22
+	y += labelH + formLabelGap
 	switch trigger {
 	case automation.TriggerProcessExited:
 		p.draft.ProcessLogic = automation.ProcessNone
@@ -307,52 +315,52 @@ func (p *panel) layoutEditorContent(layoutWidth int) int {
 		p.placeCombo(idProcessLogic, pad, y, columnW, true)
 		p.place(idChooseProcesses, pad+columnW+gap, y, columnW, fieldH, true)
 	}
-	y += fieldH + gap
-	p.place(idProcessSummary, pad, y, contentW, 22, true)
+	y += fieldH + formRelatedGap
+	p.place(idProcessSummary, pad, y, contentW, labelH, true)
 	showInfo := len(p.draft.Processes) > 0
 	if showInfo {
-		p.place(idProcessSummary, pad, y, contentW-30, 22, true)
+		p.place(idProcessSummary, pad, y, contentW-30, labelH, true)
 	}
-	p.place(idProcessInfo, pad+contentW-22, y, 22, 22, showInfo)
-	y += 30
+	p.place(idProcessInfo, pad+contentW-processSummaryRowH, y, processSummaryRowH, processSummaryRowH, showInfo)
+	y += processSummaryRowH + formContentGap
 
-	p.place(idOptionsTitle, pad, y, contentW, 24, true)
-	y += 32
+	p.place(idOptionsTitle, pad, y, contentW, labelH, true)
+	y += labelH + formContentGap
 	switch action {
 	case automation.ActionStayAwake:
-		p.place(idKeepScreen, pad, y, contentW, fieldH, true)
-		y += fieldH + gap
+		p.place(idKeepScreen, pad, y, contentW, checkboxRowHeight, true)
+		y += checkboxRowHeight
 	case automation.ActionEnableIdle:
 		p.place(idIdleMinutesLabel, pad, y, columnW, labelH, true)
-		p.place(idIdleMinutes, pad, y+22, columnW, fieldH, true)
-		y += 64
+		p.place(idIdleMinutes, pad, y+labelH+formLabelGap, columnW, fieldH, true)
+		y += labelH + formLabelGap + fieldH
 	case automation.ActionPauseStayAwake, automation.ActionPauseIdle:
-		p.place(idNoOptions, pad, y, contentW, 24, true)
-		y += 32
+		p.place(idNoOptions, pad, y, contentW, labelH, true)
+		y += labelH
 	default:
 		p.place(idWarningLabel, pad, y, columnW, labelH, true)
-		p.place(idWarningSeconds, pad, y+22, columnW, fieldH, true)
-		y += 64
+		p.place(idWarningSeconds, pad, y+labelH+formLabelGap, columnW, fieldH, true)
+		y += labelH + formLabelGap + fieldH
 		if len(p.draft.Processes) > 0 && trigger != automation.TriggerProcessStarted && trigger != automation.TriggerProcessExited {
+			y += formRelatedGap
 			p.place(idBlockedLabel, pad, y, columnW, labelH, true)
-			p.placeCombo(idBlockedPolicy, pad, y+22, columnW, true)
+			p.placeCombo(idBlockedPolicy, pad, y+labelH+formLabelGap, columnW, true)
 			if blockedAt(p.comboIndex(idBlockedPolicy)) == automation.BlockedWait {
 				p.place(idMaxWaitLabel, pad+columnW+gap, y, columnW, labelH, true)
-				p.place(idMaxWait, pad+columnW+gap, y+22, columnW, fieldH, true)
+				p.place(idMaxWait, pad+columnW+gap, y+labelH+formLabelGap, columnW, fieldH, true)
 			}
-			y += 64
+			y += labelH + formLabelGap + fieldH
 		}
 	}
-	runtimeHeight := 22
-	p.place(idRuntimeNote, pad, y, contentW, runtimeHeight, true)
-	y += runtimeHeight + gap
-	if strings.TrimSpace(p.controlText(idValidation)) != "" {
-		p.place(idValidation, pad, y, contentW, 36, true)
-		y += 42
-	}
+	// The status row belongs to the option above it, while the buttons form a
+	// separate footer. Keep its bounds stable in both normal and error states so
+	// validation feedback never resizes or rebuilds the editor after Save.
+	y += formRelatedGap
+	p.place(idValidation, pad, y, contentW, labelH, true)
+	y += labelH + formSectionGap
 	p.place(idCancel, pad+contentW-220, y, 102, nativeform.ButtonHeight, true)
 	p.place(idSave, pad+contentW-110, y, 110, nativeform.ButtonHeight, true)
-	y += 52
+	y += nativeform.ButtonHeight + formEdgePadding
 	return y
 }
 
@@ -360,14 +368,14 @@ func (p *panel) layoutWeekdays(y, contentW int) int {
 	const pad, gap = nativeform.FormPadding, nativeform.ControlGap
 	buttonW := (contentW - gap*(len(editorWeekdays)-1)) / len(editorWeekdays)
 	const quickW, quickH = 88, 24
-	p.place(idDaysLabel, pad, y+3, contentW-2*(quickW+gap), 18, true)
+	p.place(idDaysLabel, pad, y+(quickH-formTextHeight)/2, contentW-2*(quickW+gap), formTextHeight, true)
 	p.place(idDaysWorkdays, pad+contentW-2*quickW-gap, y, quickW, quickH, true)
 	p.place(idDaysEveryday, pad+contentW-quickW, y, quickW, quickH, true)
-	y += 30
+	y += quickH + formRelatedGap
 	for index := range editorWeekdays {
 		p.place(idWeekdayBase+uint16(index), pad+index*(buttonW+gap), y, buttonW, nativeform.FieldHeight, true)
 	}
-	return y + nativeform.FieldHeight + gap
+	return y + nativeform.FieldHeight + formRelatedGap
 }
 
 func (p *panel) handleCommand(id, notification uint16) {
@@ -421,6 +429,12 @@ func (p *panel) handleManager(id, notification uint16) {
 	}
 }
 func (p *panel) handleEditor(id, notification uint16) {
+	if notification == enChange {
+		switch id {
+		case idName, idDate, idTime, idEndTime, idIdleMinutes, idWarningSeconds, idMaxWait:
+			p.clearEditorError()
+		}
+	}
 	if _, ok := p.choices[id]; ok {
 		if notification == bnClicked {
 			// Open after the native BUTTON finishes its click processing. Opening
@@ -434,12 +448,8 @@ func (p *panel) handleEditor(id, notification uint16) {
 		return
 	}
 	if id >= idWeekdayBase && id < idWeekdayBase+uint16(len(editorWeekdays)) && notification == bnClicked {
-		hadValidation := strings.TrimSpace(p.controlText(idValidation)) != ""
 		p.setChecked(id, !p.checked(id))
-		p.setText(idValidation, "")
-		if hadValidation {
-			p.relayoutEditor()
-		}
+		p.clearEditorError()
 		return
 	}
 	p.closeChoice(false)
@@ -463,7 +473,7 @@ func (p *panel) handleEditor(id, notification uint16) {
 			p.processDescriptions = descriptions
 			p.setText(idProcessSummary, p.processSummary())
 			p.refreshProcessInfoTooltip()
-			p.setText(idValidation, "")
+			p.clearEditorError()
 			p.relayoutEditor()
 		}})
 	case idProcessInfo:
@@ -478,14 +488,10 @@ func (p *panel) handleEditor(id, notification uint16) {
 }
 
 func (p *panel) selectWeekdays(everyDay bool) {
-	hadValidation := strings.TrimSpace(p.controlText(idValidation)) != ""
 	for index := range editorWeekdays {
 		p.setChecked(idWeekdayBase+uint16(index), everyDay || index < 5)
 	}
-	p.setText(idValidation, "")
-	if hadValidation {
-		p.relayoutEditor()
-	}
+	p.clearEditorError()
 }
 
 func (p *panel) handleChoiceChanged(id uint16) {
@@ -493,8 +499,16 @@ func (p *panel) handleChoiceChanged(id uint16) {
 	if id == idAction {
 		p.setTriggerOptions(p.draft.Action, p.draft.Trigger)
 	}
-	p.setText(idValidation, "")
+	p.clearEditorError()
 	p.relayoutEditor()
+}
+
+func (p *panel) clearEditorError() {
+	if !p.editorStatusError {
+		return
+	}
+	p.editorStatusError = false
+	p.setText(idValidation, p.t("automation_runtime_note"))
 }
 
 func (p *panel) relayoutEditor() {

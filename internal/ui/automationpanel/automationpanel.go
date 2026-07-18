@@ -126,9 +126,11 @@ type panel struct {
 	layoutWorkArea      *nativeform.Rect
 	layoutErr           error
 	layoutingEditor     bool
+	editorStatusError   bool
 	managerReady        bool
 	editorReady         bool
 	rebuildSuspended    bool
+	rebuildVisibility   map[uint16]bool
 	firstFramePending   bool
 	managerScroll       *nativeform.ListboxScrollbar
 	contentScroll       *nativeform.Scrollbar
@@ -201,6 +203,14 @@ const (
 	idDaysEveryday      = 238
 	idWeekdayBase       = 240
 	idFieldSurfaceBase  = 500
+	formTextHeight      = 18
+	formLabelGap        = 4
+	formRelatedGap      = 8
+	formContentGap      = 12
+	formSectionGap      = 16
+	formEdgePadding     = 16
+	checkboxRowHeight   = 28
+	processSummaryRowH  = 22
 	wmDestroy           = 0x0002
 	wmPaint             = 0x000F
 	wmClose             = 0x0010
@@ -265,6 +275,7 @@ const (
 	ttsNoPrefix         = 0x02
 	bnSetFocus          = 6
 	enSetFocus          = 0x0100
+	enChange            = 0x0300
 	lbnSetFocus         = 4
 	transparent         = 1
 	opaque              = 2

@@ -13,6 +13,12 @@ const (
 	managerPad               = 18
 	managerButtonGap         = 8
 	managerCompactButtonBase = 116*3 + 192
+	managerTitleY            = formEdgePadding
+	managerListY             = managerTitleY + formTextHeight + formContentGap
+	managerListHeight        = 240
+	managerStatusY           = managerListY + managerListHeight + formRelatedGap
+	managerButtonsY          = managerStatusY + formTextHeight + formSectionGap
+	managerEmptyY            = managerListY + (managerListHeight-(2*formTextHeight+formContentGap))/2
 )
 
 func (p *panel) showManager() {
@@ -27,23 +33,23 @@ func (p *panel) showManager() {
 	p.setCaption(p.t("automation_title"))
 	p.resize(managerWidth, managerHeight)
 	if !p.managerReady {
-		p.child("STATIC", p.t("automation_rules_title"), wsChild|wsVisible|ssLeft, 18, 16, 564, 24, idTitle, p.sectionFont)
-		surface := p.child("STATIC", "", formSurfaceStyle|wsVisible, 18, 48, 564, 240, idListSurface, p.font)
+		p.child("STATIC", p.t("automation_rules_title"), wsChild|wsVisible|ssLeft, 18, managerTitleY, 564, formTextHeight, idTitle, p.sectionFont)
+		surface := p.child("STATIC", "", formSurfaceStyle|wsVisible, 18, managerListY, 564, managerListHeight, idListSurface, p.font)
 		pSetWindowPos.Call(uintptr(surface), 1, 0, 0, 0, 0, swpNoMove|swpNoSize|swpNoActivate)
-		list := p.child("LISTBOX", "", wsChild|wsVisible|wsTabStop|wsVScroll|wsClipSiblings|lbsNotify|lbsNoIntegralHeight, 20, 50, 560, 236, idList, p.font)
+		list := p.child("LISTBOX", "", wsChild|wsVisible|wsTabStop|wsVScroll|wsClipSiblings|lbsNotify|lbsNoIntegralHeight, 20, managerListY+2, 560, managerListHeight-4, idList, p.font)
 		if scrollbar, err := nativeform.NewListboxScrollbar(nativeform.ListboxScrollbarOptions{
 			Parent: p.hwnd, Listbox: list, Palette: p.palette, Background: p.palette.Surface, Scale: p.scale(),
 		}); err == nil {
 			p.managerScroll = scrollbar
 			p.syncManagerScrollbarBounds()
 		}
-		p.child("STATIC", p.t("automation_empty_title"), wsChild|ssLeft, 42, 136, 516, 24, idEmptyTitle, p.sectionFont)
-		p.child("STATIC", p.t("automation_empty_body"), wsChild|ssLeft, 42, 168, 516, 44, idEmptyBody, p.font)
-		p.child("STATIC", p.managerStatusText(), wsChild|wsVisible|ssLeft, 18, 296, 564, 24, idNext, p.font)
-		p.child("BUTTON", p.t("automation_new"), wsChild|wsVisible|wsTabStop|bsOwnerDraw, 18, 328, 116, 36, idNew, p.font)
-		p.child("BUTTON", p.t("automation_edit"), wsChild|wsVisible|wsTabStop|bsOwnerDraw, 142, 328, 116, 36, idEdit, p.font)
-		p.child("BUTTON", p.t("automation_delete"), wsChild|wsVisible|wsTabStop|bsOwnerDraw, 266, 328, 116, 36, idDelete, p.font)
-		p.child("BUTTON", p.t("automation_toggle"), wsChild|wsVisible|wsTabStop|bsOwnerDraw, 390, 328, 192, 36, idToggle, p.font)
+		p.child("STATIC", p.t("automation_empty_title"), wsChild|ssLeft, 42, managerEmptyY, 516, formTextHeight, idEmptyTitle, p.sectionFont)
+		p.child("STATIC", p.t("automation_empty_body"), wsChild|ssLeft, 42, managerEmptyY+formTextHeight+formContentGap, 516, formTextHeight, idEmptyBody, p.font)
+		p.child("STATIC", p.managerStatusText(), wsChild|wsVisible|ssLeft, 18, managerStatusY, 564, formTextHeight, idNext, p.font)
+		p.child("BUTTON", p.t("automation_new"), wsChild|wsVisible|wsTabStop|bsOwnerDraw, 18, managerButtonsY, 116, nativeform.ButtonHeight, idNew, p.font)
+		p.child("BUTTON", p.t("automation_edit"), wsChild|wsVisible|wsTabStop|bsOwnerDraw, 142, managerButtonsY, 116, nativeform.ButtonHeight, idEdit, p.font)
+		p.child("BUTTON", p.t("automation_delete"), wsChild|wsVisible|wsTabStop|bsOwnerDraw, 266, managerButtonsY, 116, nativeform.ButtonHeight, idDelete, p.font)
+		p.child("BUTTON", p.t("automation_toggle"), wsChild|wsVisible|wsTabStop|bsOwnerDraw, 390, managerButtonsY, 192, nativeform.ButtonHeight, idToggle, p.font)
 		pSetWindowPos.Call(uintptr(p.controls[idList]), 0, 0, 0, 0, 0, swpNoMove|swpNoSize|swpNoActivate)
 		for id, key := range map[uint16]string{idList: "tip_automation_list", idNew: "tip_automation_new", idEdit: "tip_automation_edit", idToggle: "tip_automation_toggle", idDelete: "tip_automation_delete"} {
 			p.addTooltip(id, key)
@@ -65,19 +71,19 @@ func (p *panel) layoutManager() {
 		return
 	}
 	contentWidth, standardWidth, toggleWidth := managerLayoutWidths(p.viewportWidth, p.clientHeight > p.viewportHeight)
-	p.setManagerBounds(idTitle, managerPad, 16, contentWidth, 24)
-	p.setManagerBounds(idListSurface, managerPad, 48, contentWidth, 240)
-	p.setManagerBounds(idList, managerPad+2, 50, max(1, contentWidth-4), 236)
-	p.setManagerBounds(idEmptyTitle, managerPad+24, 136, max(1, contentWidth-48), 24)
-	p.setManagerBounds(idEmptyBody, managerPad+24, 168, max(1, contentWidth-48), 44)
-	p.setManagerBounds(idNext, managerPad, 296, contentWidth, 24)
+	p.setManagerBounds(idTitle, managerPad, managerTitleY, contentWidth, formTextHeight)
+	p.setManagerBounds(idListSurface, managerPad, managerListY, contentWidth, managerListHeight)
+	p.setManagerBounds(idList, managerPad+2, managerListY+2, max(1, contentWidth-4), managerListHeight-4)
+	p.setManagerBounds(idEmptyTitle, managerPad+24, managerEmptyY, max(1, contentWidth-48), formTextHeight)
+	p.setManagerBounds(idEmptyBody, managerPad+24, managerEmptyY+formTextHeight+formContentGap, max(1, contentWidth-48), formTextHeight)
+	p.setManagerBounds(idNext, managerPad, managerStatusY, contentWidth, formTextHeight)
 
 	x := managerPad
 	for _, button := range []struct {
 		id    uint16
 		width int
 	}{{idNew, standardWidth}, {idEdit, standardWidth}, {idDelete, standardWidth}, {idToggle, toggleWidth}} {
-		p.setManagerBounds(button.id, x, 328, button.width, 36)
+		p.setManagerBounds(button.id, x, managerButtonsY, button.width, nativeform.ButtonHeight)
 		x += button.width + managerButtonGap
 	}
 	p.syncManagerScrollbarBounds()

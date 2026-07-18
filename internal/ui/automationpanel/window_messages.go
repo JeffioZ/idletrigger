@@ -71,10 +71,13 @@ func wndProc(hwnd windows.Handle, message uint32, wParam, lParam uintptr) uintpt
 			textColor = p.palette.MutedText
 		}
 		if controlID == idValidation {
-			if p.themeDark {
-				textColor = p.palette.DangerBorder
-			} else {
-				textColor = p.palette.DangerBackground
+			textColor = p.palette.MutedText
+			if p.editorStatusError {
+				if p.themeDark {
+					textColor = p.palette.DangerBorder
+				} else {
+					textColor = p.palette.DangerBackground
+				}
 			}
 		}
 		brush := p.windowBrush
@@ -198,7 +201,7 @@ func isSecondaryLabel(id uint16) bool {
 
 func isMutedLabel(id uint16) bool {
 	switch id {
-	case idNameHint, idRuntimeNote, idNoOptions:
+	case idNameHint, idNoOptions:
 		return true
 	default:
 		return false
@@ -220,7 +223,7 @@ func editorControlIDs() []uint16 {
 		idTriggerTitle, idDateLabel, idDate, idTimeLabel, idTime, idEndTimeLabel, idEndTime, idDaysLabel, idDaysWorkdays, idDaysEveryday,
 		idProcessLogicLabel, idProcessLogic, idChooseProcesses, idProcessSummary, idProcessInfo, idOptionsTitle, idKeepScreen,
 		idIdleMinutesLabel, idIdleMinutes, idWarningLabel, idWarningSeconds, idBlockedLabel, idBlockedPolicy,
-		idMaxWaitLabel, idMaxWait, idNoOptions, idRuntimeNote, idValidation, idCancel, idSave,
+		idMaxWaitLabel, idMaxWait, idNoOptions, idValidation, idCancel, idSave,
 	}
 	for index := range editorWeekdays {
 		ids = append(ids, idWeekdayBase+uint16(index))
@@ -294,8 +297,8 @@ func (p *panel) validateDraft() (uint16, string) {
 }
 
 func (p *panel) setEditorError(id uint16, message string) {
+	p.editorStatusError = true
 	p.setText(idValidation, message)
-	p.relayoutEditor()
 	if control := p.controls[id]; control != 0 {
 		pSetFocus.Call(uintptr(control))
 	}

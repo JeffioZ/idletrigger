@@ -8,6 +8,7 @@ import (
 
 func (p *panel) beginRebuild() {
 	p.rebuildSuspended = false
+	p.rebuildVisibility = nil
 	if p.hwnd == 0 {
 		return
 	}
@@ -15,6 +16,7 @@ func (p *panel) beginRebuild() {
 	// final frame in EndRebuild without changing the top-level WS_VISIBLE state;
 	// WM_SETREDRAW caused a black intermediate frame on some Windows builds.
 	p.rebuildSuspended = true
+	p.rebuildVisibility = make(map[uint16]bool)
 }
 
 func (p *panel) endRebuild() {
@@ -24,7 +26,12 @@ func (p *panel) endRebuild() {
 	if !p.rebuildSuspended {
 		return
 	}
+	visibility := p.rebuildVisibility
 	p.rebuildSuspended = false
+	p.rebuildVisibility = nil
+	for id, visible := range visibility {
+		p.applyVisibility(id, visible)
+	}
 	if p.firstFramePending {
 		return
 	}

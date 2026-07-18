@@ -186,6 +186,266 @@ func TestAutomationTimeLabelDistinguishesExecutionAndWindowStart(t *testing.T) {
 	}
 }
 
+func TestTimeEditNormalizesToTimeGrammar(t *testing.T) {
+	tests := []struct {
+		name      string
+		value     string
+		final     bool
+		wantValue string
+		wantCaret int
+	}{
+		{name: "already formatted", value: "12:34", wantValue: "12:34", wantCaret: 5},
+		{name: "separator inserted", value: "1234", wantValue: "12:34", wantCaret: 5},
+		{name: "unexpected characters removed", value: "12a:3b4", wantValue: "12:34", wantCaret: 5},
+		{name: "full width normalized", value: "１２：３４", wantValue: "12:34", wantCaret: 5},
+		{name: "single hour padded on blur", value: "9:30", final: true, wantValue: "09:30", wantCaret: 5},
+		{name: "leading separator ignored", value: ":12", wantValue: "12", wantCaret: 2},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			gotValue, gotCaret := normalizeTimeEditText(test.value, len([]rune(test.value)), test.final)
+			if gotValue != test.wantValue || gotCaret != test.wantCaret {
+				t.Fatalf("normalizeTimeEditText(%q) = %q, %d; want %q, %d", test.value, gotValue, gotCaret, test.wantValue, test.wantCaret)
+			}
+		})
+	}
+}
+
+func TestTimeEditsRejectUnexpectedCharactersAndNormalizeOnBlur(t *testing.T) {
+	requireNativeIntegration(t)
+	err := Capture(State{}, func(key string) string { return key }, 1, false, true, func(hwnd windows.Handle) error {
+		p := activePanelForTest(t, hwnd)
+		p.setText(idTime, "")
+		for _, value := range []rune{'１', '2', 'x', '3', '4', '5'} {
+			pSendMessage.Call(uintptr(p.controls[idTime]), timeWMChar, uintptr(value), 0)
+		}
+		if got := p.controlText(idTime); got != "12:34" {
+			t.Fatalf("time edit text = %q, want %q", got, "12:34")
+		}
+
+		p.setText(idTime, "9:30")
+		pSendMessage.Call(uintptr(p.controls[idTime]), timeWMKillFocus, 0, 0)
+		if got := p.controlText(idTime); got != "09:30" {
+			t.Fatalf("time edit text after blur = %q, want %q", got, "09:30")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEditorValidationKeepsLayoutAndVisibilityStable(t *testing.T) {
+	requireNativeIntegration(t)
+	err := Capture(State{}, func(key string) string { return key }, 1, false, true, func(hwnd windows.Handle) error {
+		p := activePanelForTest(t, hwnd)
+		beforeHeight := p.clientHeight
+		beforeStatus := p.bounds[idValidation]
+		beforeSave := p.bounds[idSave]
+
+		p.beginRebuild()
+		p.show(idSave, false)
+		if visible, _, _ := pIsWindowVisible.Call(uintptr(p.controls[idSave])); visible == 0 {
+			t.Fatal("rebuild exposed an intermediate hidden Save button")
+		}
+		p.show(idSave, true)
+		p.endRebuild()
+
+		p.saveEditor()
+		if !p.editorStatusError {
+			t.Fatal("invalid editor save did not enter the error status")
+		}
+		if p.clientHeight != beforeHeight || p.bounds[idValidation] != beforeStatus || p.bounds[idSave] != beforeSave {
+			t.Fatalf("validation moved editor layout: height %d->%d status %+v->%+v save %+v->%+v", beforeHeight, p.clientHeight, beforeStatus, p.bounds[idValidation], beforeSave, p.bounds[idSave])
+		}
+		if visible, _, _ := pIsWindowVisible.Call(uintptr(p.controls[idSave])); visible == 0 {
+			t.Fatal("Save button was not visible after validation")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAutomationSpacingUsesSharedRhythm(t *testing.T) {
+	requireNativeIntegration(t)
+	err := Capture(State{}, func(key string) string { return key }, 1, false, false, func(hwnd windows.Handle) error {
+		p := activePanelForTest(t, hwnd)
+		title := p.bounds[idTitle]
+		list := p.bounds[idListSurface]
+		emptyTitle := p.bounds[idEmptyTitle]
+		emptyBody := p.bounds[idEmptyBody]
+		status := p.bounds[idNext]
+		button := p.bounds[idNew]
+		if got := list.Y - (title.Y + title.Height); got != formContentGap {
+			t.Fatalf("manager title-to-list gap = %d, want %d", got, formContentGap)
+		}
+		if got := status.Y - (list.Y + list.Height); got != formRelatedGap {
+			t.Fatalf("manager list-to-status gap = %d, want %d", got, formRelatedGap)
+		}
+		if got := button.Y - (status.Y + status.Height); got != formSectionGap {
+			t.Fatalf("manager status-to-buttons gap = %d, want %d", got, formSectionGap)
+		}
+		if got := managerHeight - (button.Y + button.Height); got != formEdgePadding {
+			t.Fatalf("manager bottom padding = %d, want %d", got, formEdgePadding)
+		}
+		if got := emptyBody.Y - (emptyTitle.Y + emptyTitle.Height); got != formContentGap {
+			t.Fatalf("manager empty-state text gap = %d, want %d", got, formContentGap)
+		}
+		topSpace := emptyTitle.Y - list.Y
+		bottomSpace := list.Y + list.Height - (emptyBody.Y + emptyBody.Height)
+		if topSpace != bottomSpace {
+			t.Fatalf("manager empty state is not vertically centered: top=%d bottom=%d", topSpace, bottomSpace)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = Capture(State{}, func(key string) string { return key }, 1, false, true, func(hwnd windows.Handle) error {
+		p := activePanelForTest(t, hwnd)
+		basics := p.bounds[idBasicsTitle]
+		nameLabel := p.bounds[idNameLabel]
+		name := p.bounds[idName]
+		nameHint := p.bounds[idNameHint]
+		actionLabel := p.bounds[idActionLabel]
+		actionField := p.bounds[idAction]
+		triggerTitle := p.bounds[idTriggerTitle]
+		processLabel := p.bounds[idProcessLogicLabel]
+		processField := p.bounds[idProcessLogic]
+		processSummary := p.bounds[idProcessSummary]
+		optionsTitle := p.bounds[idOptionsTitle]
+		option := p.bounds[idKeepScreen]
+		status := p.bounds[idValidation]
+		button := p.bounds[idCancel]
+		for name, value := range map[string]int{
+			"basics-to-name-label":     nameLabel.Y - (basics.Y + basics.Height),
+			"options-title-to-control": option.Y - (optionsTitle.Y + optionsTitle.Height),
+		} {
+			if value != formContentGap {
+				t.Fatalf("editor %s gap = %d, want %d", name, value, formContentGap)
+			}
+		}
+		if got := status.Y - (option.Y + option.Height); got != formRelatedGap {
+			t.Fatalf("editor option-to-status gap = %d, want %d", got, formRelatedGap)
+		}
+		if got := button.Y - (status.Y + status.Height); got != formSectionGap {
+			t.Fatalf("editor status-to-buttons gap = %d, want %d", got, formSectionGap)
+		}
+		for name, value := range map[string]int{
+			"name-label-to-field":    name.Y - (nameLabel.Y + nameLabel.Height),
+			"field-to-name-hint":     nameHint.Y - (name.Y + name.Height),
+			"action-label-to-field":  actionField.Y - (actionLabel.Y + actionLabel.Height),
+			"process-label-to-field": processField.Y - (processLabel.Y + processLabel.Height),
+		} {
+			if value != formLabelGap {
+				t.Fatalf("editor %s gap = %d, want %d", name, value, formLabelGap)
+			}
+		}
+		for name, value := range map[string]int{
+			"hint-to-action-row":         actionLabel.Y - (nameHint.Y + nameHint.Height),
+			"action-field-to-section":    triggerTitle.Y - (actionField.Y + actionField.Height),
+			"process-summary-to-section": optionsTitle.Y - (processSummary.Y + processSummary.Height),
+		} {
+			if value != formSectionGap {
+				t.Fatalf("editor %s gap = %d, want %d", name, value, formSectionGap)
+			}
+		}
+		if got := processSummary.Y - (processField.Y + processField.Height); got != formRelatedGap {
+			t.Fatalf("editor process-field-to-summary gap = %d, want %d", got, formRelatedGap)
+		}
+		if got := p.clientHeight - (button.Y + button.Height); got != formEdgePadding {
+			t.Fatalf("editor bottom padding = %d, want %d", got, formEdgePadding)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEditorVariantSpacingUsesSameTokens(t *testing.T) {
+	requireNativeIntegration(t)
+	captureRule := func(name string, rule automation.Rule, verify func(*panel)) {
+		t.Helper()
+		t.Run(name, func(t *testing.T) {
+			err := Capture(State{Rules: []automation.Rule{rule}}, func(key string) string { return key }, 1, false, true, func(hwnd windows.Handle) error {
+				verify(activePanelForTest(t, hwnd))
+				return nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+
+	once := defaultRule()
+	once.Action = automation.ActionShutdown
+	once.Trigger = automation.TriggerOnce
+	once.Processes = nil
+	captureRule("once-event-action", once, func(p *panel) {
+		date := p.bounds[idDate]
+		processLabel := p.bounds[idProcessLogicLabel]
+		optionsTitle := p.bounds[idOptionsTitle]
+		warningLabel := p.bounds[idWarningLabel]
+		warning := p.bounds[idWarningSeconds]
+		status := p.bounds[idValidation]
+		if got := processLabel.Y - (date.Y + date.Height); got != formRelatedGap {
+			t.Fatalf("date-to-process gap = %d, want %d", got, formRelatedGap)
+		}
+		if got := warningLabel.Y - (optionsTitle.Y + optionsTitle.Height); got != formContentGap {
+			t.Fatalf("options-title-to-warning gap = %d, want %d", got, formContentGap)
+		}
+		if got := warning.Y - (warningLabel.Y + warningLabel.Height); got != formLabelGap {
+			t.Fatalf("warning-label-to-field gap = %d, want %d", got, formLabelGap)
+		}
+		if got := status.Y - (warning.Y + warning.Height); got != formRelatedGap {
+			t.Fatalf("warning-to-status gap = %d, want %d", got, formRelatedGap)
+		}
+	})
+
+	window := defaultRule()
+	window.Trigger = automation.TriggerTimeWindow
+	captureRule("time-window-weekdays", window, func(p *panel) {
+		timeField := p.bounds[idTime]
+		quick := p.bounds[idDaysWorkdays]
+		weekday := p.bounds[idWeekdayBase]
+		processLabel := p.bounds[idProcessLogicLabel]
+		for name, value := range map[string]int{
+			"time-to-quick-row":           quick.Y - (timeField.Y + timeField.Height),
+			"quick-row-to-weekdays":       weekday.Y - (quick.Y + quick.Height),
+			"weekdays-to-process-section": processLabel.Y - (weekday.Y + weekday.Height),
+		} {
+			if value != formRelatedGap {
+				t.Fatalf("%s gap = %d, want %d", name, value, formRelatedGap)
+			}
+		}
+	})
+
+	blocked := defaultRule()
+	blocked.Action = automation.ActionShutdown
+	blocked.Trigger = automation.TriggerOnce
+	blocked.Processes = []automation.ProcessTarget{{Match: automation.MatchName, Executable: "player.exe"}}
+	blocked.BlockedPolicy = automation.BlockedWait
+	captureRule("blocked-event-action", blocked, func(p *panel) {
+		warning := p.bounds[idWarningSeconds]
+		blockedLabel := p.bounds[idBlockedLabel]
+		blockedField := p.bounds[idBlockedPolicy]
+		status := p.bounds[idValidation]
+		if got := blockedLabel.Y - (warning.Y + warning.Height); got != formRelatedGap {
+			t.Fatalf("warning-to-blocked-policy gap = %d, want %d", got, formRelatedGap)
+		}
+		if got := blockedField.Y - (blockedLabel.Y + blockedLabel.Height); got != formLabelGap {
+			t.Fatalf("blocked-label-to-field gap = %d, want %d", got, formLabelGap)
+		}
+		if got := status.Y - (blockedField.Y + blockedField.Height); got != formRelatedGap {
+			t.Fatalf("blocked-policy-to-status gap = %d, want %d", got, formRelatedGap)
+		}
+	})
+}
+
 func TestRuleSummaryIncludesEffectiveDays(t *testing.T) {
 	english := &panel{text: func(key string) string { return i18n.T("en", key) }}
 	weekly := automation.Rule{Action: automation.ActionShutdown, Trigger: automation.TriggerWeekly, Time: "23:00", Days: []string{"wed", "mon"}}

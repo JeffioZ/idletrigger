@@ -60,9 +60,23 @@ type warningControlLayout struct {
 }
 
 const (
+	warningWidth        = 390
+	warningPadding      = 16
+	warningBodyHeight   = 76
+	warningButtonGap    = 8
+	warningButtonWidth  = 100
+	warningButtonHeight = 36
+	warningBodyX        = warningPadding
+	warningBodyY        = warningPadding
+	warningBodyWidth    = warningWidth - 2*warningPadding
+	warningButtonsY     = warningBodyY + warningBodyHeight + warningPadding
+	warningExecuteX     = warningWidth - warningPadding - warningButtonWidth
+	warningCancelX      = warningExecuteX - warningButtonGap - warningButtonWidth
+	warningHeight       = warningButtonsY + warningButtonHeight + warningPadding
+)
+
+const (
 	windowClass       = "IdleTriggerActionWarning"
-	warningWidth      = 390
-	warningHeight     = 176
 	idBody            = 101
 	idCancel          = 102
 	idExecute         = 103
@@ -254,9 +268,9 @@ func buildControls(options Options) {
 	}
 	languageMu.RUnlock()
 	uiFont, _ = font.New(int32(14*scale+0.5), 400, chinese)
-	bodyControl = child("STATIC", options.Body(options.Seconds), wsChild|wsVisible|ssLeft|ssNotify, 18, 20, 354, 76, idBody)
-	cancelControl = child("BUTTON", options.CancelText, wsChild|wsVisible|wsTabStop|bsPushButton, 166, 116, 98, 36, idCancel)
-	executeControl = child("BUTTON", options.ExecuteText, wsChild|wsVisible|wsTabStop|bsPushButton, 274, 116, 98, 36, idExecute)
+	bodyControl = child("STATIC", options.Body(options.Seconds), wsChild|wsVisible|ssLeft|ssNotify, warningBodyX, warningBodyY, warningBodyWidth, warningBodyHeight, idBody)
+	cancelControl = child("BUTTON", options.CancelText, wsChild|wsVisible|wsTabStop|bsPushButton, warningCancelX, warningButtonsY, warningButtonWidth, warningButtonHeight, idCancel)
+	executeControl = child("BUTTON", options.ExecuteText, wsChild|wsVisible|wsTabStop|bsPushButton, warningExecuteX, warningButtonsY, warningButtonWidth, warningButtonHeight, idExecute)
 	createTooltips()
 }
 
@@ -357,7 +371,7 @@ func position(suggested *rect) {
 	if monitor != 0 {
 		pGetMonitorInfo.Call(monitor, uintptr(unsafe.Pointer(&info)))
 	}
-	margin := int32(18 * scale)
+	margin := int32(warningPadding * scale)
 	x, y := warningOrigin(info.Work, width, height, margin)
 	pSetWindowPos.Call(uintptr(active), ^uintptr(0), uintptr(x), uintptr(y), uintptr(width), uintptr(height), swpNoActivate|swpShowWindow)
 }
@@ -421,9 +435,9 @@ func rebuildForDPI(scale float64, suggested *rect) bool {
 	oldFont := uiFont
 	uiFont = newFont
 	controls := []warningControlLayout{
-		{bodyControl, 18, 20, 354, 76},
-		{cancelControl, 166, 116, 98, 36},
-		{executeControl, 274, 116, 98, 36},
+		{bodyControl, warningBodyX, warningBodyY, warningBodyWidth, warningBodyHeight},
+		{cancelControl, warningCancelX, warningButtonsY, warningButtonWidth, warningButtonHeight},
+		{executeControl, warningExecuteX, warningButtonsY, warningButtonWidth, warningButtonHeight},
 	}
 	for _, control := range controls {
 		if control.hwnd != 0 {
