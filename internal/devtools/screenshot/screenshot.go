@@ -65,6 +65,7 @@ type job struct {
 	surface  string
 	language string
 	theme    controlpanel.Theme
+	scale    float64
 	path     string
 }
 
@@ -96,6 +97,7 @@ var (
 	pGetClientRect      = user32.NewProc("GetClientRect")
 	pClientToScreen     = user32.NewProc("ClientToScreen")
 	pPrintWindow        = user32.NewProc("PrintWindow")
+	pSendMessage        = user32.NewProc("SendMessageW")
 	pCreateCompatibleDC = gdi32.NewProc("CreateCompatibleDC")
 	pDeleteDC           = gdi32.NewProc("DeleteDC")
 	pCreateDIBSection   = gdi32.NewProc("CreateDIBSection")
@@ -124,20 +126,27 @@ func Run(args []string) error {
 		}
 		capturedSizes := make(map[string]image.Point)
 		for _, job := range jobs {
-			if job.theme == controlpanel.ThemeDark {
-				darkmode.SetPreferredAppMode(true)
-			}
+			darkmode.SetPreferredAppMode(job.theme == controlpanel.ThemeDark)
 			captureWindow := func(hwnd windows.Handle) error {
-				img, err := printWindow(hwnd)
+				var client *image.NRGBA
+				var err error
+				if strings.HasPrefix(job.surface, "popup-") {
+					client, err = printWindowClient(hwnd)
+				} else {
+					var window *image.NRGBA
+					window, err = printWindow(hwnd)
+					if err == nil {
+						client, err = clientCrop(hwnd, window)
+					}
+				}
 				if err != nil {
 					return err
 				}
-				client, err := clientCrop(hwnd, img)
-				if err != nil {
-					return err
+				if strings.HasPrefix(job.surface, "popup-") && !imageHasVisualVariation(client) {
+					return fmt.Errorf("popup capture %s contains no rendered content", job.surface)
 				}
 				size := client.Bounds().Size()
-				key := job.surface + "/" + job.language
+				key := fmt.Sprintf("%s/%s/%.2f", job.surface, job.language, job.scale)
 				if previous, ok := capturedSizes[key]; ok && size != previous {
 					return fmt.Errorf("inconsistent %s client capture size %dx%d; expected %dx%d", job.language, size.X, size.Y, previous.X, previous.Y)
 				}
@@ -148,18 +157,31 @@ func Run(args []string) error {
 				return nil
 			}
 			text := func(key string) string { return i18n.T(job.language, key) }
+			captureScale := job.scale
+			if captureScale <= 0 {
+				captureScale = readmeCaptureScale
+			}
 			var err error
 			switch job.surface {
 			case "automation":
 				state := fixedAutomationSnapshot(job.language)
-				err = automationpanel.Capture(state, text, readmeCaptureScale, job.theme == controlpanel.ThemeDark, false, captureWindow)
+				err = automationpanel.Capture(state, text, captureScale, job.theme == controlpanel.ThemeDark, false, captureWindow)
 			case "automation-editor":
 				state := fixedAutomationEditorSnapshot(job.language)
-				err = automationpanel.Capture(state, text, readmeCaptureScale, job.theme == controlpanel.ThemeDark, true, captureWindow)
+				err = automationpanel.Capture(state, text, captureScale, job.theme == controlpanel.ThemeDark, true, captureWindow)
 			case "process-picker":
-				err = processpicker.Capture(fixedProcessPickerOptions(job.language, text), fixedProcessGroups(), readmeCaptureScale, job.theme == controlpanel.ThemeDark, captureWindow)
+				err = processpicker.Capture(fixedProcessPickerOptions(job.language, text), fixedProcessGroups(), captureScale, job.theme == controlpanel.ThemeDark, captureWindow)
 			default:
-				err = controlpanel.Capture(fixedSnapshot(job.language, job.theme), text, readmeCaptureScale, captureWindow)
+				err = controlpanel.Capture(fixedSnapshot(job.language, job.theme), text, captureScale, func(hwnd windows.Handle) error {
+					if strings.HasPrefix(job.surface, "popup-") {
+						popup, popupErr := controlpanel.OpenCapturePopup(hwnd, job.surface)
+						if popupErr != nil {
+							return popupErr
+						}
+						return captureWindow(popup)
+					}
+					return captureWindow(hwnd)
+				})
 			}
 			if err != nil {
 				return fmt.Errorf("capture %s: %w", filepath.Base(job.path), err)
@@ -308,7 +330,7 @@ func parse(args []string) (options, error) {
 	var opts options
 	for i := 1; i < len(args); i++ {
 		switch args[i] {
-		case "--readme-set", "--review-set":
+		case "--readme-set", "--review-set", "--popup-review-set":
 			if opts.captureSet != "" {
 				return options{}, fmt.Errorf("screenshot capture set specified more than once")
 			}
@@ -382,7 +404,7 @@ func parse(args []string) (options, error) {
 }
 
 func usage() string {
-	return "usage:\n  IdleTrigger.exe screenshot --readme-set --output DIRECTORY\n  IdleTrigger.exe screenshot --review-set --output DIRECTORY\n  IdleTrigger.exe screenshot [--surface control|automation|automation-editor|process-picker] --language en|zh-CN --theme light|dark --output FILE.png"
+	return "usage:\n  IdleTrigger.exe screenshot --readme-set --output DIRECTORY\n  IdleTrigger.exe screenshot --review-set --output DIRECTORY\n  IdleTrigger.exe screenshot --popup-review-set --output DIRECTORY\n  IdleTrigger.exe screenshot [--surface control|automation|automation-editor|process-picker] --language en|zh-CN --theme light|dark --output FILE.png"
 }
 
 func (opts options) jobs() ([]job, error) {
@@ -396,6 +418,26 @@ func (opts options) jobs() ([]job, error) {
 			{surface: "control", language: "zh-CN", theme: controlpanel.ThemeLight, path: filepath.Join(opts.output, "control-panel-zh-CN-light.png")},
 			{surface: "control", language: "zh-CN", theme: controlpanel.ThemeDark, path: filepath.Join(opts.output, "control-panel-zh-CN-dark.png")},
 		}, nil
+	}
+	if opts.captureSet == "popup-review" {
+		var jobs []job
+		for _, scale := range []struct {
+			name  string
+			value float64
+		}{{"100", 1}, {"150", 1.5}, {"200", 2}} {
+			for _, theme := range []struct {
+				value controlpanel.Theme
+				name  string
+			}{{controlpanel.ThemeLight, "light"}, {controlpanel.ThemeDark, "dark"}} {
+				for _, language := range []string{"en", "zh-CN"} {
+					for _, surface := range []string{"popup-system", "popup-language", "popup-timeout", "popup-action"} {
+						name := fmt.Sprintf("%s-%s-%s-%s.png", surface, language, theme.name, scale.name)
+						jobs = append(jobs, job{surface: surface, language: language, theme: theme.value, scale: scale.value, path: filepath.Join(opts.output, name)})
+					}
+				}
+			}
+		}
+		return jobs, nil
 	}
 	var jobs []job
 	for _, theme := range []struct {
@@ -554,16 +596,65 @@ func printWindow(hwnd windows.Handle) (*image.NRGBA, error) {
 	if ok, _, err := pPrintWindow.Call(uintptr(hwnd), dc, pwRenderFullContent); ok == 0 {
 		return nil, fmt.Errorf("PrintWindow: %w", err)
 	}
-	stride := int(width) * 4
-	src := unsafe.Slice((*byte)(pixels), stride*int(height))
-	img := image.NewNRGBA(image.Rect(0, 0, int(width), int(height)))
-	for y := 0; y < int(height); y++ {
-		for x := 0; x < int(width); x++ {
+	return dibSectionImage(pixels, int(width), int(height)), nil
+}
+
+func printWindowClient(hwnd windows.Handle) (*image.NRGBA, error) {
+	var bounds rect
+	if ok, _, err := pGetClientRect.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&bounds))); ok == 0 {
+		return nil, fmt.Errorf("GetClientRect: %w", err)
+	}
+	width, height := bounds.Right-bounds.Left, bounds.Bottom-bounds.Top
+	if width <= 0 || height <= 0 {
+		return nil, fmt.Errorf("invalid client capture size %dx%d", width, height)
+	}
+	dc, _, err := pCreateCompatibleDC.Call(0)
+	if dc == 0 {
+		return nil, fmt.Errorf("CreateCompatibleDC: %w", err)
+	}
+	defer pDeleteDC.Call(dc)
+	info := bitmapInfo{Header: bitmapInfoHeader{Size: uint32(unsafe.Sizeof(bitmapInfoHeader{})), Width: width, Height: -height, Planes: 1, Bits: 32}}
+	var pixels unsafe.Pointer
+	bitmap, _, err := pCreateDIBSection.Call(dc, uintptr(unsafe.Pointer(&info)), 0, uintptr(unsafe.Pointer(&pixels)), 0, 0)
+	if bitmap == 0 || pixels == nil {
+		return nil, fmt.Errorf("CreateDIBSection: %w", err)
+	}
+	old, _, _ := pSelectObject.Call(dc, bitmap)
+	defer func() { pSelectObject.Call(dc, old); pDeleteObject.Call(bitmap) }()
+	const (
+		wmPrintClient = 0x0318
+		prfClient     = 0x00000004
+	)
+	pSendMessage.Call(uintptr(hwnd), wmPrintClient, dc, prfClient)
+	return dibSectionImage(pixels, int(width), int(height)), nil
+}
+
+func dibSectionImage(pixels unsafe.Pointer, width, height int) *image.NRGBA {
+	stride := width * 4
+	src := unsafe.Slice((*byte)(pixels), stride*height)
+	img := image.NewNRGBA(image.Rect(0, 0, width, height))
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
 			offset := y*stride + x*4
 			img.Pix[offset], img.Pix[offset+1], img.Pix[offset+2], img.Pix[offset+3] = src[offset+2], src[offset+1], src[offset], 0xff
 		}
 	}
-	return img, nil
+	return img
+}
+
+func imageHasVisualVariation(img *image.NRGBA) bool {
+	if img == nil || img.Bounds().Empty() {
+		return false
+	}
+	first := img.NRGBAAt(img.Bounds().Min.X, img.Bounds().Min.Y)
+	for y := img.Bounds().Min.Y; y < img.Bounds().Max.Y; y++ {
+		for x := img.Bounds().Min.X; x < img.Bounds().Max.X; x++ {
+			if img.NRGBAAt(x, y) != first {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func clientCrop(hwnd windows.Handle, captured image.Image) (*image.NRGBA, error) {

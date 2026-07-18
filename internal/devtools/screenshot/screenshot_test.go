@@ -25,6 +25,7 @@ func TestParse(t *testing.T) {
 		{"automation editor", []string{"screenshot", "--surface", "automation-editor", "--language", "en", "--theme", "dark", "--output", "out.png"}, false},
 		{"readme set", []string{"screenshot", "--readme-set", "--output", "images"}, false},
 		{"review set", []string{"screenshot", "--review-set", "--output", "images"}, false},
+		{"popup review set", []string{"screenshot", "--popup-review-set", "--output", "images"}, false},
 		{"ambiguous all", []string{"screenshot", "--all", "--output", "images"}, true},
 		{"missing language", []string{"screenshot", "--theme", "dark", "--output", "out.png"}, true},
 		{"missing theme", []string{"screenshot", "--language", "en", "--output", "out.png"}, true},
@@ -113,6 +114,43 @@ func TestReviewSetCoversEverySurfaceLanguageAndTheme(t *testing.T) {
 	}
 	if len(want) != 0 {
 		t.Fatalf("missing review jobs: %v", want)
+	}
+}
+
+func TestPopupReviewSetCoversEveryScaleLanguageThemeAndPopup(t *testing.T) {
+	opts, err := parse([]string{"screenshot", "--popup-review-set", "--output", "dist/ui-popup-review"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobs, err := opts.jobs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs) != 48 {
+		t.Fatalf("popup review job count = %d, want 48", len(jobs))
+	}
+	wantScales := map[float64]bool{1: true, 1.5: true, 2: true}
+	seen := make(map[string]bool)
+	for _, job := range jobs {
+		if !wantScales[job.scale] {
+			t.Fatalf("unexpected popup review scale %.2f", job.scale)
+		}
+		name := filepath.Base(job.path)
+		if seen[name] {
+			t.Fatalf("duplicate popup review job %q", name)
+		}
+		seen[name] = true
+	}
+}
+
+func TestPopupCaptureRejectsAnUnpaintedClient(t *testing.T) {
+	blank := image.NewNRGBA(image.Rect(0, 0, 8, 8))
+	if imageHasVisualVariation(blank) {
+		t.Fatal("blank popup capture was accepted")
+	}
+	blank.SetNRGBA(4, 4, color.NRGBA{R: 1, A: 255})
+	if !imageHasVisualVariation(blank) {
+		t.Fatal("painted popup capture was rejected")
 	}
 }
 
