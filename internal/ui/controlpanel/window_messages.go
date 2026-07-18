@@ -379,6 +379,10 @@ func wndProc(hwnd windows.Handle, msg uint32, wp, lp uintptr) uintptr {
 			}
 		case wmSettingChange, wmSysColorChange, wmThemeChanged:
 			p.refreshTheme(true)
+			// Theme application already updates every child and commits a complete
+			// frame. Letting DefWindowProc process the same broadcast afterward can
+			// reopen native hot-state painting outside that atomic transaction.
+			return 0
 		case wmGetDpiScaledSize:
 			if p.applyDPIWindowSize(wp, lp) {
 				return 1

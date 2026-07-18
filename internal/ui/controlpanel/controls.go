@@ -297,18 +297,13 @@ func (p *panel) visualState(id uint16) buttonVisualState {
 }
 
 // controlState is the single source for owner-drawn button states. The
-// semantic state comes from the panel model; transient state comes from the
-// current Win32 draw notification and never escapes into tray business state.
+// semantic state comes from the panel model. Hover uses the panel's explicit
+// mouse tracker as its only source: native ODS_HOTLIGHT can lag one control
+// behind during fast pointer movement and make two owner-drawn controls flash.
 func (p *panel) controlState(id uint16, itemState uint32) buttonVisualState {
 	state := p.visualState(id)
 	state.Disabled = state.Disabled || itemState&odsDisabled != 0
-	state.Hovered = p.hoverID == id || itemState&odsHotlight != 0
-	// Native BUTTON hotlight can outlive WM_MOUSELEAVE on owner-drawn menu and
-	// choice triggers. Those controls use the panel's tracked hover state
-	// exclusively; their open appearance is handled separately by triggerOpen.
-	if isMenuTrigger(id) || id == idIdleTimeout || id == idIdleAction || id == idProjectHome {
-		state.Hovered = p.hoverID == id
-	}
+	state.Hovered = p.hoverID == id
 	state.Pressed = itemState&odsSelected != 0
 	state.Focused = p.shouldDrawFocusOutline(itemState)
 	return state
@@ -349,6 +344,9 @@ func (p *panel) choose(group []uint16, selected uint16) {
 }
 func (p *panel) invalidate(id uint16) {
 	if hwnd := p.controls[id]; hwnd != 0 {
-		pInvalidateRect.Call(uintptr(hwnd), 0, 1)
+		// Every panel control is owner-drawn and covers its complete client area.
+		// Do not expose an erased intermediate frame when rapid hover transitions
+		// invalidate adjacent controls before WM_DRAWITEM coalesces their paints.
+		pInvalidateRect.Call(uintptr(hwnd), 0, 0)
 	}
 }

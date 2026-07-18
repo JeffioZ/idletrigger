@@ -11,7 +11,6 @@ import (
 var (
 	themeSwitchUser32              = windows.NewLazySystemDLL("user32.dll")
 	pUpdatePerUserSystemParameters = themeSwitchUser32.NewProc("UpdatePerUserSystemParameters")
-	pSendNotifyMessage             = themeSwitchUser32.NewProc("SendNotifyMessageW")
 	pSendMessageTimeout            = themeSwitchUser32.NewProc("SendMessageTimeoutW")
 )
 
@@ -83,30 +82,47 @@ func Refresh() error {
 	return nil
 }
 
-func notifyThemeChanged() {
+type themeChangeNotification struct {
+	message uint32
+	token   string
+}
+
+func themeChangeNotifications() []themeChangeNotification {
 	const (
-		hwndBroadcast    = 0xFFFF
 		wmThemeChanged   = 0x031A
 		wmSysColorChange = 0x0015
 		wmSettingChange  = 0x001A
-		smtoAbortIfHung  = 0x0002
+	)
+	return []themeChangeNotification{
+		{message: wmSettingChange, token: "ImmersiveColorSet"},
+		{message: wmSettingChange, token: "WindowsThemeElement"},
+		{message: wmSettingChange, token: "Policy"},
+		{message: wmSysColorChange},
+		{message: wmThemeChanged},
+	}
+}
+
+func notifyThemeChanged() {
+	const (
+		hwndBroadcast   = 0xFFFF
+		smtoAbortIfHung = 0x0002
 	)
 
 	pUpdatePerUserSystemParameters.Call(0, 1)
 
 	// Notify every top-level window, including Explorer's taskbars on each
-	// display. Windows components do not all listen for the same token, so send
-	// the common theme and color notifications without blocking on hung apps.
-	for _, token := range []string{"ImmersiveColorSet", "WindowsThemeElement", "Policy"} {
-		ptr, _ := windows.UTF16PtrFromString(token)
-		lp := uintptr(unsafe.Pointer(ptr))
-		pSendNotifyMessage.Call(hwndBroadcast, wmSettingChange, 0, lp)
-		pSendMessageTimeout.Call(hwndBroadcast, wmSettingChange, 0, lp, smtoAbortIfHung, 250, 0)
+	// display. Windows components do not all listen for the same token, so keep
+	// the complete set but deliver each event exactly once. The previous
+	// asynchronous-plus-synchronous pair left duplicate messages queued after
+	// the app had already committed its new frame, producing late hover redraws.
+	for _, notification := range themeChangeNotifications() {
+		var lParam uintptr
+		if notification.token != "" {
+			ptr, _ := windows.UTF16PtrFromString(notification.token)
+			lParam = uintptr(unsafe.Pointer(ptr))
+		}
+		pSendMessageTimeout.Call(hwndBroadcast, uintptr(notification.message), 0, lParam, smtoAbortIfHung, 250, 0)
 	}
-	pSendNotifyMessage.Call(hwndBroadcast, wmSysColorChange, 0, 0)
-	pSendMessageTimeout.Call(hwndBroadcast, wmSysColorChange, 0, 0, smtoAbortIfHung, 250, 0)
-	pSendNotifyMessage.Call(hwndBroadcast, wmThemeChanged, 0, 0)
-	pSendMessageTimeout.Call(hwndBroadcast, wmThemeChanged, 0, 0, smtoAbortIfHung, 250, 0)
 }
 
 // Current returns the current theme mode.

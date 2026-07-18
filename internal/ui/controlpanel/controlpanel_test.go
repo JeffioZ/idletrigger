@@ -426,6 +426,59 @@ func TestExplicitThemeDoesNotReadSystemTheme(t *testing.T) {
 	}
 }
 
+func TestThemeRefreshCommitsCompleteFrame(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping native Win32 integration test in short mode")
+	}
+	getUpdateRect := windows.NewLazySystemDLL("user32.dll").NewProc("GetUpdateRect")
+	err := Capture(State{Theme: ThemeLight}, func(key string) string { return key }, 1, func(hwnd windows.Handle) error {
+		p := panelFor(hwnd)
+		if p == nil {
+			t.Fatal("capture panel is not active")
+		}
+		originalApplyControlTheme := applyPanelControlTheme
+		defer func() { applyPanelControlTheme = originalApplyControlTheme }()
+		themedControls := make(map[windows.Handle]int)
+		applyPanelControlTheme = func(control windows.Handle, dark bool) {
+			if dark {
+				themedControls[control]++
+			}
+			originalApplyControlTheme(control, dark)
+		}
+		p.theme = ThemeDark
+		p.hoverID = idThemeSwitch
+		// Match the unique theme/color broadcasts sent by the theme feature and
+		// include one duplicate to guard against late platform notifications.
+		for _, message := range []uint32{wmSettingChange, wmSettingChange, wmSysColorChange, wmThemeChanged, wmThemeChanged} {
+			pSendMessage.Call(uintptr(hwnd), uintptr(message), 0, 0)
+		}
+		if p.hwnd == 0 {
+			t.Fatal("atomic theme refresh destroyed the capture panel")
+		}
+		if !p.themeDark || p.palette != colors.ForTheme(true) {
+			t.Fatalf("theme refresh retained the light palette: dark=%v palette=%+v", p.themeDark, p.palette)
+		}
+		for id, control := range p.controls {
+			if control == 0 {
+				continue
+			}
+			if pending, _, _ := getUpdateRect.Call(uintptr(control), 0, 0); pending != 0 {
+				t.Fatalf("theme refresh left control %d with a deferred paint region", id)
+			}
+			if count := themedControls[control]; count != 1 {
+				t.Fatalf("theme broadcasts applied the dark native theme to control %d %d times, want once", id, count)
+			}
+		}
+		if p.hoverID != idThemeSwitch || !p.controlState(idThemeSwitch, 0).Hovered {
+			t.Fatal("theme broadcasts dropped the stable hover state")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestControlStateCombinesModelAndNativeState(t *testing.T) {
 	p := &panel{
 		toggles:            map[uint16]bool{idIdle: true},
@@ -456,20 +509,29 @@ func TestUnavailableThemeDisablesEveryThemeControl(t *testing.T) {
 	}
 }
 
-func TestMenuAndChoiceTriggersIgnoreStaleNativeHotlight(t *testing.T) {
+func TestOwnerDrawnButtonsIgnoreStaleNativeHotlight(t *testing.T) {
 	p := &panel{
 		toggles:  map[uint16]bool{},
 		selected: map[uint16]bool{},
 		disabled: map[uint16]bool{},
 	}
-	for _, id := range []uint16{idQuickActions, idLanguage, idIdleTimeout, idIdleAction} {
+	for _, id := range []uint16{idNoSleep, idThemeSwitch, idQuickActions, idLanguage, idIdleTimeout, idIdleAction, idProjectHome, idExit} {
 		if state := p.controlState(id, odsHotlight); state.Hovered {
-			t.Fatalf("trigger %d retained native hotlight after mouse leave", id)
+			t.Fatalf("owner-drawn control %d retained stale native hotlight", id)
 		}
 	}
-	p.hoverID = idLanguage
-	if state := p.controlState(idLanguage, 0); !state.Hovered {
-		t.Fatal("tracked hover must remain visible for language trigger")
+	sequence := []uint16{idNoSleep, idIdle, idThemeSwitch, idLanguage, idExit}
+	for index, current := range sequence {
+		p.hoverID = current
+		if state := p.controlState(current, 0); !state.Hovered {
+			t.Fatalf("tracked hover was lost for control %d", current)
+		}
+		if index > 0 {
+			previous := sequence[index-1]
+			if state := p.controlState(previous, odsHotlight); state.Hovered {
+				t.Fatalf("rapid transition %d -> %d restored stale native hotlight", previous, current)
+			}
+		}
 	}
 }
 
