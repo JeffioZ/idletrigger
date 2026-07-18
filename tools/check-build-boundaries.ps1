@@ -62,6 +62,7 @@ try {
         'compress/flate',
         'compress/zlib',
         'crypto/md5',
+        'crypto/sha256',
         'os/exec'
     )
     foreach ($dependency in $forbiddenReleaseDependencies) {

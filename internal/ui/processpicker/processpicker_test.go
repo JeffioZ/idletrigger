@@ -520,6 +520,22 @@ func requireNativeIntegration(t *testing.T) {
 	}
 }
 
+func TestProcessPickerDefaultColumnsDoNotShowHorizontalScrollBar(t *testing.T) {
+	requireNativeIntegration(t)
+	groups := make([]processcatalog.Group, 40)
+	for index := range groups {
+		groups[index] = processcatalog.Group{Executable: fmt.Sprintf("player-%02d.exe", index), Description: "Media Player", Count: 2}
+	}
+	if err := Capture(testPickerOptions(), groups, 1, false, func(hwnd windows.Handle) error {
+		p := activePickerForTest(t, hwnd)
+		assertNoHorizontalProcessScroll(t, p)
+		assertHeaderLeavesScrollbarLane(t, p)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestProcessPickerRemainsOperableAcrossDPIAndSmallWorkArea(t *testing.T) {
 	requireNativeIntegration(t)
 	work := nativeform.Rect{Right: 1366, Bottom: 768}

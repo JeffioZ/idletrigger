@@ -1,11 +1,12 @@
 package config
 
 import (
-	"crypto/sha256"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"path/filepath"
+	"strconv"
 )
 
 var ErrConfigChanged = errors.New("configuration changed on disk")
@@ -84,4 +85,8 @@ func saveToAtRevision(p string, cfg Config, expectedRevision string) (string, er
 	return configRevision([]byte(contents)), nil
 }
 
-func configRevision(data []byte) string { return fmt.Sprintf("%x", sha256.Sum256(data)) }
+func configRevision(data []byte) string {
+	hash := fnv.New64a()
+	_, _ = hash.Write(data)
+	return strconv.FormatUint(hash.Sum64(), 16)
+}

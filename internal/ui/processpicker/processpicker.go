@@ -213,7 +213,7 @@ const (
 	windowClass           = "IdleTriggerProcessPicker"
 	windowWidth           = 700
 	windowHeight          = 510
-	processScrollbarLane  = 18
+	processScrollbarLane  = 24
 	idSearch              = 101
 	idRefresh             = 102
 	idList                = 103

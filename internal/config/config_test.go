@@ -390,6 +390,19 @@ func TestSaveToAtRevisionRejectsExternalChange(t *testing.T) {
 	}
 }
 
+func TestConfigRevisionIsCompactAndContentSensitive(t *testing.T) {
+	revision := configRevision([]byte("idletrigger"))
+	if len(revision) > 16 || revision == "" {
+		t.Fatalf("config revision = %q, want a compact 64-bit token", revision)
+	}
+	if revision != configRevision([]byte("idletrigger")) {
+		t.Fatal("identical configuration content produced different revisions")
+	}
+	if revision == configRevision([]byte("IdleTrigger")) {
+		t.Fatal("different configuration content produced the same revision")
+	}
+}
+
 func TestNormalizeConfigUsesValidationBounds(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.IdleTimeoutMinutes = 7*24*60 + 1
