@@ -92,16 +92,6 @@ func drawTextCentered(dc windows.Handle, text *uint16, bounds rect) {
 	pDrawText.Call(uintptr(dc), uintptr(unsafe.Pointer(text)), ^uintptr(0), uintptr(unsafe.Pointer(&bounds)), dtCenter|dtWordBreak)
 }
 
-func drawTextLeftCentered(dc windows.Handle, text *uint16, bounds rect) {
-	measure := bounds
-	pDrawText.Call(uintptr(dc), uintptr(unsafe.Pointer(text)), ^uintptr(0), uintptr(unsafe.Pointer(&measure)), dtLeft|dtWordBreak|dtCalcRect)
-	textH := measure.Bottom - measure.Top
-	if textH < bounds.Bottom-bounds.Top {
-		bounds.Top += ((bounds.Bottom - bounds.Top) - textH) / 2
-	}
-	pDrawText.Call(uintptr(dc), uintptr(unsafe.Pointer(text)), ^uintptr(0), uintptr(unsafe.Pointer(&bounds)), dtLeft|dtWordBreak)
-}
-
 func (p *panel) fill(dc, brush windows.Handle) {
 	var r rect
 	pGetClientRect.Call(uintptr(p.hwnd), uintptr(unsafe.Pointer(&r)))

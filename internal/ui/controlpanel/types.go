@@ -294,7 +294,6 @@ var (
 	pSetFocus              = user32.NewProc("SetFocus")
 	pEnableWindow          = user32.NewProc("EnableWindow")
 	pFillRect              = user32.NewProc("FillRect")
-	pFrameRect             = user32.NewProc("FrameRect")
 	pDrawText              = user32.NewProc("DrawTextW")
 	pInvalidateRect        = user32.NewProc("InvalidateRect")
 	pGetClientRect         = user32.NewProc("GetClientRect")

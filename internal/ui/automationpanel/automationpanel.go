@@ -548,30 +548,6 @@ func (p *panel) create() error {
 	return nil
 }
 
-func (p *panel) clearControls() {
-	p.closeChoice(false)
-	p.surfaces.Close()
-	if p.managerScroll != nil {
-		p.managerScroll.Close()
-		p.managerScroll = nil
-	}
-	p.interaction.Release()
-	for _, control := range p.controls {
-		if control != 0 {
-			pDestroyWindow.Call(uintptr(control))
-		}
-	}
-	for _, control := range p.anonymous {
-		if control != 0 {
-			pDestroyWindow.Call(uintptr(control))
-		}
-	}
-	if p.tooltip != 0 {
-		pDestroyWindow.Call(uintptr(p.tooltip))
-	}
-	p.initializeControlState()
-}
-
 func (p *panel) initializeControlState() {
 	p.controls = make(map[uint16]windows.Handle)
 	p.anonymous = nil
