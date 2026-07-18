@@ -3,6 +3,7 @@ package controlpanel
 import (
 	"strings"
 	"testing"
+	"unsafe"
 
 	"github.com/JeffioZ/idletrigger/internal/ui/colors"
 	"github.com/JeffioZ/idletrigger/internal/ui/nativeform"
@@ -167,15 +168,14 @@ func TestTriggerOpenUsesOnlyItsRealMenuState(t *testing.T) {
 	if p.triggerOpen(idQuickActions) || p.triggerOpen(idLanguage) || p.triggerOpen(idIdleTimeout) {
 		t.Fatal("fresh panel must not report any trigger as open")
 	}
-	p.quickMenuOpen = true
+	p.choice.openID = idQuickActions
 	if !p.triggerOpen(idQuickActions) || p.triggerOpen(idLanguage) {
 		t.Fatal("quick menu open state was not isolated")
 	}
-	p.quickMenuOpen, p.languageMenuOpen = false, true
+	p.choice.openID = idLanguage
 	if p.triggerOpen(idQuickActions) || !p.triggerOpen(idLanguage) {
 		t.Fatal("language menu open state was not isolated")
 	}
-	p.languageMenuOpen = false
 	p.choice.openID = idIdleAction
 	if p.triggerOpen(idIdleTimeout) || !p.triggerOpen(idIdleAction) {
 		t.Fatal("choice trigger must use its matching open ID")
@@ -195,54 +195,21 @@ func TestDangerQuickActionsAreLimitedToShutdownAndRestart(t *testing.T) {
 	}
 }
 
-func TestMenuOptionStylesKeepOnlySemanticDifferences(t *testing.T) {
-	if got := menuOptionStyleFor(idLangEN, true); !got.Selected || got.Danger {
-		t.Fatalf("selected language style = %+v", got)
+func TestPopupMenuItemsKeepOnlySemanticDifferences(t *testing.T) {
+	p := &panel{lang: func(key string) string { return key }, selected: map[uint16]bool{idLangZH: true}}
+	quick := p.quickMenuItems()
+	if len(quick) != len(quickActionIDs()) {
+		t.Fatalf("quick items = %d", len(quick))
 	}
-	if got := menuOptionStyleFor(idLock, false); got.Selected || got.Danger {
-		t.Fatalf("regular quick action style = %+v", got)
-	}
-	if got := menuOptionStyleFor(idShutdown, false); got.Selected || !got.Danger {
-		t.Fatalf("shutdown style = %+v", got)
-	}
-	if got := menuOptionStyleFor(idRestart, false); got.Selected || !got.Danger {
-		t.Fatalf("restart style = %+v", got)
-	}
-}
-
-func TestSharedMenuGeometryIncludesRowGaps(t *testing.T) {
-	const rowHeight, rowGap, surfaceInset = 34, 1, 4
-	heights := map[int]int{0: 8, 1: 42, 2: 77, 5: 182, 10: 357}
-	for rows, want := range heights {
-		if got := menuHeight(rows, rowHeight, rowGap, surfaceInset); got != want {
-			t.Fatalf("menuHeight(%d) = %d, want %d", rows, got, want)
+	for _, item := range quick {
+		wantDanger := item.Value == idShutdown || item.Value == idRestart
+		if item.Danger != wantDanger {
+			t.Fatalf("quick item %+v danger = %v, want %v", item, item.Danger, wantDanger)
 		}
 	}
-	offsets := map[int]int{0: 4, 1: 39, 4: 144, 9: 319}
-	for index, want := range offsets {
-		if got := menuRowOffset(index, rowHeight, rowGap, surfaceInset); got != want {
-			t.Fatalf("menuRowOffset(%d) = %d, want %d", index, got, want)
-		}
-	}
-}
-
-func TestSharedMenuRowsFitExactAvailableHeight(t *testing.T) {
-	const rowHeight, rowGap, surfaceInset = 34, 1, 4
-	cases := []struct {
-		available int
-		want      int
-	}{
-		{41, 0},
-		{42, 1},
-		{76, 1},
-		{77, 2},
-		{181, 4},
-		{182, 5},
-	}
-	for _, tc := range cases {
-		if got := menuRowsFit(tc.available, rowHeight, rowGap, surfaceInset); got != tc.want {
-			t.Fatalf("menuRowsFit(%d) = %d, want %d", tc.available, got, tc.want)
-		}
+	languages, selected := p.languageMenuItems()
+	if len(languages) != 2 || selected != 1 || languages[0].Danger || languages[1].Danger {
+		t.Fatalf("language items = %+v, selected = %d", languages, selected)
 	}
 }
 
@@ -377,6 +344,38 @@ func TestPopupMetricsUseOneDPITransform(t *testing.T) {
 	}
 }
 
+func TestSuggestedDPIBoundsUsesTheSystemRectangle(t *testing.T) {
+	want := rect{Left: -640, Top: 80, Right: 120, Bottom: 680}
+	got, ok := suggestedDPIBounds(uintptr(unsafe.Pointer(&want)))
+	if !ok || got != want {
+		t.Fatalf("suggested DPI bounds = (%+v, %v), want (%+v, true)", got, ok, want)
+	}
+	invalid := rect{Left: 10, Top: 10, Right: 10, Bottom: 20}
+	if _, ok := suggestedDPIBounds(uintptr(unsafe.Pointer(&invalid))); ok {
+		t.Fatal("empty suggested DPI bounds must use the fallback placement")
+	}
+}
+
+func TestPanelScaleUsesTheMessageDPI(t *testing.T) {
+	if got := panelScaleForDPI(144, 0); got != 1.5 {
+		t.Fatalf("message DPI scale = %v, want 1.5", got)
+	}
+	if got := panelScaleForDPI(144, 2); got != 2 {
+		t.Fatalf("capture DPI scale = %v, want 2", got)
+	}
+}
+
+func TestDPIFrameCommitsOnlyTheLatestGeneration(t *testing.T) {
+	p := panel{pendingDPI: 144, dpiGeneration: 3, dpiReadyGeneration: 2}
+	if p.dpiFrameReady() {
+		t.Fatal("stale DPI layout must remain cloaked")
+	}
+	p.dpiReadyGeneration = 3
+	if !p.dpiFrameReady() {
+		t.Fatal("latest DPI layout should be ready to present")
+	}
+}
+
 func TestPositionPreservesScaledClientBounds(t *testing.T) {
 	const (
 		scale            = 1.5
@@ -414,8 +413,8 @@ func TestVisualStateTokensKeepSpecifiedLogicalSizes(t *testing.T) {
 	if control.FocusInset != 2 || control.FocusRingWidth != 2 {
 		t.Fatalf("focus tokens = inset %d width %d, want 2/2", control.FocusInset, control.FocusRingWidth)
 	}
-	if control.ArrowWidth != 8 || control.ArrowHeight != 4 || control.SelectedMarkerWidth != 3 {
-		t.Fatalf("disclosure tokens = arrow %dx%d marker %d, want 8x4/3", control.ArrowWidth, control.ArrowHeight, control.SelectedMarkerWidth)
+	if control.ArrowWidth != 8 || control.ArrowHeight != 4 {
+		t.Fatalf("disclosure tokens = arrow %dx%d, want 8x4", control.ArrowWidth, control.ArrowHeight)
 	}
 	metrics := newPanelMetrics(defaultPanelStyle, 1.5)
 	if got := metrics.px(control.FocusRingWidth); got != 3 {
@@ -479,24 +478,6 @@ func TestMenuAndChoiceTriggersIgnoreStaleNativeHotlight(t *testing.T) {
 	}
 }
 
-func TestClosingHoverMenuClearsTrackedHover(t *testing.T) {
-	p := &panel{
-		quickMenuOpen:    true,
-		languageMenuOpen: true,
-		hoverID:          idQuickActions,
-		controls:         map[uint16]windows.Handle{},
-	}
-	p.closeQuickMenu()
-	if p.quickMenuOpen || p.hoverID != 0 {
-		t.Fatalf("quick menu close retained state: open=%v hover=%d", p.quickMenuOpen, p.hoverID)
-	}
-	p.hoverID = idLanguage
-	p.closeLanguageMenu()
-	if p.languageMenuOpen || p.hoverID != 0 {
-		t.Fatalf("language menu close retained state: open=%v hover=%d", p.languageMenuOpen, p.hoverID)
-	}
-}
-
 func TestChoiceTriggerKeyboardKeysOpenTheSharedPopup(t *testing.T) {
 	for _, key := range []uintptr{vkReturn, vkSpace, vkUp, vkDown, vkF4} {
 		if !isChoiceOpenKey(key) {
@@ -535,26 +516,60 @@ func TestChoiceTriggerTogglesARealSharedPopup(t *testing.T) {
 	}
 }
 
+func TestFixedMenuTriggersUseTheSharedPopup(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping native Win32 integration test in short mode")
+	}
+	err := Capture(State{}, func(key string) string { return key }, 1, func(hwnd windows.Handle) error {
+		p := panelFor(hwnd)
+		if p == nil {
+			t.Fatal("capture panel is not active")
+		}
+		for _, id := range append(quickActionIDs(), languageIDs()...) {
+			if p.controls[id] != 0 {
+				t.Fatalf("legacy fixed-menu child %d still exists", id)
+			}
+		}
+		p.openQuickMenu()
+		quick := p.choice.popup
+		if p.choice.openID != idQuickActions || quick == nil || !quick.IsOpen() {
+			t.Fatal("system controls did not open the shared popup")
+		}
+		p.openLanguageMenu()
+		language := p.choice.popup
+		if quick.IsOpen() || p.choice.openID != idLanguage || language == nil || !language.IsOpen() {
+			t.Fatal("language settings did not replace the system-controls popup")
+		}
+		p.closeChoice(false)
+		if language.IsOpen() || p.choice.openID != 0 || p.choice.popup != nil {
+			t.Fatal("language popup did not close through the shared lifecycle")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPanelBackgroundClickClosesEveryOpenMenu(t *testing.T) {
 	p := &panel{
-		quickMenuOpen:    true,
-		languageMenuOpen: true,
 		choice: choiceSurface{
-			openID: idIdleTimeout,
+			openID: idQuickActions,
 		},
 	}
 	p.closeOpenMenus()
-	if p.quickMenuOpen || p.languageMenuOpen || p.choice.openID != 0 {
-		t.Fatalf("background click left menus open: quick=%v language=%v choice=%d", p.quickMenuOpen, p.languageMenuOpen, p.choice.openID)
+	if p.choice.openID != 0 {
+		t.Fatalf("background click left popup open: %d", p.choice.openID)
 	}
 }
 
 func TestMenuClickKeepsOnlyTheOpenSurfaceInteractive(t *testing.T) {
-	p := &panel{quickMenuOpen: true}
-	for _, id := range []uint16{idQuickActions, idQuickMenu, idSleep} {
-		if !p.menuClickKeepsOpen(id) {
-			t.Fatalf("quick menu click %d should keep the menu open", id)
-		}
+	p := &panel{choice: choiceSurface{openID: idQuickActions}}
+	if !p.menuClickKeepsOpen(idQuickActions) {
+		t.Fatal("clicking the open system-controls trigger should keep its popup alive until the deferred toggle")
+	}
+	if p.menuClickKeepsOpen(idSleep) {
+		t.Fatal("popup values are no longer owner child controls")
 	}
 	if p.menuClickKeepsOpen(idLanguage) {
 		t.Fatal("another trigger must close the current menu before switching")

@@ -122,35 +122,38 @@ type OnAction func(action Action, value int)
 const (
 	panelClass = "IdleTriggerPopup"
 
-	wmDestroy         = 0x0002
-	wmClose           = 0x0010
-	wmActivate        = 0x0006
-	wmMouseMove       = 0x0200
-	wmLButtonDown     = 0x0201
-	wmLButtonUp       = 0x0202
-	wmMouseWheel      = 0x020A
-	wmMouseLeave      = 0x02A3
-	wmSetCursor       = 0x0020
-	wmNcLButtonDown   = 0x00A1
-	wmParentNotify    = 0x0210
-	wmEraseBkgnd      = 0x0014
-	wmSysColorChange  = 0x0015
-	wmSettingChange   = 0x001A
-	wmDrawItem        = 0x002B
-	wmCommand         = 0x0111
-	wmCtlColorStatic  = 0x0138
-	wmCtlColorEdit    = 0x0133
-	wmCtlColorListBox = 0x0134
-	wmThemeChanged    = 0x031A
-	wmDpiChanged      = 0x02E0
-	wmKeyDown         = 0x0100
-	wmSysKeyDown      = 0x0104
-	wmKillFocus       = 0x0008
-	wmOpenChoice      = 0x8001
-	wmSetFont         = 0x0030
-	wmSetIcon         = 0x0080
-	bnClicked         = 0
-	waInactive        = 0
+	wmDestroy          = 0x0002
+	wmClose            = 0x0010
+	wmActivate         = 0x0006
+	wmMouseMove        = 0x0200
+	wmLButtonDown      = 0x0201
+	wmLButtonUp        = 0x0202
+	wmMouseWheel       = 0x020A
+	wmMouseLeave       = 0x02A3
+	wmSetCursor        = 0x0020
+	wmNcLButtonDown    = 0x00A1
+	wmParentNotify     = 0x0210
+	wmEraseBkgnd       = 0x0014
+	wmSysColorChange   = 0x0015
+	wmSettingChange    = 0x001A
+	wmDrawItem         = 0x002B
+	wmCommand          = 0x0111
+	wmCtlColorStatic   = 0x0138
+	wmCtlColorEdit     = 0x0133
+	wmCtlColorListBox  = 0x0134
+	wmThemeChanged     = 0x031A
+	wmDpiChanged       = 0x02E0
+	wmGetDpiScaledSize = 0x02E4
+	wmKeyDown          = 0x0100
+	wmSysKeyDown       = 0x0104
+	wmKillFocus        = 0x0008
+	wmOpenChoice       = 0x8001
+	wmApplyDPI         = 0x8002
+	wmCommitDPI        = 0x8003
+	wmSetFont          = 0x0030
+	wmSetIcon          = 0x0080
+	bnClicked          = 0
+	waInactive         = 0
 
 	wsOverlapped       = 0x00000000
 	wsPopup            = 0x80000000
@@ -173,15 +176,12 @@ const (
 
 	wsExToolWindow = 0x00000080
 	wsExTopmost    = 0x00000008
-	wsExComposited = 0x02000000
 	wsExAppWindow  = 0x00040000
 
 	swpNoSize                     = 0x0001
 	swpNoMove                     = 0x0002
 	swpNoZOrder                   = 0x0004
 	swpNoActivate                 = 0x0010
-	swpShowWindow                 = 0x0040
-	swHide                        = 0
 	monitorNearest                = 2
 	panelFallbackWindowCoordinate = int32(-32000)
 	gwlpWndProc                   = ^uintptr(3)
@@ -232,7 +232,6 @@ const (
 
 const (
 	idQuickActions      = 6
-	idQuickMenu         = 7
 	idNoSleep           = 10
 	idAutomation        = 11
 	idAutomationEnabled = 12
@@ -251,7 +250,6 @@ const (
 	idIdleTimeout       = 120
 	idIdleAction        = 121
 	idLanguage          = 150
-	idLanguageMenu      = 151
 	idLangEN            = 152
 	idLangZH            = 153
 	idConfig            = 500
@@ -280,6 +278,9 @@ var (
 	pSetWindowLong         = user32.NewProc("SetWindowLongW")
 	pSetWindowLongPtr      = user32.NewProc("SetWindowLongPtrW")
 	pSetWindowPos          = user32.NewProc("SetWindowPos")
+	pBeginDeferWindowPos   = user32.NewProc("BeginDeferWindowPos")
+	pDeferWindowPos        = user32.NewProc("DeferWindowPos")
+	pEndDeferWindowPos     = user32.NewProc("EndDeferWindowPos")
 	pPostMessage           = user32.NewProc("PostMessageW")
 	pGetCursorPos          = user32.NewProc("GetCursorPos")
 	pMonitorFromWindow     = user32.NewProc("MonitorFromWindow")
@@ -291,7 +292,6 @@ var (
 	pLoadCursor            = user32.NewProc("LoadCursorW")
 	pSetCursor             = user32.NewProc("SetCursor")
 	pSetFocus              = user32.NewProc("SetFocus")
-	pShowWindow            = user32.NewProc("ShowWindow")
 	pEnableWindow          = user32.NewProc("EnableWindow")
 	pFillRect              = user32.NewProc("FillRect")
 	pFrameRect             = user32.NewProc("FrameRect")
@@ -331,7 +331,6 @@ const (
 	staticNone staticKind = iota
 	staticSection
 	staticSubtitle
-	staticQuickMenu
 )
 
 type trackMouseEvent struct {
@@ -344,6 +343,10 @@ type trackMouseEvent struct {
 type initCommonControlsEx struct {
 	Size uint32
 	ICC  uint32
+}
+
+type windowSize struct {
+	Width, Height int32
 }
 
 type panel struct {
@@ -387,8 +390,6 @@ type panel struct {
 	automationSummary       string
 	developerCapturePanel   bool
 	developerWarningPreview bool
-	quickMenuOpen           bool
-	languageMenuOpen        bool
 	themeSchedule           string
 	themeUnavailable        bool
 	themeUnavailableDetail  string
@@ -400,6 +401,15 @@ type panel struct {
 	controlBounds           map[uint16]logicalBounds
 	captureScale            float64
 	captureHost             bool
+	pendingDPI              uint32
+	pendingDPISuggested     rect
+	pendingDPIHasSuggested  bool
+	dpiGeneration           uint32
+	dpiReadyGeneration      uint32
+	dpiApplyPosted          bool
+	dpiCommitPosted         bool
+	dpiCommitFailures       uint8
+	dpiTransition           *nativeform.FrameTransition
 }
 
 // choiceSurface retains selector data while nativeform owns the one shared

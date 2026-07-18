@@ -111,6 +111,7 @@ func wndProc(hwnd windows.Handle, message uint32, wParam, lParam uintptr) uintpt
 		return 0
 	case wmDpiChanged:
 		if p.font != 0 {
+			transition := nativeform.BeginFrameTransition(p.hwnd)
 			dpi := uint32(wParam & 0xffff)
 			if dpi == 0 {
 				dpi = 96
@@ -120,9 +121,20 @@ func wndProc(hwnd windows.Handle, message uint32, wParam, lParam uintptr) uintpt
 				suggested := nativeform.Rect(*(*rect)(nativeform.MessagePointer(lParam)))
 				p.pendingSuggested = &suggested
 			}
-			p.rebuildForDPI()
-			scale := p.scale()
-			p.icons.Apply(p.hwnd, p.themeDark, int(32*scale+0.5), int(16*scale+0.5), true)
+			if p.rebuildForDPI() {
+				scale := p.scale()
+				p.icons.Apply(p.hwnd, p.themeDark, int(32*scale+0.5), int(16*scale+0.5), true)
+			}
+			committed := false
+			for range 3 {
+				if err := transition.Commit(p.frameControls()...); err == nil {
+					committed = true
+					break
+				}
+			}
+			if !committed {
+				pDestroyWindow.Call(uintptr(p.hwnd))
+			}
 		}
 		return 0
 	case wmDestroy:

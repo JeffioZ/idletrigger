@@ -16,8 +16,8 @@ const (
 	FillModeAlternate = 0
 	FillModeWinding   = 1
 
-	smoothingModeAntiAlias = 4
-	pixelOffsetModeHalf    = 4
+	smoothingModeAntiAlias8x8 = 5
+	pixelOffsetModeHalf       = 4
 )
 
 type Point struct{ X, Y int32 }
@@ -438,7 +438,7 @@ func createFromHDC(hdc windows.Handle) (uintptr, bool) {
 func deleteGraphics(graphics uintptr) { pDeleteGraphics.Call(graphics) }
 
 func setSmoothingMode(graphics uintptr) bool {
-	status, _, _ := pSetSmoothingMode.Call(graphics, smoothingModeAntiAlias)
+	status, _, _ := pSetSmoothingMode.Call(graphics, smoothingModeAntiAlias8x8)
 	return status == 0
 }
 

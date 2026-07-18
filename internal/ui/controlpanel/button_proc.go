@@ -45,9 +45,9 @@ func (p *panel) handleButtonMessage(hwnd windows.Handle, id uint16, msg uint32, 
 	case wmKeyDown:
 		return p.handleButtonKeyDown(id, wp)
 	case wmSysKeyDown:
-		if (wp == vkDown || wp == vkF4) && (id == idIdleTimeout || id == idIdleAction) {
+		if (wp == vkDown || wp == vkF4) && isPopupTrigger(id) {
 			p.enterKeyboardNavigation()
-			p.requestChoice(id, true)
+			p.requestChoice(id)
 			return true, 0
 		}
 	}
@@ -61,17 +61,20 @@ func (p *panel) handleButtonKeyDown(id uint16, key uintptr) (bool, uintptr) {
 		// navigation is the only path that enables focus-visible drawing.
 		p.enterKeyboardNavigation()
 	}
-	if (id == idIdleTimeout || id == idIdleAction) && isChoiceOpenKey(key) {
-		p.requestChoice(id, true)
-		return true, 0
-	}
-	if containsQuickAction(id) && p.handleQuickActionKey(id, key) {
-		return true, 0
-	}
-	if containsLanguageOption(id) && p.handleLanguageKey(id, key) {
+	if isPopupTrigger(id) && isChoiceOpenKey(key) {
+		p.requestChoice(id)
 		return true, 0
 	}
 	return false, 0
+}
+
+func isPopupTrigger(id uint16) bool {
+	switch id {
+	case idQuickActions, idLanguage, idIdleTimeout, idIdleAction:
+		return true
+	default:
+		return false
+	}
 }
 
 func isChoiceOpenKey(key uintptr) bool {
@@ -81,34 +84,4 @@ func isChoiceOpenKey(key uintptr) bool {
 	default:
 		return false
 	}
-}
-
-func (p *panel) handleQuickActionKey(id uint16, key uintptr) bool {
-	switch key {
-	case vkUp:
-		p.focusFixedMenuOption(quickActionIDs(), id, -1)
-	case vkDown:
-		p.focusFixedMenuOption(quickActionIDs(), id, 1)
-	case vkEscape:
-		p.closeQuickMenu()
-		pSetFocus.Call(uintptr(p.controls[idQuickActions]))
-	default:
-		return false
-	}
-	return true
-}
-
-func (p *panel) handleLanguageKey(id uint16, key uintptr) bool {
-	switch key {
-	case vkUp:
-		p.focusFixedMenuOption(languageIDs(), id, -1)
-	case vkDown:
-		p.focusFixedMenuOption(languageIDs(), id, 1)
-	case vkEscape:
-		p.closeLanguageMenu()
-		pSetFocus.Call(uintptr(p.controls[idLanguage]))
-	default:
-		return false
-	}
-	return true
 }

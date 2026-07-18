@@ -195,6 +195,7 @@ type picker struct {
 	lastScanDuration time.Duration
 	statusHoldUntil  time.Time
 	pendingStatus    string
+	listWheelDelta   int
 	anchorTopKey     string
 	anchorFocusKey   string
 	ownerDisabled    bool
@@ -205,12 +206,14 @@ type picker struct {
 	viewportWidth    int
 	viewportHeight   int
 	pendingSuggested *nativeform.Rect
+	layoutBatch      uintptr
 }
 
 const (
 	windowClass           = "IdleTriggerProcessPicker"
 	windowWidth           = 700
 	windowHeight          = 510
+	processScrollbarLane  = 18
 	idSearch              = 101
 	idRefresh             = 102
 	idList                = 103
@@ -326,7 +329,6 @@ const (
 	ttsAlwaysTip          = 0x01
 	ttsNoPrefix           = 0x02
 	opaque                = 2
-	sbHorz                = 0
 	sbVert                = 1
 	odsSelected           = 0x0001
 	odsFocus              = 0x0010
@@ -382,6 +384,9 @@ var (
 	pSendMessage          = user32.NewProc("SendMessageW")
 	pSetWindowText        = user32.NewProc("SetWindowTextW")
 	pSetWindowPos         = user32.NewProc("SetWindowPos")
+	pBeginDeferWindowPos  = user32.NewProc("BeginDeferWindowPos")
+	pDeferWindowPos       = user32.NewProc("DeferWindowPos")
+	pEndDeferWindowPos    = user32.NewProc("EndDeferWindowPos")
 	pShowWindow           = user32.NewProc("ShowWindow")
 	pSetForeground        = user32.NewProc("SetForegroundWindow")
 	pEnableWindow         = user32.NewProc("EnableWindow")
@@ -773,7 +778,6 @@ func (p *picker) create() (err error) {
 	p.syncListScrollbarBounds()
 	p.syncListScrollbar()
 	p.resizeColumns()
-	pShowScrollBar.Call(uintptr(list), sbHorz, 0)
 	p.child("STATIC", p.text("process_picker_loading"), wsChild|ssLeft, 42, 180, 616, 40, idEmpty)
 	p.child("STATIC", p.text("process_picker_loading"), wsChild|wsVisible|ssLeft, 18, 308, 664, 20, idStatus)
 	p.child("STATIC", p.text("process_picker_selection_title"), wsChild|wsVisible|ssLeft, 18, 336, 664, 20, idPreviewTitle)
@@ -873,18 +877,19 @@ func (p *picker) resizeColumns() {
 	for index, width := range widths {
 		pSendMessage.Call(uintptr(list), lvmSetColumnWidth, uintptr(index), uintptr(width))
 	}
-	// Common controls may recreate non-client scrollbars after a column resize.
-	// Reassert the themed vertical overlay and the no-horizontal-scroll contract
-	// after the final widths are installed.
+	// The shared overlay owns the visible vertical affordance. Keep the native
+	// vertical bar hidden without forcibly toggling the horizontal bar: it must
+	// remain available when the user intentionally widens a column.
 	pShowScrollBar.Call(uintptr(list), sbVert, 0)
-	pShowScrollBar.Call(uintptr(list), sbHorz, 0)
 }
 
 func processColumnWidths(clientWidth int, scale float64) [3]int {
-	// The themed scrollbar begins below the native header, so the header and
-	// its columns use the full client width. The body scrollbar overlays the
-	// roomy instance-count column without creating a fourth header remainder.
-	available := max(0, clientWidth)
+	// Reserve a stable lane for the themed vertical scrollbar. ListView can
+	// recreate its native vertical scroll mechanics after the first wheel or
+	// item update; filling the complete client width makes that transition
+	// create a horizontal scrollbar even though the default columns fit.
+	reserve := max(1, int(float64(processScrollbarLane)*scale+0.5))
+	available := max(0, clientWidth-reserve)
 	last := min(available, int(82*scale+0.5))
 	remaining := available - last
 	minimumFirst := int(190*scale + 0.5)
@@ -964,6 +969,23 @@ func (p *picker) scrollListTo(position int) {
 	delta := (position - int(current)) * rowHeight
 	pSendMessage.Call(uintptr(list), lvmScroll, 0, uintptr(delta))
 	p.syncListScrollbar()
+}
+
+func (p *picker) scrollListWheel(wParam uintptr) bool {
+	if len(p.visible) == 0 {
+		return false
+	}
+	p.listWheelDelta += int(int16(wParam >> 16))
+	steps := p.listWheelDelta / 120
+	p.listWheelDelta %= 120
+	if steps == 0 {
+		return true
+	}
+	top, _, _ := pSendMessage.Call(uintptr(p.controls[idList]), lvmGetTopIndex, 0, 0)
+	// Three rows follows the Windows default while keeping high-resolution
+	// wheel deltas accumulated until one complete notch is available.
+	p.scrollListTo(int(top) - steps*3)
+	return true
 }
 
 func (p *picker) updateHeaderLabels() {

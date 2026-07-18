@@ -48,6 +48,17 @@ type FirstFrameGate struct {
 	api                 firstFrameAPI
 }
 
+// FrameTransition keeps an already-visible top-level HWND out of the DWM
+// presentation stream while one synchronous layout transition is committed.
+// It does not change WS_VISIBLE, activation or focus.
+type FrameTransition struct {
+	window              windows.Handle
+	cloaked             bool
+	transitionsDisabled bool
+	committed           bool
+	api                 firstFrameAPI
+}
+
 // BeginFirstFrame prepares a hidden top-level window for atomic presentation.
 // Unsupported DWM attributes safely retain the normal hidden-window path.
 func BeginFirstFrame(window windows.Handle) FirstFrameGate {
@@ -62,6 +73,49 @@ func beginFirstFrameWith(window windows.Handle, api firstFrameAPI) FirstFrameGat
 	gate.transitionsDisabled = api.setDWMBoolean(window, firstFrameTransitionsForcedDisabled, true)
 	gate.cloaked = api.setDWMBoolean(window, firstFrameCloak, true)
 	return gate
+}
+
+// BeginFrameTransition starts an atomic visual update for a visible window.
+// Unsupported DWM attributes safely fall back to a normal synchronous frame.
+func BeginFrameTransition(window windows.Handle) FrameTransition {
+	return beginFrameTransitionWith(window, defaultFirstFrameAPI)
+}
+
+func beginFrameTransitionWith(window windows.Handle, api firstFrameAPI) FrameTransition {
+	transition := FrameTransition{window: window, api: api}
+	if window == 0 {
+		return transition
+	}
+	transition.transitionsDisabled = api.setDWMBoolean(window, firstFrameTransitionsForcedDisabled, true)
+	transition.cloaked = api.setDWMBoolean(window, firstFrameCloak, true)
+	return transition
+}
+
+// Commit synchronously paints the completed layout and then exposes it to
+// DWM. A second identical frame after uncloak replaces any retained pre-cloak
+// surface before a later input-driven paint can become visible.
+func (t *FrameTransition) Commit(controls ...windows.Handle) error {
+	if t == nil || t.window == 0 {
+		return fmt.Errorf("frame-transition window is required")
+	}
+	if t.committed {
+		return fmt.Errorf("frame transition already committed")
+	}
+	if t.transitionsDisabled {
+		defer func() {
+			t.api.setDWMBoolean(t.window, firstFrameTransitionsForcedDisabled, false)
+			t.transitionsDisabled = false
+		}()
+	}
+	t.api.present(t.window, controls...)
+	if t.cloaked {
+		if !t.api.setDWMBoolean(t.window, firstFrameCloak, false) {
+			return fmt.Errorf("uncloak transitioned frame")
+		}
+		t.api.present(t.window, controls...)
+	}
+	t.committed = true
+	return nil
 }
 
 // Reveal marks the HWND visible while it remains cloaked, commits one complete

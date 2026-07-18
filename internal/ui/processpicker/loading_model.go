@@ -2,6 +2,7 @@ package processpicker
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -55,6 +56,7 @@ func (p *picker) startLoad(mode processLoadMode) {
 			postPickerUI(func() { p.finishLoad(generation, nil, err, true, scanDuration) })
 			return
 		}
+		instances = excludePickerProcess(instances, uint32(os.Getpid()))
 		for index := range instances {
 			key := (automation.ProcessTarget{Match: automation.MatchName, Executable: instances[index].Executable}).Key()
 			instances[index].Description = cachedDescriptions[key]
@@ -95,6 +97,19 @@ func (p *picker) startLoad(mode processLoadMode) {
 			})
 		}
 	}()
+}
+
+func excludePickerProcess(instances []processcatalog.Instance, processID uint32) []processcatalog.Instance {
+	if processID == 0 {
+		return instances
+	}
+	filtered := instances[:0]
+	for _, instance := range instances {
+		if instance.PID != processID {
+			filtered = append(filtered, instance)
+		}
+	}
+	return filtered
 }
 
 func descriptionCandidates(instances []processcatalog.Instance, cached map[string]string, attempted map[string]struct{}, retry bool) ([]processcatalog.Instance, []string) {
@@ -428,13 +443,8 @@ func (p *picker) reconcileVisible(previous, next []item) {
 	if len(next) > 0 {
 		pSendMessage.Call(uintptr(list), lvmRedrawItems, 0, uintptr(len(next)-1))
 	}
-	// The vertical scrollbar appears only after rows are populated and reduces
-	// the usable report width. Refit at that point so the list never creates a
-	// horizontal scrollbar.
 	p.syncListScrollbarBounds()
 	p.syncListScrollbar()
-	p.resizeColumns()
-	pShowScrollBar.Call(uintptr(list), sbHorz, 0)
 	nativeform.PresentControl(list, true)
 }
 

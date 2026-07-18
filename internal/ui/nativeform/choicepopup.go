@@ -14,6 +14,7 @@ type ChoicePopupItem struct {
 	Label  string
 	Value  int
 	Header bool
+	Danger bool
 }
 
 type ChoicePopupOptions struct {
@@ -31,23 +32,26 @@ type ChoicePopupOptions struct {
 	// Escape/F4 without stealing it when the popup closes through mouse focus.
 	KeepOpenOnReselect    bool
 	RestoreAnchorOnCancel bool
+	PreferAbove           bool
+	FocusVisible          bool
 	OnSelect              func(int)
 	OnClose               func()
 }
 
 type ChoicePopup struct {
-	hwnd      windows.Handle
-	options   ChoicePopupOptions
-	first     int
-	hover     int
-	pressed   int
-	focus     int
-	rowHeight int32
-	inset     int32
-	radius    int32
-	rowGap    int32
-	closed    bool
-	scrollbar *Scrollbar
+	hwnd         windows.Handle
+	options      ChoicePopupOptions
+	first        int
+	hover        int
+	pressed      int
+	focus        int
+	rowHeight    int32
+	inset        int32
+	radius       int32
+	rowGap       int32
+	closed       bool
+	focusVisible bool
+	scrollbar    *Scrollbar
 }
 
 type popupRect struct{ Left, Top, Right, Bottom int32 }
@@ -120,6 +124,7 @@ var (
 	cpMonitorFromWnd = cpUser32.NewProc("MonitorFromWindow")
 	cpGetMonitorInfo = cpUser32.NewProc("GetMonitorInfoW")
 	cpSetWindowPos   = cpUser32.NewProc("SetWindowPos")
+	cpSetActiveWnd   = cpUser32.NewProc("SetActiveWindow")
 	cpSetFocus       = cpUser32.NewProc("SetFocus")
 	cpIsChild        = cpUser32.NewProc("IsChild")
 	cpSetCapture     = cpUser32.NewProc("SetCapture")
@@ -163,6 +168,7 @@ func ShowChoicePopup(options ChoicePopupOptions) (*ChoicePopup, error) {
 		options: options, hover: -1, pressed: -1, focus: -1,
 		rowHeight: int32(MenuRowHeight*options.Scale + 0.5), rowGap: int32(MenuRowGap*options.Scale + 0.5),
 		inset: int32(MenuSurfaceInset*options.Scale + 0.5), radius: int32(CornerRadius*options.Scale + 0.5),
+		focusVisible: options.FocusVisible,
 	}
 	for index, item := range options.Items {
 		if !item.Header && item.Value == options.Selected {
@@ -210,15 +216,8 @@ func ShowChoicePopup(options ChoicePopupOptions) (*ChoicePopup, error) {
 	info := popupMonitorInfo{Size: uint32(unsafe.Sizeof(popupMonitorInfo{}))}
 	cpGetMonitorInfo.Call(monitor, uintptr(unsafe.Pointer(&info)))
 	anchorGap := int32(MenuAnchorGap*options.Scale + 0.5)
-	x, y := anchor.Left, anchor.Bottom+anchorGap
-	if y+height > info.Work.Bottom {
-		above := anchor.Top - height - anchorGap
-		if above >= info.Work.Top {
-			y = above
-		} else {
-			y = max(info.Work.Top, info.Work.Bottom-height)
-		}
-	}
+	x := anchor.Left
+	y := choicePopupVerticalPosition(anchor, info.Work, height, anchorGap, options.PreferAbove)
 	if x+width > info.Work.Right {
 		x = info.Work.Right - width
 	}
@@ -231,8 +230,33 @@ func ShowChoicePopup(options ChoicePopupOptions) (*ChoicePopup, error) {
 	// on some builds, which closes the popup through WM_KILLFOCUS.
 	cpSetWindowPos.Call(hwnd, ^uintptr(0), uintptr(x), uintptr(y), uintptr(width), uintptr(height), cpSWPShowWindow)
 	popup.updateScroll(visible)
+	cpSetActiveWnd.Call(hwnd)
 	cpSetFocus.Call(hwnd)
+	if !popup.IsOpen() {
+		return nil, fmt.Errorf("choice popup closed during activation")
+	}
 	return popup, nil
+}
+
+func choicePopupVerticalPosition(anchor, work popupRect, height, gap int32, preferAbove bool) int32 {
+	above := anchor.Top - height - gap
+	below := anchor.Bottom + gap
+	if preferAbove {
+		if above >= work.Top {
+			return above
+		}
+		if below+height <= work.Bottom {
+			return below
+		}
+	} else {
+		if below+height <= work.Bottom {
+			return below
+		}
+		if above >= work.Top {
+			return above
+		}
+	}
+	return max(work.Top, work.Bottom-height)
 }
 
 func (p *ChoicePopup) Close() {
@@ -359,8 +383,8 @@ func (p *ChoicePopup) draw(target windows.Handle, bounds Rect) {
 				DrawPopupHeader(dc, row, p.options.Font, item.Label, p.options.Palette, p.options.Palette.ElevatedSurface, max(1, int32(p.options.Scale+0.5)))
 				continue
 			}
-			state := ControlState{Hovered: index == p.hover, Pressed: index == p.pressed, Focused: index == p.focus}
-			DrawMenuOption(dc, row, p.options.Font, p.options.SelectedFont, item.Label, p.options.Palette, p.options.Palette.ElevatedSurface, state, item.Value == p.options.Selected, p.radius, max(1, int32(p.options.Scale+0.5)))
+			state := ControlState{Hovered: index == p.hover, Pressed: index == p.pressed, Focused: p.focusVisible && index == p.focus}
+			DrawMenuOption(dc, row, p.options.Font, p.options.SelectedFont, item.Label, p.options.Palette, p.options.Palette.ElevatedSurface, state, item.Value == p.options.Selected, item.Danger, p.radius, max(1, int32(p.options.Scale+0.5)))
 		}
 	}
 	if !DrawBuffered(target, bounds, paint) {
@@ -396,8 +420,9 @@ func choicePopupWndProc(hwnd windows.Handle, message uint32, wParam, lParam uint
 	case cpWMMouseMove:
 		y := int32(int16(lParam >> 16))
 		row := p.rowAt(y)
-		if row != p.hover {
+		if row != p.hover || p.focusVisible {
 			p.hover, p.focus = row, row
+			p.focusVisible = false
 			cpInvalidateRect.Call(uintptr(hwnd), 0, 0)
 		}
 		track := popupTrackMouse{Size: uint32(unsafe.Sizeof(popupTrackMouse{})), Flags: cpTMELeave, Track: hwnd}
@@ -434,6 +459,7 @@ func choicePopupWndProc(hwnd windows.Handle, message uint32, wParam, lParam uint
 		}
 		return 0
 	case cpWMKeyDown:
+		p.focusVisible = true
 		switch wParam {
 		case cpVKEscape, cpVKF4:
 			p.close(true)

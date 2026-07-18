@@ -34,17 +34,6 @@ func (p *panel) clearHover(hwnd windows.Handle) {
 	}
 }
 
-func containsLanguageOption(id uint16) bool { return id == idLangEN || id == idLangZH }
-
-func containsQuickAction(id uint16) bool {
-	for _, quickID := range quickActionIDs() {
-		if id == quickID {
-			return true
-		}
-	}
-	return false
-}
-
 func (p *panel) controlID(hwnd windows.Handle) uint16 {
 	for id, control := range p.controls {
 		if control == hwnd {
@@ -126,6 +115,220 @@ func (p *panel) position(style, exStyle uint32) error {
 	return nil
 }
 
+func suggestedDPIBounds(lp uintptr) (rect, bool) {
+	if lp == 0 {
+		return rect{}, false
+	}
+	suggested := *(*rect)(nativeform.MessagePointer(lp))
+	return suggested, suggested.Right > suggested.Left && suggested.Bottom > suggested.Top
+}
+
+func panelScaleForDPI(dpi uint32, captureScale float64) float64 {
+	if captureScale > 0 {
+		return captureScale
+	}
+	if dpi == 0 {
+		dpi = 96
+	}
+	return float64(dpi) / 96
+}
+
+func (p *panel) desiredWindowSizeForDPI(dpi uint32) (int32, int32, error) {
+	return p.desiredWindowSize(dpi, dpi)
+}
+
+func (p *panel) desiredWindowSize(layoutDPI, frameDPI uint32) (int32, int32, error) {
+	scale := panelScaleForDPI(layoutDPI, p.captureScale)
+	effectiveDPI := frameDPI
+	if p.captureScale > 0 {
+		effectiveDPI = uint32(p.captureScale*96 + 0.5)
+	}
+	if effectiveDPI == 0 {
+		effectiveDPI = 96
+	}
+	clientWidth := int(float64(p.metrics.style.Layout.PanelWidth)*scale + 0.5)
+	clientHeight := int(float64(p.clientH)*scale + 0.5)
+	return nativeform.WindowSizeForClient(clientWidth, clientHeight, uintptr(p.style), uintptr(p.exStyle), effectiveDPI)
+}
+
+func (p *panel) applyDPIWindowSize(wp, lp uintptr) bool {
+	if lp == 0 {
+		return false
+	}
+	dpi := uint32(wp)
+	if dpi == 0 {
+		dpi = 96
+	}
+	width, height, err := p.desiredWindowSizeForDPI(dpi)
+	if err != nil {
+		return false
+	}
+	size := (*windowSize)(nativeform.MessagePointer(lp))
+	size.Width, size.Height = width, height
+	return true
+}
+
+func (p *panel) applySuggestedDPIBounds(suggested rect, ok bool) error {
+	if !ok {
+		return nil
+	}
+	if result, _, callErr := pSetWindowPos.Call(
+		uintptr(p.hwnd), 0,
+		uintptr(suggested.Left), uintptr(suggested.Top),
+		uintptr(suggested.Right-suggested.Left), uintptr(suggested.Bottom-suggested.Top),
+		swpNoZOrder|swpNoActivate,
+	); result == 0 {
+		return fmt.Errorf("apply suggested control panel DPI bounds: %w", callErr)
+	}
+	return nil
+}
+
+func (p *panel) queueDPIChange(wp, lp uintptr) {
+	dpi := uint32(wp & 0xffff)
+	if dpi == 0 {
+		dpi = 96
+	}
+	suggested, hasSuggested := suggestedDPIBounds(lp)
+	p.pendingDPI = dpi
+	p.pendingDPISuggested = suggested
+	p.pendingDPIHasSuggested = hasSuggested
+	p.dpiGeneration++
+	if p.dpiTransition == nil {
+		transition := nativeform.BeginFrameTransition(p.hwnd)
+		p.dpiTransition = &transition
+	}
+	if !p.dpiApplyPosted {
+		if posted, _, _ := pPostMessage.Call(uintptr(p.hwnd), wmApplyDPI, 0, 0); posted != 0 {
+			p.dpiApplyPosted = true
+		}
+	}
+	// Acknowledge the system-provided bounds inside WM_DPICHANGED as required.
+	// The window remains cloaked; the queued transaction will replace the size
+	// with one calculated from the final DPI after any nested messages unwind.
+	if err := p.applySuggestedDPIBounds(suggested, hasSuggested); err != nil {
+		mylog.Info("Control panel suggested DPI placement failed: %v", err)
+	}
+	if !p.dpiApplyPosted {
+		p.applyPendingDPI()
+	}
+}
+
+func (p *panel) ensureDPIApplyPosted() {
+	if p.dpiApplyPosted || p.hwnd == 0 {
+		return
+	}
+	if posted, _, _ := pPostMessage.Call(uintptr(p.hwnd), wmApplyDPI, 0, 0); posted != 0 {
+		p.dpiApplyPosted = true
+		return
+	}
+	p.applyPendingDPI()
+}
+
+func (p *panel) ensureDPICommitPosted() {
+	if p.dpiCommitPosted || p.hwnd == 0 {
+		return
+	}
+	if posted, _, _ := pPostMessage.Call(uintptr(p.hwnd), wmCommitDPI, 0, 0); posted != 0 {
+		p.dpiCommitPosted = true
+		return
+	}
+	p.commitPendingDPI()
+}
+
+func (p *panel) positionForResolvedDPI(layoutDPI, frameDPI uint32, suggested rect, hasSuggested bool) error {
+	width, height, err := p.desiredWindowSize(layoutDPI, frameDPI)
+	if err != nil {
+		return fmt.Errorf("calculate resolved control panel bounds: %w", err)
+	}
+	var monitor uintptr
+	if hasSuggested {
+		monitor, _, _ = pMonitorFromRect.Call(uintptr(unsafe.Pointer(&suggested)), monitorNearest)
+	}
+	if monitor == 0 {
+		monitor, _, _ = pMonitorFromWindow.Call(uintptr(p.hwnd), monitorNearest)
+	}
+	if monitor == 0 {
+		return fmt.Errorf("locate resolved control panel monitor")
+	}
+	info := monitorInfo{Size: uint32(unsafe.Sizeof(monitorInfo{}))}
+	if result, _, callErr := pGetMonitorInfo.Call(monitor, uintptr(unsafe.Pointer(&info))); result == 0 {
+		return fmt.Errorf("read resolved control panel work area: %w", callErr)
+	}
+	margin := int32(float64(16)*panelScaleForDPI(layoutDPI, p.captureScale) + 0.5)
+	x, y := panelOrigin(info.Work, width, height, margin)
+	if result, _, callErr := pSetWindowPos.Call(
+		uintptr(p.hwnd), 0, uintptr(x), uintptr(y), uintptr(width), uintptr(height),
+		swpNoZOrder|swpNoActivate,
+	); result == 0 {
+		return fmt.Errorf("position resolved control panel DPI bounds: %w", callErr)
+	}
+	return nil
+}
+
+func (p *panel) applyPendingDPI() {
+	p.dpiApplyPosted = false
+	if p.hwnd == 0 || p.pendingDPI == 0 {
+		return
+	}
+	generation := p.dpiGeneration
+	dpi := p.pendingDPI
+	suggested, hasSuggested := p.pendingDPISuggested, p.pendingDPIHasSuggested
+	resolvedDPI := dpi
+	if !p.refreshFontsForDPI(dpi) {
+		// Keep the outer frame consistent with the metrics that remain active
+		// when Windows cannot allocate the replacement GDI fonts.
+		resolvedDPI = uint32(p.metrics.scale*96 + 0.5)
+		mylog.Info("Control panel DPI font rebuild failed; retaining dpi=%d", resolvedDPI)
+	}
+	if err := p.positionForResolvedDPI(resolvedDPI, dpi, suggested, hasSuggested); err != nil {
+		mylog.Info("Control panel resolved DPI placement failed: %v", err)
+	}
+	if p.dpiGeneration != generation {
+		p.ensureDPIApplyPosted()
+		return
+	}
+	p.dpiReadyGeneration = generation
+	p.ensureDPICommitPosted()
+}
+
+func (p *panel) dpiFrameReady() bool {
+	return p.pendingDPI != 0 && p.dpiReadyGeneration == p.dpiGeneration
+}
+
+func (p *panel) commitPendingDPI() {
+	p.dpiCommitPosted = false
+	if p.pendingDPI == 0 {
+		return
+	}
+	if !p.dpiFrameReady() {
+		p.ensureDPIApplyPosted()
+		return
+	}
+	transition := p.dpiTransition
+	if transition != nil {
+		if err := transition.Commit(p.frameControls()...); err != nil {
+			p.dpiCommitFailures++
+			mylog.Info("Control panel atomic DPI presentation failed: %v", err)
+			if p.dpiCommitFailures < 3 {
+				p.ensureDPICommitPosted()
+				return
+			}
+			// A window which DWM still considers cloaked cannot be recovered by
+			// another paint. Destroy it rather than leave an invisible active
+			// panel; the next tray click creates a clean HWND.
+			mylog.Info("Control panel DPI presentation abandoned after %d attempts", p.dpiCommitFailures)
+			pDestroyWindow.Call(uintptr(p.hwnd))
+			return
+		}
+	} else {
+		p.present()
+	}
+	p.dpiTransition = nil
+	p.pendingDPI = 0
+	p.dpiCommitFailures = 0
+	mylog.Info("UI font: surface=popup rebuilt reason=dpi-change dpi=%d face=%q client_px=%dx%d generation=%d", int(p.metrics.scale*96+0.5), p.fontChoice.Face, p.sc(p.metrics.style.Layout.PanelWidth), p.sc(p.clientH), p.dpiReadyGeneration)
+}
+
 func wndProc(hwnd windows.Handle, msg uint32, wp, lp uintptr) uintptr {
 	p := panelFor(hwnd)
 	if p != nil {
@@ -147,7 +350,14 @@ func wndProc(hwnd windows.Handle, msg uint32, wp, lp uintptr) uintptr {
 				p.leaveKeyboardNavigation()
 			}
 		case wmOpenChoice:
-			p.openChoice(uint16(wp))
+			switch id := uint16(wp); id {
+			case idQuickActions:
+				p.openQuickMenu()
+			case idLanguage:
+				p.openLanguageMenu()
+			default:
+				p.openChoice(id)
+			}
 			return 0
 		case wmDestroy:
 			clearPanel(p, hwnd)
@@ -164,22 +374,23 @@ func wndProc(hwnd windows.Handle, msg uint32, wp, lp uintptr) uintptr {
 			return uintptr(p.surfaceBrush)
 		case wmDrawItem:
 			if lp != 0 {
-				item := drawItemFromLParam(lp)
-				if p.staticKinds[uint16(item.CtlID)] != staticNone {
-					p.drawStatic(item)
-				} else {
-					p.drawButton(item)
-				}
+				p.drawItemBuffered(drawItemFromLParam(lp))
 				return 1
 			}
 		case wmSettingChange, wmSysColorChange, wmThemeChanged:
 			p.refreshTheme(true)
-		case wmDpiChanged:
-			p.refreshFontsForDPI()
-			if err := p.position(p.style, p.exStyle); err != nil {
-				mylog.Info("Control panel DPI placement failed: %v", err)
+		case wmGetDpiScaledSize:
+			if p.applyDPIWindowSize(wp, lp) {
+				return 1
 			}
-			mylog.Info("UI font: surface=popup rebuilt reason=dpi-change dpi=%d face=%q client_px=%dx%d", int(p.metrics.scale*96+0.5), p.fontChoice.Face, p.sc(p.metrics.style.Layout.PanelWidth), p.sc(p.clientH))
+		case wmDpiChanged:
+			p.queueDPIChange(wp, lp)
+			return 0
+		case wmApplyDPI:
+			p.applyPendingDPI()
+			return 0
+		case wmCommitDPI:
+			p.commitPendingDPI()
 			return 0
 		case wmCommand:
 			id, notification := uint16(wp), uint16(wp>>16)
@@ -197,16 +408,11 @@ func wndProc(hwnd windows.Handle, msg uint32, wp, lp uintptr) uintptr {
 	return result
 }
 
-func (p *panel) refreshFontsForDPI() {
+func (p *panel) refreshFontsForDPI(dpi uint32) bool {
 	p.closeChoice(false)
-	newScale := dpiForWindow(p.hwnd)
-	if p.captureScale > 0 {
-		// Screenshot hosts deliberately keep a logical 96-DPI panel even when
-		// Windows notifies the app about the monitor's physical DPI.
-		newScale = p.captureScale
-	}
+	newScale := panelScaleForDPI(dpi, p.captureScale)
 	if newScale <= 0 || newScale == p.metrics.scale {
-		return
+		return true
 	}
 	oldMetrics, oldChoice := p.metrics, p.fontChoice
 	p.metrics = newPanelMetrics(p.metrics.style, newScale)
@@ -222,17 +428,17 @@ func (p *panel) refreshFontsForDPI() {
 			}
 		}
 		p.metrics, p.fontChoice = oldMetrics, oldChoice
-		return
+		return false
 	}
 	oldFont, oldSection, oldSubtitle, oldChoiceSelected := p.font, p.sectionFont, p.subtitleFont, p.choiceSelectedFont
 	p.font, p.sectionFont, p.subtitleFont, p.choiceSelectedFont = newFont, newSectionFont, newSubtitleFont, newChoiceSelectedFont
 	p.setWindowIcons(p.resolveTheme(), true)
+	p.positionDPIControls()
 	for id, hwnd := range p.controls {
-		if bounds, ok := p.controlBounds[id]; ok {
-			pSetWindowPos.Call(uintptr(hwnd), 0, uintptr(p.sc(bounds.x)), uintptr(p.sc(bounds.y)), uintptr(p.sc(bounds.width)), uintptr(p.sc(bounds.height)), 0x0004|0x0010)
-		}
 		if p.staticKinds[id] == staticNone {
-			pSendMessage.Call(uintptr(hwnd), wmSetFont, uintptr(p.font), 1)
+			// The DPI transaction presents the complete frame after every child
+			// has its final bounds and font. Avoid one eager repaint per button.
+			pSendMessage.Call(uintptr(hwnd), wmSetFont, uintptr(p.font), 0)
 		}
 	}
 	if p.tooltip != 0 {
@@ -241,6 +447,47 @@ func (p *panel) refreshFontsForDPI() {
 	for _, font := range []windows.Handle{oldFont, oldSection, oldSubtitle, oldChoiceSelected} {
 		if font != 0 {
 			pDeleteObject.Call(uintptr(font))
+		}
+	}
+	return true
+}
+
+func (p *panel) positionDPIControls() {
+	flags := uintptr(swpNoZOrder | swpNoActivate)
+	deferred, _, _ := pBeginDeferWindowPos.Call(uintptr(len(p.controlBounds)))
+	if deferred != 0 {
+		for id, bounds := range p.controlBounds {
+			hwnd := p.controls[id]
+			if hwnd == 0 {
+				continue
+			}
+			next, _, _ := pDeferWindowPos.Call(
+				deferred, uintptr(hwnd), 0,
+				uintptr(p.sc(bounds.x)), uintptr(p.sc(bounds.y)),
+				uintptr(p.sc(bounds.width)), uintptr(p.sc(bounds.height)), flags,
+			)
+			if next == 0 {
+				deferred = 0
+				break
+			}
+			deferred = next
+		}
+		if deferred != 0 {
+			if committed, _, _ := pEndDeferWindowPos.Call(deferred); committed != 0 {
+				return
+			}
+		}
+	}
+
+	// Resource exhaustion can make the deferred-window transaction unavailable.
+	// Preserve the previous positioning behavior as a complete fallback.
+	for id, bounds := range p.controlBounds {
+		if hwnd := p.controls[id]; hwnd != 0 {
+			pSetWindowPos.Call(
+				uintptr(hwnd), 0,
+				uintptr(p.sc(bounds.x)), uintptr(p.sc(bounds.y)),
+				uintptr(p.sc(bounds.width)), uintptr(p.sc(bounds.height)), flags,
+			)
 		}
 	}
 }

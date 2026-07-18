@@ -180,54 +180,7 @@ func (p *panel) build() error {
 	if err := button(p.text("menu_project_home"), projectHomeX, projectHomeY, projectHomeW, projectHomeH, idProjectHome); err != nil {
 		return err
 	}
-	quickW := bottomW
-	menuRowH := layout.QuickMenuRowHeight
-	menuRowGap := layout.QuickMenuRowGap
-	menuInset := p.metrics.style.Control.MenuSurfaceInset
-	menuH := menuHeight(len(quickActionIDs()), menuRowH, menuRowGap, menuInset)
-	menuY := y - menuH
-	if err := createMenuSurface(p, idQuickMenu, pad, menuY, quickW, menuH); err != nil {
-		return err
-	}
-	for i, id := range quickActionIDs() {
-		if err := buttonHidden(p, p.text(quickActionTranslationKey(id)), pad+menuInset, menuY+menuRowOffset(i, menuRowH, menuRowGap, menuInset), quickW-2*menuInset, menuRowH, id); err != nil {
-			return err
-		}
-	}
-	languageX := pad + bottomW + gap
-	languageMenuH := menuHeight(len(languageIDs()), menuRowH, menuRowGap, menuInset)
-	languageMenuY := y - languageMenuH
-	if err := createMenuSurface(p, idLanguageMenu, languageX, languageMenuY, bottomW, languageMenuH); err != nil {
-		return err
-	}
-	for i, id := range languageIDs() {
-		if err := buttonHidden(p, []string{p.text("menu_lang_en"), p.text("menu_lang_zh")}[i], languageX+menuInset, languageMenuY+menuRowOffset(i, menuRowH, menuRowGap, menuInset), bottomW-2*menuInset, menuRowH, id); err != nil {
-			return err
-		}
-	}
 	p.applyDependentStates()
-	return nil
-}
-
-func createMenuSurface(p *panel, id uint16, x, y, width, height int) error {
-	p.staticKinds[id] = staticQuickMenu
-	_, err := p.child("STATIC", "", wsChild|ssOwnerDraw, x, y, width, height, id, 0)
-	return err
-}
-
-func buttonHidden(p *panel, text string, x, y, width, height int, id uint16) error {
-	return createMenuOption(p, text, x, y, width, height, id)
-}
-
-// createMenuOption is shared by the two fixed in-panel menus. Value selectors
-// use nativeform.ChoicePopup so scrolling and keyboard behavior are identical
-// in the main panel and form windows.
-func createMenuOption(p *panel, text string, x, y, width, height int, id uint16) error {
-	hwnd, err := p.child("BUTTON", text, wsChild|wsTabStop|bsOwnerDraw, x, y, width, height, id, p.font)
-	if err != nil {
-		return err
-	}
-	p.subclassButton(hwnd)
 	return nil
 }
 

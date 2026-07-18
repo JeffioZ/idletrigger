@@ -442,8 +442,9 @@ func TestProcessColumnWidthsNeverRequireHorizontalScrolling(t *testing.T) {
 	} {
 		widths := processColumnWidths(test.clientWidth, test.scale)
 		total := widths[0] + widths[1] + widths[2]
-		if total > test.clientWidth {
-			t.Fatalf("processColumnWidths(%d, %.2f) = %v (total %d)", test.clientWidth, test.scale, widths, total)
+		reserve := max(1, int(float64(processScrollbarLane)*test.scale+0.5))
+		if total > max(0, test.clientWidth-reserve) {
+			t.Fatalf("processColumnWidths(%d, %.2f) = %v (total %d, reserve %d)", test.clientWidth, test.scale, widths, total, reserve)
 		}
 		for _, width := range widths {
 			if width < 0 {
@@ -455,6 +456,17 @@ func TestProcessColumnWidthsNeverRequireHorizontalScrolling(t *testing.T) {
 	wide := processColumnWidths(996, 1)
 	if wide[1] != 310 || wide[0] <= wide[1] {
 		t.Fatalf("wide process picker should keep description compact and give spare room to process names: %v", wide)
+	}
+}
+
+func TestProcessPickerExcludesOnlyItsOwnPID(t *testing.T) {
+	instances := []processcatalog.Instance{
+		{PID: 10, Executable: "IdleTrigger.exe"},
+		{PID: 11, Executable: "other.exe"},
+	}
+	filtered := excludePickerProcess(instances, 10)
+	if len(filtered) != 1 || filtered[0].PID != 11 {
+		t.Fatalf("filtered instances = %+v", filtered)
 	}
 }
 
@@ -511,7 +523,10 @@ func requireNativeIntegration(t *testing.T) {
 func TestProcessPickerRemainsOperableAcrossDPIAndSmallWorkArea(t *testing.T) {
 	requireNativeIntegration(t)
 	work := nativeform.Rect{Right: 1366, Bottom: 768}
-	groups := []processcatalog.Group{{Executable: "player.exe", Description: "Media Player", Count: 2}}
+	groups := make([]processcatalog.Group, 40)
+	for index := range groups {
+		groups[index] = processcatalog.Group{Executable: fmt.Sprintf("player-%02d.exe", index), Description: "Media Player", Count: 2}
+	}
 	for _, scale := range []float64{1, 1.25, 1.5, 2} {
 		t.Run(formatPickerScale(scale), func(t *testing.T) {
 			err := Capture(testPickerOptions(), groups, scale, false, func(hwnd windows.Handle) error {
@@ -526,8 +541,14 @@ func TestProcessPickerRemainsOperableAcrossDPIAndSmallWorkArea(t *testing.T) {
 				for _, id := range []uint16{idCancel, idConfirm} {
 					assertPickerRectInside(t, pickerWindowRect(t, p.controls[id]), client)
 				}
+				wheelDelta := int16(-120)
+				pSendMessage.Call(uintptr(p.controls[idList]), wmMouseWheel, uintptr(uint32(uint16(wheelDelta))<<16), 0)
+				top, _, _ := pSendMessage.Call(uintptr(p.controls[idList]), lvmGetTopIndex, 0, 0)
+				if top == 0 {
+					t.Fatal("process list did not respond to the mouse wheel")
+				}
 				assertNoHorizontalProcessScroll(t, p)
-				assertHeaderReachesListEdge(t, p)
+				assertHeaderLeavesScrollbarLane(t, p)
 				return nil
 			})
 			if err != nil {
@@ -542,6 +563,7 @@ func TestProcessPickerAppliesSuggestedRectAcrossDPIChanges(t *testing.T) {
 	err := Capture(testPickerOptions(), nil, 1, false, func(hwnd windows.Handle) error {
 		p := activePickerForTest(t, hwnd)
 		p.captureScale = 0
+		listHandle := p.controls[idList]
 		workAreas := pickerMonitorWorkAreas(t)
 		for index, dpi := range []uint32{96, 120, 144, 192, 120} {
 			work := workAreas[index%len(workAreas)]
@@ -558,6 +580,9 @@ func TestProcessPickerAppliesSuggestedRectAcrossDPIChanges(t *testing.T) {
 			want := nativeform.ConstrainRect(suggested, work)
 			if got := pickerWindowRect(t, hwnd); got != want {
 				t.Fatalf("window rect after %d DPI = %+v, want %+v", dpi, got, want)
+			}
+			if p.controls[idList] != listHandle {
+				t.Fatalf("process list HWND changed after %d DPI", dpi)
 			}
 		}
 		return nil
@@ -896,7 +921,7 @@ func assertNoHorizontalProcessScroll(t *testing.T, p *picker) {
 	}
 }
 
-func assertHeaderReachesListEdge(t *testing.T, p *picker) {
+func assertHeaderLeavesScrollbarLane(t *testing.T, p *picker) {
 	t.Helper()
 	var headerClient, last rect
 	if ok, _, _ := pGetClientRect.Call(uintptr(p.header), uintptr(unsafe.Pointer(&headerClient))); ok == 0 {
@@ -905,7 +930,9 @@ func assertHeaderReachesListEdge(t *testing.T, p *picker) {
 	if ok, _, _ := pSendMessage.Call(uintptr(p.header), hdmGetItemRect, 2, uintptr(unsafe.Pointer(&last))); ok == 0 {
 		t.Fatal("read last process header item")
 	}
-	if gap := headerClient.Right - last.Right; gap < 0 || gap > 1 {
-		t.Fatalf("process header right remainder = %d px (client=%+v last=%+v)", gap, headerClient, last)
+	gap := headerClient.Right - last.Right
+	want := int32(max(1, int(float64(processScrollbarLane)*p.scale()+0.5)))
+	if gap < want-1 || gap > want+1 {
+		t.Fatalf("process header scrollbar lane = %d px, want %d (client=%+v last=%+v)", gap, want, headerClient, last)
 	}
 }

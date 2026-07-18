@@ -6,16 +6,6 @@ import (
 )
 
 func (p *panel) openChoice(id uint16) {
-	if p.disabled[id] {
-		return
-	}
-	if p.choice.openID == id && p.choice.popup != nil && p.choice.popup.IsOpen() {
-		p.closeChoice(true)
-		return
-	}
-	p.closeChoice(false)
-	p.closeQuickMenu()
-	p.closeLanguageMenu()
 	options := p.choice.options[id]
 	if len(options) == 0 || p.controls[id] == 0 {
 		return
@@ -29,6 +19,20 @@ func (p *panel) openChoice(id uint16) {
 	for index, label := range options {
 		items[index] = nativeform.ChoicePopupItem{Label: label, Value: index}
 	}
+	p.openPopup(id, selected, true, items, func(index int) {
+		p.applyChoice(id, index)
+	})
+}
+
+func (p *panel) openPopup(id uint16, selected int, keepReselection bool, items []nativeform.ChoicePopupItem, onSelect func(int)) {
+	if p.disabled[id] || p.controls[id] == 0 || len(items) == 0 {
+		return
+	}
+	if p.choice.openID == id && p.choice.popup != nil && p.choice.popup.IsOpen() {
+		p.closeChoice(true)
+		return
+	}
+	p.closeChoice(false)
 	p.choice.serial++
 	serial := p.choice.serial
 	p.choice.openID = id
@@ -36,10 +40,10 @@ func (p *panel) openChoice(id uint16) {
 		Owner: p.hwnd, Anchor: p.controls[id], Font: p.font, SelectedFont: p.choiceSelectedFont,
 		Palette: p.palette, Dark: p.themeDark, Scale: p.metrics.scale,
 		Selected: selected, MaxVisible: 6, Items: items,
-		KeepOpenOnReselect: true, RestoreAnchorOnCancel: true,
-		OnSelect: func(index int) {
-			p.applyChoice(id, index)
-		},
+		KeepOpenOnReselect: keepReselection, RestoreAnchorOnCancel: true,
+		PreferAbove:  id == idQuickActions || id == idLanguage,
+		FocusVisible: p.keyboardNavigation,
+		OnSelect:     onSelect,
 		OnClose: func() {
 			if p.choice.serial != serial {
 				return
@@ -51,8 +55,9 @@ func (p *panel) openChoice(id uint16) {
 			p.invalidate(id)
 		},
 	})
-	if err != nil {
+	if err != nil || popup == nil || !popup.IsOpen() {
 		p.choice.openID = 0
+		p.choice.popup = nil
 		p.invalidate(id)
 		return
 	}
@@ -60,7 +65,7 @@ func (p *panel) openChoice(id uint16) {
 	p.invalidate(id)
 }
 
-func (p *panel) requestChoice(id uint16, _ bool) {
+func (p *panel) requestChoice(id uint16) {
 	pPostMessage.Call(uintptr(p.hwnd), wmOpenChoice, uintptr(id), 0)
 }
 

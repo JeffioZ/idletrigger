@@ -61,10 +61,10 @@ func (p *panel) commandAction(id uint16) (Action, int, bool) {
 func (p *panel) handleMenuCommand(id uint16) bool {
 	switch id {
 	case idQuickActions:
-		p.openQuickMenu(p.keyboardNavigation)
+		p.openQuickMenu()
 		return true
 	case idLanguage:
-		p.openLanguageMenu(p.keyboardNavigation)
+		p.openLanguageMenu()
 		return true
 	case idLangEN:
 		p.selectLanguage(idLangEN, 0)
@@ -82,7 +82,7 @@ func (p *panel) selectLanguage(id uint16, value int) {
 		return
 	}
 	p.choose(languageIDs(), id)
-	p.closeLanguageMenu()
+	p.closeChoice(false)
 	if p.onAction != nil {
 		p.onAction(ActLanguage, value)
 	}

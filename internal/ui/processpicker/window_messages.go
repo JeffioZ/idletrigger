@@ -290,10 +290,42 @@ func (p *picker) place(id uint16, x, y, width, height int) {
 		return
 	}
 	scale := p.scale()
-	pSetWindowPos.Call(uintptr(control), 0,
-		uintptr(int(float64(x)*scale)), uintptr(int(float64(y-p.contentOffset)*scale)),
-		uintptr(max(1, int(float64(width)*scale))), uintptr(max(1, int(float64(height)*scale))),
-		swpNoZOrder|swpNoActivate)
+	positionX := uintptr(int(float64(x) * scale))
+	positionY := uintptr(int(float64(y-p.contentOffset) * scale))
+	physicalWidth := uintptr(max(1, int(float64(width)*scale)))
+	physicalHeight := uintptr(max(1, int(float64(height)*scale)))
+	if p.layoutBatch != 0 {
+		next, _, _ := pDeferWindowPos.Call(
+			p.layoutBatch, uintptr(control), 0,
+			positionX, positionY, physicalWidth, physicalHeight,
+			swpNoZOrder|swpNoActivate,
+		)
+		if next != 0 {
+			p.layoutBatch = next
+			return
+		}
+		p.layoutBatch = 0
+	}
+	pSetWindowPos.Call(uintptr(control), 0, positionX, positionY, physicalWidth, physicalHeight, swpNoZOrder|swpNoActivate)
+}
+
+func (p *picker) beginLayoutBatch() {
+	p.layoutBatch = 0
+	if p.hwnd == 0 {
+		return
+	}
+	batch, _, _ := pBeginDeferWindowPos.Call(uintptr(len(p.controls)))
+	p.layoutBatch = batch
+}
+
+func (p *picker) endLayoutBatch() bool {
+	batch := p.layoutBatch
+	p.layoutBatch = 0
+	if batch == 0 {
+		return false
+	}
+	committed, _, _ := pEndDeferWindowPos.Call(batch)
+	return committed != 0
 }
 
 func (p *picker) scrollContentTo(position int) {
@@ -400,18 +432,22 @@ func (p *picker) releaseBrushes() {
 	p.windowBrush, p.surfaceBrush = 0, 0
 }
 
-func (p *picker) rebuildForDPI() {
+func (p *picker) rebuildForDPI() bool {
 	scale := p.scale()
 	newFont, _ := newFontForPicker(int32(14*scale+0.5), 400, p.options.Chinese)
 	if newFont == 0 {
-		return
+		return false
 	}
 	oldFont := p.font
 	p.font = newFont
 	for _, control := range p.controls {
-		pSendMessage.Call(uintptr(control), wmSetFont, uintptr(p.font), 1)
+		pSendMessage.Call(uintptr(control), wmSetFont, uintptr(p.font), 0)
 	}
+	p.beginLayoutBatch()
 	p.positionInWorkArea(nil)
+	if !p.endLayoutBatch() {
+		p.layout()
+	}
 	_ = p.applyStateImages()
 	if p.scrollbar != nil {
 		p.scrollbar.SetScale(scale)
@@ -430,6 +466,16 @@ func (p *picker) rebuildForDPI() {
 	if oldFont != 0 {
 		pDeleteObject.Call(uintptr(oldFont))
 	}
+	return true
+}
+
+func (p *picker) commitDPIFrame(transition *nativeform.FrameTransition) bool {
+	for range 3 {
+		if err := transition.Commit(p.frameControls()...); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func wndProc(hwnd windows.Handle, message uint32, wParam, lParam uintptr) uintptr {
@@ -507,6 +553,7 @@ func wndProc(hwnd windows.Handle, message uint32, wParam, lParam uintptr) uintpt
 		p.applyTheme()
 		return 0
 	case wmDpiChanged:
+		transition := nativeform.BeginFrameTransition(p.hwnd)
 		dpi := uint32(wParam & 0xffff)
 		if dpi == 0 {
 			dpi = 96
@@ -516,9 +563,13 @@ func wndProc(hwnd windows.Handle, message uint32, wParam, lParam uintptr) uintpt
 			suggested := nativeform.Rect(*(*rect)(nativeform.MessagePointer(lParam)))
 			p.pendingSuggested = &suggested
 		}
-		p.rebuildForDPI()
-		scale := p.scale()
-		p.icons.Apply(p.hwnd, p.themeDark, int(32*scale+0.5), int(16*scale+0.5), true)
+		if p.rebuildForDPI() {
+			scale := p.scale()
+			p.icons.Apply(p.hwnd, p.themeDark, int(32*scale+0.5), int(16*scale+0.5), true)
+		}
+		if !p.commitDPIFrame(&transition) {
+			p.destroy()
+		}
 		return 0
 	case wmDestroy:
 		p.releaseResources()

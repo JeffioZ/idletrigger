@@ -103,14 +103,6 @@ func (p *panel) roundRectFocusRing(dc windows.Handle, bounds rect, color uint32)
 func (p *panel) drawButton(item *drawItem) {
 	id := uint16(item.CtlID)
 	state := p.controlState(id, item.ItemState)
-	if containsLanguageOption(id) {
-		p.drawMenuOption(item, state, menuOptionStyleFor(id, p.selected[id]))
-		return
-	}
-	if containsQuickAction(id) {
-		p.drawMenuOption(item, state, menuOptionStyleFor(id, false))
-		return
-	}
 	if id == idIdleTimeout || id == idIdleAction {
 		p.drawChoiceButton(item, state)
 		return
@@ -241,77 +233,6 @@ func projectHomeLinkColor(palette colors.Palette, dark bool, state buttonVisualS
 		return palette.AccentHover
 	}
 	return palette.Accent
-}
-
-type menuOptionStyle struct {
-	Selected bool
-	Danger   bool
-}
-
-func menuOptionStyleFor(id uint16, selected bool) menuOptionStyle {
-	return menuOptionStyle{
-		Selected: selected,
-		Danger:   isDangerQuickAction(id),
-	}
-}
-
-// drawMenuOption is the rendering path for the two fixed in-panel menus.
-// Value selector rows are drawn by nativeform.ChoicePopup.
-func (p *panel) drawMenuOption(item *drawItem, state buttonVisualState, style menuOptionStyle) {
-	brush, border, textColor := p.surfaceBrush, p.palette.Border, p.palette.PrimaryText
-	if state.Hovered {
-		brush = p.hoverBrush
-	}
-	if style.Danger {
-		brush, border, textColor = p.dangerBrush, p.palette.DangerBorder, p.palette.DangerText
-		if state.Hovered {
-			brush, border = p.dangerHoverBrush, p.palette.DangerHoverBorder
-		}
-	}
-	if state.Pressed {
-		brush, border = p.elevatedBrush, p.palette.AccentPressed
-		if style.Danger {
-			brush, border, textColor = p.dangerPressedBrush, p.palette.DangerPressedBorder, p.palette.DangerText
-		}
-	}
-	if state.Disabled || item.ItemState&odsDisabled != 0 {
-		brush, border, textColor = p.disabledBrush, p.palette.SubtleBorder, p.palette.DisabledText
-	}
-	// Menu rows live on the elevated popup surface. Clearing with the same
-	// brush keeps rounded corners and the shared row gap free of panel-colored
-	// seams at every DPI scale.
-	pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&item.Rect)), uintptr(p.elevatedBrush))
-	p.roundRect(item.HDC, item.Rect, brush, border, p.sc(p.metrics.style.Control.CornerRadius))
-	if style.Selected {
-		marker := item.Rect
-		marker.Left += int32(p.sc(p.metrics.style.Control.MenuSurfaceInset))
-		marker.Right = marker.Left + int32(p.sc(p.metrics.style.Control.SelectedMarkerWidth))
-		marker.Top += int32(p.sc(6))
-		marker.Bottom -= int32(p.sc(6))
-		if marker.Left < marker.Right && marker.Top < marker.Bottom {
-			pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&marker)), uintptr(p.accentBrush))
-		}
-	}
-	pSetTextColor.Call(uintptr(item.HDC), uintptr(textColor))
-	pSetBkMode.Call(uintptr(item.HDC), transparent)
-	font := p.font
-	if style.Selected {
-		font = p.choiceSelectedFont
-	}
-	old, _, _ := pSelectObject.Call(uintptr(item.HDC), uintptr(font))
-	defer pSelectObject.Call(uintptr(item.HDC), old)
-	text, _ := windows.UTF16PtrFromString(p.labels[uint16(item.CtlID)])
-	bounds := item.Rect
-	bounds.Left += int32(p.sc(p.metrics.style.Control.ButtonTextInset))
-	bounds.Right -= int32(p.sc(p.metrics.style.Control.ButtonTextInset))
-	drawTextCentered(item.HDC, text, bounds)
-	if state.Focused {
-		focusColor := p.palette.Focus
-		if style.Danger {
-			focusColor = p.palette.DangerFocus
-		}
-		p.roundRectFocusRing(item.HDC, item.Rect, focusColor)
-	}
 }
 
 func (p *panel) drawChoiceButton(item *drawItem, state buttonVisualState) {

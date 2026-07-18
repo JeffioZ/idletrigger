@@ -57,9 +57,17 @@ func (p *picker) releaseHeaderRenderer() {
 }
 
 func headerListSubclassProc(hwnd windows.Handle, message uint32, wParam, lParam uintptr, subclassID, refData uintptr) uintptr {
+	if message == headerMouseWheel {
+		activeMu.Lock()
+		p := active
+		activeMu.Unlock()
+		if p != nil && hwnd == p.controls[idList] && p.scrollListWheel(wParam) {
+			return 0
+		}
+	}
 	result, _, _ := pDefSubclassProc.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
 	switch message {
-	case headerMouseWheel, headerVScroll, headerKeyDown:
+	case headerVScroll, headerKeyDown:
 		activeMu.Lock()
 		p := active
 		activeMu.Unlock()

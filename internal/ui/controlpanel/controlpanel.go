@@ -286,13 +286,13 @@ func (p *panel) create() error {
 	title, _ := windows.UTF16PtrFromString(titleText)
 	name, _ := windows.UTF16PtrFromString(panelClass)
 	style := uint32(wsPopup | wsCaption | wsSysMenu | wsClipChildren)
-	exStyle := uint32(wsExTopmost | wsExComposited)
+	exStyle := uint32(wsExTopmost)
 	owner := uintptr(p.owner)
 	if p.developerCapturePanel || p.captureHost {
 		// Capture mode uses a normal app window shape so screenshot tools can
 		// detect the whole panel instead of treating it as a transient tray popup.
 		style = uint32(wsOverlappedWindow | wsClipChildren)
-		exStyle = uint32(wsExAppWindow | wsExComposited)
+		exStyle = uint32(wsExAppWindow)
 		owner = 0
 	}
 	// Create hidden on the destination monitor instead of at a default or
@@ -392,6 +392,9 @@ func (p *panel) child(className, text string, style uint32, x, y, width, height 
 	if err != nil {
 		return 0, err
 	}
+	// Owner-drawn siblings repaint independently during DPI and theme changes;
+	// clipping keeps their buffered paint regions isolated.
+	style |= wsClipSiblings
 	hwnd, _, callErr := pCreateWindowEx.Call(0, uintptr(unsafe.Pointer(class)), uintptr(unsafe.Pointer(caption)), uintptr(style), uintptr(p.sc(x)), uintptr(p.sc(y)), uintptr(p.sc(width)), uintptr(p.sc(height)), uintptr(p.hwnd), uintptr(id), 0, 0)
 	if hwnd == 0 {
 		return 0, fmt.Errorf("create %s control: %w", className, callErr)

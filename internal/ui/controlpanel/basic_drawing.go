@@ -2,6 +2,7 @@ package controlpanel
 
 import (
 	"github.com/JeffioZ/idletrigger/internal/platform/windows/gdiplus"
+	"github.com/JeffioZ/idletrigger/internal/ui/nativeform"
 	"github.com/JeffioZ/idletrigger/internal/ui/trayicon"
 	"golang.org/x/sys/windows"
 	"unsafe"
@@ -83,10 +84,6 @@ func (p *panel) drawToggleBox(dc windows.Handle, box rect, brush, border windows
 func (p *panel) drawStatic(item *drawItem) {
 	id := uint16(item.CtlID)
 	kind := p.staticKinds[id]
-	if kind == staticQuickMenu {
-		p.roundRect(item.HDC, item.Rect, p.elevatedBrush, p.palette.SubtleBorder, p.sc(p.metrics.style.Control.CornerRadius))
-		return
-	}
 	pFillRect.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(&item.Rect)), uintptr(p.backgroundBrush))
 	pSetBkMode.Call(uintptr(item.HDC), transparent)
 	text, err := windows.UTF16PtrFromString(p.labels[id])
@@ -125,6 +122,31 @@ func (p *panel) drawStatic(item *drawItem) {
 		defer pSelectObject.Call(uintptr(item.HDC), old)
 	}
 	pDrawText.Call(uintptr(item.HDC), uintptr(unsafe.Pointer(text)), ^uintptr(0), uintptr(unsafe.Pointer(&bounds)), dtLeft|dtVCenter|dtWordBreak)
+}
+
+func (p *panel) drawItemBuffered(item *drawItem) {
+	if item == nil || item.HDC == 0 {
+		return
+	}
+	bounds := nativeform.Rect{Left: item.Rect.Left, Top: item.Rect.Top, Right: item.Rect.Right, Bottom: item.Rect.Bottom}
+	paint := func(dc windows.Handle, local nativeform.Rect) {
+		buffered := *item
+		buffered.HDC = dc
+		buffered.Rect = rect{Left: local.Left, Top: local.Top, Right: local.Right, Bottom: local.Bottom}
+		if p.staticKinds[uint16(buffered.CtlID)] != staticNone {
+			p.drawStatic(&buffered)
+		} else {
+			p.drawButton(&buffered)
+		}
+	}
+	if nativeform.DrawBuffered(item.HDC, bounds, paint) {
+		return
+	}
+	if p.staticKinds[uint16(item.CtlID)] != staticNone {
+		p.drawStatic(item)
+	} else {
+		p.drawButton(item)
+	}
 }
 
 func drawTextCentered(dc windows.Handle, text *uint16, bounds rect) {

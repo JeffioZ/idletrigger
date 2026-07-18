@@ -45,7 +45,7 @@ func (p *panel) place(id uint16, x, y, width, height int, visible bool) {
 		innerHeight := min(20, height-4)
 		p.positionControl(hwnd, x+2, y+(height-innerHeight)/2, width-4, innerHeight)
 		p.show(id, visible)
-		if visible {
+		if visible && p.layoutBatch == 0 {
 			pSetWindowPos.Call(uintptr(hwnd), 0, 0, 0, 0, 0, swpNoMove|swpNoSize|swpNoActivate)
 		}
 		return
@@ -58,10 +58,51 @@ func (p *panel) positionControl(hwnd windows.Handle, x, y, width, height int) {
 		return
 	}
 	scale := p.scale()
-	pSetWindowPos.Call(uintptr(hwnd), 0,
-		uintptr(int(float64(x)*scale)), uintptr(int(float64(y-p.contentOffset)*scale)),
-		uintptr(int(float64(width)*scale)), uintptr(int(float64(height)*scale)),
-		swpNoZOrder|swpNoActivate)
+	positionX := uintptr(int(float64(x) * scale))
+	positionY := uintptr(int(float64(y-p.contentOffset) * scale))
+	physicalWidth := uintptr(max(1, int(float64(width)*scale)))
+	physicalHeight := uintptr(max(1, int(float64(height)*scale)))
+	if p.layoutBatch != 0 {
+		next, _, _ := pDeferWindowPos.Call(
+			p.layoutBatch, uintptr(hwnd), 0,
+			positionX, positionY, physicalWidth, physicalHeight,
+			swpNoZOrder|swpNoActivate,
+		)
+		if next != 0 {
+			p.layoutBatch = next
+			return
+		}
+		p.layoutBatch = 0
+	}
+	pSetWindowPos.Call(uintptr(hwnd), 0, positionX, positionY, physicalWidth, physicalHeight, swpNoZOrder|swpNoActivate)
+}
+
+func (p *panel) beginLayoutBatch() {
+	p.layoutBatch = 0
+	p.layoutVisibility = nil
+	if p.hwnd == 0 {
+		return
+	}
+	batch, _, _ := pBeginDeferWindowPos.Call(uintptr(len(p.controls) + len(p.anonymous)))
+	p.layoutBatch = batch
+}
+
+func (p *panel) endLayoutBatch() bool {
+	batch := p.layoutBatch
+	visibility := p.layoutVisibility
+	p.layoutBatch = 0
+	p.layoutVisibility = nil
+	if batch == 0 {
+		return false
+	}
+	committed, _, _ := pEndDeferWindowPos.Call(batch)
+	if committed == 0 {
+		return false
+	}
+	for id, visible := range visibility {
+		p.applyVisibility(id, visible)
+	}
+	return true
 }
 func (p *panel) placeCombo(id uint16, x, y, width int, visible bool) {
 	p.place(id, x, y, width, nativeform.FieldHeight, visible)
@@ -135,6 +176,17 @@ func (p *panel) setCaption(value string) {
 	pSetWindowText.Call(uintptr(p.hwnd), uintptr(unsafe.Pointer(text)))
 }
 func (p *panel) show(id uint16, visible bool) {
+	if p.layoutBatch != 0 {
+		if p.layoutVisibility == nil {
+			p.layoutVisibility = make(map[uint16]bool)
+		}
+		p.layoutVisibility[id] = visible
+		return
+	}
+	p.applyVisibility(id, visible)
+}
+
+func (p *panel) applyVisibility(id uint16, visible bool) {
 	command := uintptr(0)
 	if visible {
 		command = 5
@@ -348,28 +400,84 @@ func (p *panel) scrollWheel(wParam uintptr) bool {
 	return delta != 0
 }
 
-func (p *panel) rebuildForDPI() {
-	view, editing, draft, contentOffset := p.view, p.editing, p.draft, p.contentOffset
-	if view == editorView {
-		p.syncDraft()
-		draft = p.draft
-	}
-	p.clearControls()
-	if p.font != 0 {
-		pDeleteObject.Call(uintptr(p.font))
-	}
-	if p.sectionFont != 0 {
-		pDeleteObject.Call(uintptr(p.sectionFont))
-	}
+func (p *panel) rebuildForDPI() bool {
 	scale := p.scale()
-	p.font, _ = font.New(int32(14*scale+0.5), 400, p.state.Chinese)
-	p.sectionFont, _ = font.New(int32(14*scale+0.5), 600, p.state.Chinese)
-	if view == editorView {
-		p.showEditorDraft(editing, draft)
-	} else {
-		p.showManager()
+	newFont, _ := font.New(int32(14*scale+0.5), 400, p.state.Chinese)
+	newSectionFont, _ := font.New(int32(14*scale+0.5), 600, p.state.Chinese)
+	if newFont == 0 || newSectionFont == 0 {
+		if newFont != 0 {
+			pDeleteObject.Call(uintptr(newFont))
+		}
+		if newSectionFont != 0 {
+			pDeleteObject.Call(uintptr(newSectionFont))
+		}
+		return false
 	}
-	p.scrollContentTo(contentOffset)
+	// Choice popups are independent top-level windows and retain the fonts and
+	// scale passed at creation time. Close an open popup before replacing those
+	// resources; reopening it will use the new monitor DPI.
+	p.closeChoice(false)
+	oldFont, oldSectionFont := p.font, p.sectionFont
+	p.font, p.sectionFont = newFont, newSectionFont
+	for id, control := range p.controls {
+		useFont := p.font
+		if automationSectionControl(id) {
+			useFont = p.sectionFont
+		}
+		pSendMessage.Call(uintptr(control), wmSetFont, uintptr(useFont), 0)
+	}
+	for _, control := range p.anonymous {
+		pSendMessage.Call(uintptr(control), wmSetFont, uintptr(p.font), 0)
+	}
+	p.surfaces.SetScale(scale)
+	if p.managerScroll != nil {
+		p.managerScroll.SetScale(scale)
+	}
+	if p.contentScroll != nil {
+		p.contentScroll.SetScale(scale)
+	}
+	margin := int(6*scale + 0.5)
+	for _, id := range []uint16{idName, idDate, idTime, idEndTime, idIdleMinutes, idWarningSeconds, idMaxWait} {
+		if control := p.controls[id]; control != 0 {
+			pSendMessage.Call(uintptr(control), emSetMargins, 3, uintptr(margin|(margin<<16)))
+		}
+	}
+	if p.tooltip != 0 {
+		pSendMessage.Call(uintptr(p.tooltip), ttmSetMaxTipWidth, 0, uintptr(int(360*scale)))
+	}
+
+	p.beginLayoutBatch()
+	if p.view == editorView {
+		p.layoutEditor()
+	} else {
+		p.resize(managerWidth, managerHeight)
+		p.layoutManager()
+	}
+	if !p.endLayoutBatch() {
+		p.repositionContent()
+		if p.view == editorView {
+			p.layoutEditor()
+		} else {
+			p.layoutManager()
+		}
+	}
+	p.surfaces.PrepareCues()
+	if oldFont != 0 {
+		pDeleteObject.Call(uintptr(oldFont))
+	}
+	if oldSectionFont != 0 {
+		pDeleteObject.Call(uintptr(oldSectionFont))
+	}
+	return true
+}
+
+func automationSectionControl(id uint16) bool {
+	switch id {
+	case idTitle, idEmptyTitle, idBasicsTitle, idTriggerTitle, idOptionsTitle:
+		return true
+	default:
+		return false
+	}
 }
 func (p *panel) applyTheme() {
 	p.themeDark = theme.Current() == theme.ModeDark

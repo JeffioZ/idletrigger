@@ -134,6 +134,8 @@ type panel struct {
 	contentScroll       *nativeform.Scrollbar
 	pendingState        *State
 	managerNotice       string
+	layoutBatch         uintptr
+	layoutVisibility    map[uint16]bool
 }
 
 type logicalBounds struct{ X, Y, Width, Height int }
@@ -281,40 +283,43 @@ const (
 )
 
 var (
-	user32             = windows.NewLazySystemDLL("user32.dll")
-	gdi32              = windows.NewLazySystemDLL("gdi32.dll")
-	pCreateWindowEx    = user32.NewProc("CreateWindowExW")
-	pDestroyWindow     = user32.NewProc("DestroyWindow")
-	pDefWindowProc     = user32.NewProc("DefWindowProcW")
-	pRegisterClassEx   = user32.NewProc("RegisterClassExW")
-	pSendMessage       = user32.NewProc("SendMessageW")
-	pSetWindowText     = user32.NewProc("SetWindowTextW")
-	pPostMessage       = user32.NewProc("PostMessageW")
-	pSetWindowPos      = user32.NewProc("SetWindowPos")
-	pShowWindow        = user32.NewProc("ShowWindow")
-	pEnableWindow      = user32.NewProc("EnableWindow")
-	pIsWindow          = user32.NewProc("IsWindow")
-	pIsWindowEnabled   = user32.NewProc("IsWindowEnabled")
-	pIsWindowVisible   = user32.NewProc("IsWindowVisible")
-	pSetForeground     = user32.NewProc("SetForegroundWindow")
-	pSetFocus          = user32.NewProc("SetFocus")
-	pGetClientRect     = user32.NewProc("GetClientRect")
-	pFillRect          = user32.NewProc("FillRect")
-	pInvalidateRect    = user32.NewProc("InvalidateRect")
-	pGetDpiForWindow   = user32.NewProc("GetDpiForWindow")
-	pSetTextColor      = gdi32.NewProc("SetTextColor")
-	pSetBkColor        = gdi32.NewProc("SetBkColor")
-	pSetBkMode         = gdi32.NewProc("SetBkMode")
-	pCreateBrush       = gdi32.NewProc("CreateSolidBrush")
-	pDeleteObject      = gdi32.NewProc("DeleteObject")
-	pSetWindowSubclass = windows.NewLazySystemDLL("comctl32.dll").NewProc("SetWindowSubclass")
-	pDefSubclassProc   = windows.NewLazySystemDLL("comctl32.dll").NewProc("DefSubclassProc")
-	classOnce          sync.Once
-	classErr           error
-	activeMu           sync.Mutex
-	active             *panel
-	wndCallback        = windows.NewCallback(wndProc)
-	weekdayCallback    = windows.NewCallback(weekdayButtonProc)
+	user32               = windows.NewLazySystemDLL("user32.dll")
+	gdi32                = windows.NewLazySystemDLL("gdi32.dll")
+	pCreateWindowEx      = user32.NewProc("CreateWindowExW")
+	pDestroyWindow       = user32.NewProc("DestroyWindow")
+	pDefWindowProc       = user32.NewProc("DefWindowProcW")
+	pRegisterClassEx     = user32.NewProc("RegisterClassExW")
+	pSendMessage         = user32.NewProc("SendMessageW")
+	pSetWindowText       = user32.NewProc("SetWindowTextW")
+	pPostMessage         = user32.NewProc("PostMessageW")
+	pSetWindowPos        = user32.NewProc("SetWindowPos")
+	pBeginDeferWindowPos = user32.NewProc("BeginDeferWindowPos")
+	pDeferWindowPos      = user32.NewProc("DeferWindowPos")
+	pEndDeferWindowPos   = user32.NewProc("EndDeferWindowPos")
+	pShowWindow          = user32.NewProc("ShowWindow")
+	pEnableWindow        = user32.NewProc("EnableWindow")
+	pIsWindow            = user32.NewProc("IsWindow")
+	pIsWindowEnabled     = user32.NewProc("IsWindowEnabled")
+	pIsWindowVisible     = user32.NewProc("IsWindowVisible")
+	pSetForeground       = user32.NewProc("SetForegroundWindow")
+	pSetFocus            = user32.NewProc("SetFocus")
+	pGetClientRect       = user32.NewProc("GetClientRect")
+	pFillRect            = user32.NewProc("FillRect")
+	pInvalidateRect      = user32.NewProc("InvalidateRect")
+	pGetDpiForWindow     = user32.NewProc("GetDpiForWindow")
+	pSetTextColor        = gdi32.NewProc("SetTextColor")
+	pSetBkColor          = gdi32.NewProc("SetBkColor")
+	pSetBkMode           = gdi32.NewProc("SetBkMode")
+	pCreateBrush         = gdi32.NewProc("CreateSolidBrush")
+	pDeleteObject        = gdi32.NewProc("DeleteObject")
+	pSetWindowSubclass   = windows.NewLazySystemDLL("comctl32.dll").NewProc("SetWindowSubclass")
+	pDefSubclassProc     = windows.NewLazySystemDLL("comctl32.dll").NewProc("DefSubclassProc")
+	classOnce            sync.Once
+	classErr             error
+	activeMu             sync.Mutex
+	active               *panel
+	wndCallback          = windows.NewCallback(wndProc)
+	weekdayCallback      = windows.NewCallback(weekdayButtonProc)
 )
 
 func Show(state State, onSave OnSave, text TextFunc) error {

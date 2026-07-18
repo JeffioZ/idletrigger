@@ -94,3 +94,26 @@ func TestChoicePopupHomeAndEndSkipHeaders(t *testing.T) {
 		t.Fatalf("last selectable row = %d, want 3", got)
 	}
 }
+
+func TestChoicePopupCanPreferAboveItsAnchor(t *testing.T) {
+	work := popupRect{Top: 0, Bottom: 900}
+	anchor := popupRect{Top: 700, Bottom: 740}
+	if got := choicePopupVerticalPosition(anchor, work, 180, 4, true); got != 516 {
+		t.Fatalf("preferred-above y = %d, want 516", got)
+	}
+	if got := choicePopupVerticalPosition(anchor, work, 100, 4, false); got != 744 {
+		t.Fatalf("default-below y = %d, want 744", got)
+	}
+}
+
+func TestChoicePopupPreferredSideFallsBackWhenItDoesNotFit(t *testing.T) {
+	work := popupRect{Top: 100, Bottom: 700}
+	anchor := popupRect{Top: 150, Bottom: 190}
+	if got := choicePopupVerticalPosition(anchor, work, 240, 4, true); got != 194 {
+		t.Fatalf("above fallback y = %d, want 194", got)
+	}
+	anchor = popupRect{Top: 610, Bottom: 650}
+	if got := choicePopupVerticalPosition(anchor, work, 240, 4, false); got != 366 {
+		t.Fatalf("below fallback y = %d, want 366", got)
+	}
+}

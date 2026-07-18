@@ -324,6 +324,12 @@ func TestAutomationWindowsApplySuggestedRectAcrossDPIChanges(t *testing.T) {
 			err := Capture(State{}, func(key string) string { return key }, 1, false, editor, func(hwnd windows.Handle) error {
 				p := activePanelForTest(t, hwnd)
 				p.captureScale = 0
+				retainedID := uint16(idNew)
+				if editor {
+					retainedID = idName
+					p.setText(idName, "unsaved DPI draft")
+				}
+				retainedHandle := p.controls[retainedID]
 				workAreas := monitorWorkAreasForTest(t)
 				for index, dpi := range []uint32{96, 120, 144, 192, 120} {
 					work := workAreas[index%len(workAreas)]
@@ -343,6 +349,12 @@ func TestAutomationWindowsApplySuggestedRectAcrossDPIChanges(t *testing.T) {
 					want := nativeform.ConstrainRect(suggested, work)
 					if got := windowRectForTest(t, hwnd); got != want {
 						t.Fatalf("window rect after %d DPI = %+v, want suggested/clamped %+v", dpi, got, want)
+					}
+					if p.controls[retainedID] != retainedHandle {
+						t.Fatalf("control %d HWND changed after %d DPI", retainedID, dpi)
+					}
+					if editor && p.controlText(idName) != "unsaved DPI draft" {
+						t.Fatalf("unsaved editor text changed after %d DPI", dpi)
 					}
 				}
 				return nil

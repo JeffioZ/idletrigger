@@ -183,19 +183,31 @@ func DrawPopupHeader(dc windows.Handle, bounds Rect, font windows.Handle, label 
 // DrawMenuOption is shared by form-window choice popups and follows the main
 // control panel's menu language: quiet rows, a slim selected marker, a
 // slightly stronger selected label, and stable hover/press surfaces.
-func DrawMenuOption(dc windows.Handle, bounds Rect, font, selectedFont windows.Handle, label string, palette colors.Palette, background uint32, state ControlState, selected bool, radius, scale int32) {
+func DrawMenuOption(dc windows.Handle, bounds Rect, font, selectedFont windows.Handle, label string, palette colors.Palette, background uint32, state ControlState, selected, danger bool, radius, scale int32) {
 	fill, border, textColor := palette.Surface, palette.Border, palette.PrimaryText
 	if state.Hovered {
 		fill = palette.HoverSurface
 	}
+	if danger {
+		fill, border, textColor = palette.DangerBackground, palette.DangerBorder, palette.DangerText
+		if state.Hovered {
+			fill, border = palette.DangerHover, palette.DangerHoverBorder
+		}
+	}
 	if state.Pressed {
 		fill, border = palette.ElevatedSurface, palette.AccentPressed
+		if danger {
+			fill, border, textColor = palette.DangerPressed, palette.DangerPressedBorder, palette.DangerText
+		}
 	}
 	if state.Disabled {
 		fill, border, textColor = palette.DisabledSurface, palette.SubtleBorder, palette.DisabledText
 	}
 	if state.Focused && !state.Disabled {
 		border = palette.Focus
+		if danger {
+			border = palette.DangerFocus
+		}
 	}
 	DrawSurface(dc, bounds, palette, background, fill, border, radius)
 	if selected {

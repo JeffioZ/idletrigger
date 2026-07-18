@@ -1,108 +1,60 @@
 package controlpanel
 
 import (
-	"golang.org/x/sys/windows"
 	"unsafe"
+
+	"github.com/JeffioZ/idletrigger/internal/ui/nativeform"
+	"golang.org/x/sys/windows"
 )
 
-func (p *panel) openQuickMenu(focusFirst bool) {
-	if p.choice.openID != 0 {
-		p.closeChoice(false)
-	}
-	if p.quickMenuOpen {
-		p.closeQuickMenu()
-		return
-	}
-	p.quickMenuOpen = true
-	p.closeLanguageMenu()
-	p.showFixedMenu(idQuickMenu, quickActionIDs())
-	if focusFirst {
-		pSetFocus.Call(uintptr(p.controls[quickActionIDs()[0]]))
-	}
+func (p *panel) openQuickMenu() {
+	items := p.quickMenuItems()
+	p.openPopup(idQuickActions, -1, false, items, func(value int) {
+		p.handleCommand(uint16(value))
+	})
 }
 
-func (p *panel) clearTrackedHover(ids []uint16) {
-	for _, id := range ids {
-		if p.hoverID == id {
-			p.hoverID = 0
-			p.invalidate(id)
-			return
+func (p *panel) quickMenuItems() []nativeform.ChoicePopupItem {
+	ids := quickActionIDs()
+	items := make([]nativeform.ChoicePopupItem, len(ids))
+	for index, id := range ids {
+		items[index] = nativeform.ChoicePopupItem{
+			Label: p.text(quickActionTranslationKey(id)), Value: int(id), Danger: isDangerQuickAction(id),
 		}
 	}
+	return items
 }
 
-func (p *panel) closeQuickMenu() {
-	p.closeFixedMenu(&p.quickMenuOpen, idQuickMenu, idQuickActions, quickActionIDs())
-}
-
-func (p *panel) openLanguageMenu(focusFirst bool) {
-	if p.choice.openID != 0 {
-		p.closeChoice(false)
-	}
-	if p.languageMenuOpen {
-		p.closeLanguageMenu()
-		return
-	}
-	p.closeQuickMenu()
-	p.languageMenuOpen = true
-	p.showFixedMenu(idLanguageMenu, languageIDs())
-	if focusFirst {
-		p.focusUnselectedLanguage()
-	}
-}
-
-func (p *panel) focusUnselectedLanguage() {
-	id := uint16(idLangEN)
-	if p.selected[id] {
-		id = idLangZH
-	}
-	pSetFocus.Call(uintptr(p.controls[id]))
-}
-
-func (p *panel) closeLanguageMenu() {
-	p.closeFixedMenu(&p.languageMenuOpen, idLanguageMenu, idLanguage, languageIDs())
-}
-
-func (p *panel) showFixedMenu(surfaceID uint16, optionIDs []uint16) {
-	for _, id := range append([]uint16{surfaceID}, optionIDs...) {
-		if hwnd := p.controls[id]; hwnd != 0 {
-			pSetWindowPos.Call(uintptr(hwnd), 0, 0, 0, 0, 0, swpNoMove|swpNoSize|swpNoActivate|swpShowWindow)
+func (p *panel) openLanguageMenu() {
+	items, selected := p.languageMenuItems()
+	ids := languageIDs()
+	p.openPopup(idLanguage, selected, true, items, func(index int) {
+		if index >= 0 && index < len(ids) {
+			p.selectLanguage(ids[index], index)
 		}
-	}
+	})
 }
 
-func (p *panel) closeFixedMenu(open *bool, surfaceID, triggerID uint16, optionIDs []uint16) {
-	if !*open {
-		return
+func (p *panel) languageMenuItems() ([]nativeform.ChoicePopupItem, int) {
+	selected := 0
+	if p.selected[idLangZH] {
+		selected = 1
 	}
-	*open = false
-	p.clearTrackedHover(append([]uint16{triggerID}, optionIDs...))
-	p.invalidate(triggerID)
-	for _, id := range append([]uint16{surfaceID}, optionIDs...) {
-		if hwnd := p.controls[id]; hwnd != 0 {
-			pShowWindow.Call(uintptr(hwnd), swHide)
-		}
+	labels := []string{p.text("menu_lang_en"), p.text("menu_lang_zh")}
+	items := make([]nativeform.ChoicePopupItem, len(labels))
+	for index, label := range labels {
+		items[index] = nativeform.ChoicePopupItem{Label: label, Value: index}
 	}
+	return items, selected
 }
 
 // closeOpenMenus handles an in-panel click outside the currently open menu.
 func (p *panel) closeOpenMenus() {
-	p.closeQuickMenu()
-	p.closeLanguageMenu()
 	p.closeChoice(false)
 }
 
 func (p *panel) menuClickKeepsOpen(id uint16) bool {
-	if p.quickMenuOpen && (id == idQuickActions || id == idQuickMenu || containsQuickAction(id)) {
-		return true
-	}
-	if p.languageMenuOpen && (id == idLanguage || id == idLanguageMenu || containsLanguageOption(id)) {
-		return true
-	}
-	if p.choice.openID == 0 {
-		return false
-	}
-	return id == p.choice.openID
+	return p.choice.openID != 0 && id == p.choice.openID
 }
 
 func (p *panel) setDisabled(id uint16, value bool) {
@@ -168,14 +120,4 @@ func setWindowProc(hwnd windows.Handle, proc uintptr) (uintptr, uintptr, error) 
 		return pSetWindowLong.Call(uintptr(hwnd), gwlpWndProc, proc)
 	}
 	return pSetWindowLongPtr.Call(uintptr(hwnd), gwlpWndProc, proc)
-}
-
-func (p *panel) focusFixedMenuOption(ids []uint16, current uint16, delta int) {
-	for index, id := range ids {
-		if id == current {
-			next := (index + delta + len(ids)) % len(ids)
-			pSetFocus.Call(uintptr(p.controls[ids[next]]))
-			return
-		}
-	}
 }

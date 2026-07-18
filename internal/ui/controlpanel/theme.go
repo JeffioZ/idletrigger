@@ -75,16 +75,7 @@ func (p *panel) applyFrameTheme(dark bool) {
 }
 
 func (p *panel) triggerOpen(id uint16) bool {
-	switch id {
-	case idQuickActions:
-		return p.quickMenuOpen
-	case idLanguage:
-		return p.languageMenuOpen
-	case idIdleTimeout, idIdleAction:
-		return p.choice.openID == id
-	default:
-		return false
-	}
+	return p.choice.openID == id
 }
 
 func isDangerQuickAction(id uint16) bool { return id == idShutdown || id == idRestart }

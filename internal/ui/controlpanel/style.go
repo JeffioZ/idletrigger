@@ -19,7 +19,6 @@ const (
 type layoutTokens struct {
 	PanelWidth, Padding, Gap, SectionGap, LabelGap int
 	ButtonHeight, SectionHeight, SubtitleHeight    int
-	QuickMenuRowHeight, QuickMenuRowGap            int
 }
 
 type fontTokens struct {
@@ -30,10 +29,9 @@ type fontTokens struct {
 type controlTokens struct {
 	CornerRadius, ToggleBoxSize                     int
 	ButtonTextInset, ToggleTextGap, ToggleLeftInset int
-	FocusInset, FocusRingWidth, MenuFocusInset      int
-	ArrowWidth, ArrowHeight, SelectedMarkerWidth    int
-	MenuHintWidth, MenuHintHeight, MenuSurfaceInset int
-	MenuSurfaceWidthCompensation                    int
+	FocusInset, FocusRingWidth                      int
+	ArrowWidth, ArrowHeight                         int
+	MenuSurfaceInset                                int
 	IconLarge, IconSmall                            int
 }
 
@@ -49,7 +47,6 @@ var defaultPanelStyle = panelStyle{
 	Layout: layoutTokens{
 		PanelWidth: 472, Padding: nativeform.FormPadding, Gap: nativeform.ControlGap, SectionGap: nativeform.SectionGap, LabelGap: nativeform.LabelGap,
 		ButtonHeight: nativeform.ButtonHeight, SectionHeight: 22, SubtitleHeight: 18,
-		QuickMenuRowHeight: nativeform.MenuRowHeight, QuickMenuRowGap: nativeform.MenuRowGap,
 	},
 	Fonts: fontTokens{
 		BodySize: 14, SectionSize: 14, SubtitleSize: 12,
@@ -57,11 +54,9 @@ var defaultPanelStyle = panelStyle{
 	},
 	Control: controlTokens{
 		CornerRadius: nativeform.CornerRadius, ToggleBoxSize: 16, ButtonTextInset: 8, ToggleTextGap: 8, ToggleLeftInset: 2,
-		FocusInset: 2, FocusRingWidth: 2, MenuFocusInset: 3,
-		ArrowWidth: 8, ArrowHeight: 4, SelectedMarkerWidth: 3,
-		MenuHintWidth: 28, MenuHintHeight: 1, MenuSurfaceInset: nativeform.MenuSurfaceInset,
-		MenuSurfaceWidthCompensation: 1,
-		IconLarge:                    32, IconSmall: 16,
+		FocusInset: 2, FocusRingWidth: 2,
+		ArrowWidth: 8, ArrowHeight: 4, MenuSurfaceInset: nativeform.MenuSurfaceInset,
+		IconLarge: 32, IconSmall: 16,
 	},
 }
 

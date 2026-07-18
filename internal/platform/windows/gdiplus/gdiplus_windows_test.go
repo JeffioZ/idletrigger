@@ -17,6 +17,12 @@ func TestFillModeConstantsMatchSDK(t *testing.T) {
 	}
 }
 
+func TestHighQualitySmoothingConstantsMatchSDK(t *testing.T) {
+	if smoothingModeAntiAlias8x8 != 5 || pixelOffsetModeHalf != 4 {
+		t.Fatalf("smoothing constants = %d/%d, want 5/4", smoothingModeAntiAlias8x8, pixelOffsetModeHalf)
+	}
+}
+
 func TestLifecycleStartAndShutdownAreIdempotent(t *testing.T) {
 	var starts, stops int
 	var stopped lifecycleSession
