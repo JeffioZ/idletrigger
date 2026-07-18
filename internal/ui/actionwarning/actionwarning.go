@@ -54,6 +54,11 @@ type toolInfo struct {
 	Reserved uintptr
 }
 
+type warningControlLayout struct {
+	hwnd                windows.Handle
+	x, y, width, height int
+}
+
 const (
 	windowClass       = "IdleTriggerActionWarning"
 	warningWidth      = 390
@@ -108,14 +113,17 @@ var (
 	pRegisterClassEx     = user32.NewProc("RegisterClassExW")
 	pSetWindowText       = user32.NewProc("SetWindowTextW")
 	pSetWindowPos        = user32.NewProc("SetWindowPos")
+	pBeginDeferWindowPos = user32.NewProc("BeginDeferWindowPos")
+	pDeferWindowPos      = user32.NewProc("DeferWindowPos")
+	pEndDeferWindowPos   = user32.NewProc("EndDeferWindowPos")
 	pSetForegroundWindow = user32.NewProc("SetForegroundWindow")
 	pShowWindow          = user32.NewProc("ShowWindow")
 	pUpdateWindow        = user32.NewProc("UpdateWindow")
 	pGetDpiForWindow     = user32.NewProc("GetDpiForWindow")
 	pGetCursorPos        = user32.NewProc("GetCursorPos")
 	pMonitorFromWindow   = user32.NewProc("MonitorFromWindow")
+	pMonitorFromRect     = user32.NewProc("MonitorFromRect")
 	pGetMonitorInfo      = user32.NewProc("GetMonitorInfoW")
-	pAdjustWindowRect    = user32.NewProc("AdjustWindowRectEx")
 	pGetClientRect       = user32.NewProc("GetClientRect")
 	pFillRect            = user32.NewProc("FillRect")
 	pInvalidateRect      = user32.NewProc("InvalidateRect")
@@ -144,6 +152,7 @@ var (
 	finished       atomic.Bool
 	languageMu     sync.RWMutex
 	uiChinese      *bool
+	dpiScale       float64
 	wndCallback    = windows.NewCallback(wndProc)
 )
 
@@ -201,19 +210,19 @@ func showNow(options Options, seq uint64) {
 	}
 	class, _ := windows.UTF16PtrFromString(windowClass)
 	title, _ := windows.UTF16PtrFromString(options.Title)
-	hwnd, _, _ := pCreateWindowEx.Call(wsExTopmost|wsExComposited, uintptr(unsafe.Pointer(class)), uintptr(unsafe.Pointer(title)), wsPopup|wsCaption|wsSysMenu|wsClipChildren, 0, 0, 1, 1, 0, 0, 0, 0)
+	var cursor point
+	pGetCursorPos.Call(uintptr(unsafe.Pointer(&cursor)))
+	hwnd, _, _ := pCreateWindowEx.Call(wsExTopmost|wsExComposited, uintptr(unsafe.Pointer(class)), uintptr(unsafe.Pointer(title)), wsPopup|wsCaption|wsSysMenu|wsClipChildren, uintptr(cursor.X), uintptr(cursor.Y), 1, 1, 0, 0, 0, 0)
 	if hwnd == 0 {
 		return
 	}
 	active = windows.Handle(hwnd)
-	var cursor point
-	pGetCursorPos.Call(uintptr(unsafe.Pointer(&cursor)))
-	pSetWindowPos.Call(uintptr(active), 0, uintptr(cursor.X), uintptr(cursor.Y), 1, 1, swpNoActivate)
+	dpiScale = scaleFromWindow(active)
 	current, currentSeq = options, seq
 	finished.Store(false)
 	buildControls(options)
 	applyTheme()
-	position()
+	position(nil)
 	pShowWindow.Call(hwnd, 5)
 	pSetForegroundWindow.Call(hwnd)
 	pUpdateWindow.Call(hwnd)
@@ -314,6 +323,7 @@ func hideNow() {
 		pDestroyWindow.Call(uintptr(active))
 	}
 	active, bodyControl, cancelControl, executeControl, tooltip = 0, 0, 0, 0, 0
+	dpiScale = 0
 	tooltipText = nil
 	currentSeq = 0
 	if uiFont != 0 {
@@ -326,27 +336,48 @@ func hideNow() {
 	}
 }
 
-func position() {
+func position(suggested *rect) {
 	scale := windowScale()
-	dimensions := rect{Right: int32(float64(warningWidth) * scale), Bottom: int32(float64(warningHeight) * scale)}
-	pAdjustWindowRect.Call(uintptr(unsafe.Pointer(&dimensions)), wsPopup|wsCaption|wsSysMenu|wsClipChildren, 0, wsExTopmost|wsExComposited)
-	width, height := dimensions.Right-dimensions.Left, dimensions.Bottom-dimensions.Top
-	monitor, _, _ := pMonitorFromWindow.Call(uintptr(active), monitorNearest)
+	dpi := uint32(scale*96 + 0.5)
+	width, height, err := nativeform.WindowSizeForClient(
+		int(float64(warningWidth)*scale+0.5), int(float64(warningHeight)*scale+0.5),
+		wsPopup|wsCaption|wsSysMenu|wsClipChildren, wsExTopmost|wsExComposited, dpi,
+	)
+	if err != nil {
+		return
+	}
+	monitor := uintptr(0)
+	if suggested != nil {
+		monitor, _, _ = pMonitorFromRect.Call(uintptr(unsafe.Pointer(suggested)), monitorNearest)
+	}
+	if monitor == 0 {
+		monitor, _, _ = pMonitorFromWindow.Call(uintptr(active), monitorNearest)
+	}
 	info := monitorInfo{Size: uint32(unsafe.Sizeof(monitorInfo{}))}
 	if monitor != 0 {
 		pGetMonitorInfo.Call(monitor, uintptr(unsafe.Pointer(&info)))
 	}
 	margin := int32(18 * scale)
-	x := info.Work.Right - width - margin
-	y := info.Work.Bottom - height - margin
+	x, y := warningOrigin(info.Work, width, height, margin)
 	pSetWindowPos.Call(uintptr(active), ^uintptr(0), uintptr(x), uintptr(y), uintptr(width), uintptr(height), swpNoActivate|swpShowWindow)
 }
 
+func warningOrigin(work rect, width, height, margin int32) (int32, int32) {
+	return work.Right - width - margin, work.Bottom - height - margin
+}
+
 func windowScale() float64 {
-	if active == 0 {
+	if dpiScale > 0 {
+		return dpiScale
+	}
+	return scaleFromWindow(active)
+}
+
+func scaleFromWindow(hwnd windows.Handle) float64 {
+	if hwnd == 0 {
 		return 1
 	}
-	dpi, _, _ := pGetDpiForWindow.Call(uintptr(active))
+	dpi, _, _ := pGetDpiForWindow.Call(uintptr(hwnd))
 	if dpi == 0 {
 		return 1
 	}
@@ -376,8 +407,7 @@ func applyTheme() {
 	}
 }
 
-func rebuildForDPI() {
-	scale := windowScale()
+func rebuildForDPI(scale float64, suggested *rect) bool {
 	chinese := font.SystemLanguageIsChinese()
 	languageMu.RLock()
 	if uiChinese != nil {
@@ -386,30 +416,71 @@ func rebuildForDPI() {
 	languageMu.RUnlock()
 	newFont, _ := font.New(int32(14*scale+0.5), 400, chinese)
 	if newFont == 0 {
-		return
+		return false
 	}
 	oldFont := uiFont
 	uiFont = newFont
-	setBounds := func(hwnd windows.Handle, x, y, width, height int) {
-		if hwnd == 0 {
-			return
-		}
-		pSetWindowPos.Call(uintptr(hwnd), 0,
-			uintptr(int(float64(x)*scale)), uintptr(int(float64(y)*scale)),
-			uintptr(int(float64(width)*scale)), uintptr(int(float64(height)*scale)),
-			swpNoZOrder|swpNoActivate)
-		pSendMessage.Call(uintptr(hwnd), wmSetFont, uintptr(uiFont), 1)
+	controls := []warningControlLayout{
+		{bodyControl, 18, 20, 354, 76},
+		{cancelControl, 166, 116, 98, 36},
+		{executeControl, 274, 116, 98, 36},
 	}
-	setBounds(bodyControl, 18, 20, 354, 76)
-	setBounds(cancelControl, 166, 116, 98, 36)
-	setBounds(executeControl, 274, 116, 98, 36)
+	for _, control := range controls {
+		if control.hwnd != 0 {
+			pSendMessage.Call(uintptr(control.hwnd), wmSetFont, uintptr(uiFont), 0)
+		}
+	}
+	flags := uintptr(swpNoZOrder | swpNoActivate)
+	batch, _, _ := pBeginDeferWindowPos.Call(uintptr(len(controls)))
+	committed := batch != 0
+	if committed {
+		for _, control := range controls {
+			if control.hwnd == 0 {
+				continue
+			}
+			bounds := warningPhysicalBounds(control, scale)
+			next, _, _ := pDeferWindowPos.Call(
+				batch, uintptr(control.hwnd), 0,
+				uintptr(bounds.Left), uintptr(bounds.Top), uintptr(bounds.Right-bounds.Left), uintptr(bounds.Bottom-bounds.Top), flags,
+			)
+			if next == 0 {
+				committed = false
+				break
+			}
+			batch = next
+		}
+		if committed {
+			ended, _, _ := pEndDeferWindowPos.Call(batch)
+			committed = ended != 0
+		}
+	}
+	if !committed {
+		for _, control := range controls {
+			if control.hwnd != 0 {
+				bounds := warningPhysicalBounds(control, scale)
+				pSetWindowPos.Call(
+					uintptr(control.hwnd), 0,
+					uintptr(bounds.Left), uintptr(bounds.Top), uintptr(bounds.Right-bounds.Left), uintptr(bounds.Bottom-bounds.Top), flags,
+				)
+			}
+		}
+	}
 	if tooltip != 0 {
 		pSendMessage.Call(uintptr(tooltip), ttmSetMaxTipWidth, 0, uintptr(int(320*scale)))
 	}
 	if oldFont != 0 {
 		pDeleteObject.Call(uintptr(oldFont))
 	}
-	position()
+	position(suggested)
+	return true
+}
+
+func warningPhysicalBounds(control warningControlLayout, scale float64) rect {
+	left := int32(float64(control.x)*scale + 0.5)
+	top := int32(float64(control.y)*scale + 0.5)
+	width := int32(max(1, int(float64(control.width)*scale+0.5)))
+	height := int32(max(1, int(float64(control.height)*scale+0.5)))
+	return rect{Left: left, Top: top, Right: left + width, Bottom: top + height}
 }
 
 func wndProc(hwnd windows.Handle, message uint32, wParam, lParam uintptr) uintptr {
@@ -441,9 +512,34 @@ func wndProc(hwnd windows.Handle, message uint32, wParam, lParam uintptr) uintpt
 		applyTheme()
 		return 0
 	case wmDpiChanged:
-		rebuildForDPI()
-		scale := windowScale()
-		windowIcons.Apply(active, themeDark, int(32*scale+0.5), int(16*scale+0.5), true)
+		transition := nativeform.BeginFrameTransition(active)
+		dpi := uint32(wParam & 0xffff)
+		if dpi == 0 {
+			dpi = 96
+		}
+		oldScale := dpiScale
+		dpiScale = float64(dpi) / 96
+		var suggested *rect
+		if lParam != 0 {
+			value := *(*rect)(nativeform.MessagePointer(lParam))
+			suggested = &value
+		}
+		if rebuildForDPI(dpiScale, suggested) {
+			windowIcons.Apply(active, themeDark, int(32*dpiScale+0.5), int(16*dpiScale+0.5), true)
+		} else {
+			dpiScale = oldScale
+			position(suggested)
+		}
+		committed := false
+		for range 3 {
+			if err := transition.Commit(bodyControl, cancelControl, executeControl); err == nil {
+				committed = true
+				break
+			}
+		}
+		if !committed {
+			hideNow()
+		}
 		return 0
 	case wmDestroy:
 		windowIcons.Release()
