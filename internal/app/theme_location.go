@@ -29,6 +29,7 @@ func (s *runtimeState) startIPLocationCycle() {
 	if !s.themeIPLocationLookupEnabled() {
 		return
 	}
+	theme.ResetIPLocationFailureCooldown()
 	s.queryIPLocationInBackground(s.ipLocationGeneration)
 }
 

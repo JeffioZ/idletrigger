@@ -149,6 +149,53 @@ func TestParseIPLocationRejectsFailedResponse(t *testing.T) {
 	}
 }
 
+func TestResetIPLocationFailureCooldownAllowsImmediateRetry(t *testing.T) {
+	originalInfo, originalOK, originalQuerying, originalLastAttempt := snapshotIPLocationCache()
+	defer restoreIPLocationCache(originalInfo, originalOK, originalQuerying, originalLastAttempt)
+
+	recentFailure := time.Now().Add(-time.Minute)
+	restoreIPLocationCache(LocationInfo{}, false, false, recentFailure)
+	ResetIPLocationFailureCooldown()
+
+	_, ok, querying, lastAttempt := snapshotIPLocationCache()
+	if ok || querying {
+		t.Fatalf("failed cache state changed unexpectedly: ok=%v querying=%v", ok, querying)
+	}
+	if !lastAttempt.IsZero() {
+		t.Fatalf("failure cooldown was not reset: lastAttempt=%s", lastAttempt)
+	}
+}
+
+func TestResetIPLocationFailureCooldownPreservesSuccess(t *testing.T) {
+	originalInfo, originalOK, originalQuerying, originalLastAttempt := snapshotIPLocationCache()
+	defer restoreIPLocationCache(originalInfo, originalOK, originalQuerying, originalLastAttempt)
+
+	wantInfo := LocationInfo{Latitude: 31.2304, Longitude: 121.4737, Source: LocationSourceIP}
+	wantAttempt := time.Now().Add(-time.Hour)
+	restoreIPLocationCache(wantInfo, true, false, wantAttempt)
+	ResetIPLocationFailureCooldown()
+
+	info, ok, querying, lastAttempt := snapshotIPLocationCache()
+	if !ok || querying || info != wantInfo || !lastAttempt.Equal(wantAttempt) {
+		t.Fatalf("successful cache changed: info=%+v ok=%v querying=%v lastAttempt=%s", info, ok, querying, lastAttempt)
+	}
+}
+
+func snapshotIPLocationCache() (LocationInfo, bool, bool, time.Time) {
+	ipCache.Lock()
+	defer ipCache.Unlock()
+	return ipCache.info, ipCache.ok, ipCache.querying, ipCache.lastAttempt
+}
+
+func restoreIPLocationCache(info LocationInfo, ok, querying bool, lastAttempt time.Time) {
+	ipCache.Lock()
+	defer ipCache.Unlock()
+	ipCache.info = info
+	ipCache.ok = ok
+	ipCache.querying = querying
+	ipCache.lastAttempt = lastAttempt
+}
+
 func TestValidateHTTPStatus(t *testing.T) {
 	for _, status := range []uint32{200, 204, 299} {
 		if err := validateHTTPStatus(status); err != nil {

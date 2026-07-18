@@ -67,6 +67,17 @@ var ipCache struct {
 	lastAttempt time.Time
 }
 
+// ResetIPLocationFailureCooldown lets an explicit new lookup cycle retry
+// immediately after an earlier failure. A successful location remains cached,
+// and an in-flight lookup is still shared instead of duplicated.
+func ResetIPLocationFailureCooldown() {
+	ipCache.Lock()
+	defer ipCache.Unlock()
+	if !ipCache.ok {
+		ipCache.lastAttempt = time.Time{}
+	}
+}
+
 func cachedIPLocation(now time.Time) (LocationInfo, bool) {
 	ipCache.Lock()
 	if ipCache.ok && now.Sub(ipCache.lastAttempt) < ipLocationSuccessCacheTTL {
