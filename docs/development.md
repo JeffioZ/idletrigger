@@ -11,7 +11,7 @@
 
 IdleTrigger targets Windows 10 / Windows Server 2016 and later. The repository produces both `windows/amd64` and `windows/386` binaries.
 
-Windows 7 is not supported by the main build. Go 1.20 was the last Go release to run there; a future compatibility build should be a separately maintained Go 1.20 branch with matching dependency versions and real-device validation.
+Windows 7 is not supported by the main build. Go 1.20 was the last compatible Go release. Any future legacy build should use a separate Go 1.20 branch, compatible dependencies, and real-device testing.
 
 ```powershell
 go version
@@ -20,7 +20,7 @@ go mod download
 
 ## 🔨 Build
 
-The architecture-specific `.syso` files contain the application icon, manifest, and Windows version metadata. They are generated build artifacts and are not committed. Regenerate them before building so Explorer properties and the app version agree.
+The architecture-specific `.syso` files contain the icon, manifest, and Windows version metadata. They are generated files and are not committed. Regenerate them before building so Explorer and the app show the same version.
 
 ```powershell
 $env:CGO_ENABLED = "0"
@@ -83,13 +83,13 @@ $env:GOARCH = "386"
 go build -trimpath "-ldflags=$ldflags" -o dist/IdleTrigger-x86.exe ./cmd/idletrigger
 ```
 
-The release workflow runs formatting, module, test, and vet checks, produces both executables, and publishes `SHA256SUMS.txt`.
+The release workflow runs formatting, module, test, and vet checks. It then builds both executables and publishes `SHA256SUMS.txt`.
 
 ## 🚢 Release Process
 
-Pushing a `v*` tag creates a draft release titled `IdleTrigger vX.Y.Z`, attaches the x64 and x86 executables plus `SHA256SUMS.txt`, and generates an initial changelog. Pull requests are grouped by `.github/release.yml`; direct commits still need editorial review.
+Pushing a `v*` tag creates a draft named `IdleTrigger vX.Y.Z`. It includes both executables, `SHA256SUMS.txt`, and an initial changelog. `.github/release.yml` groups pull requests; direct commits still need manual review.
 
-Before publishing the draft, rewrite its introduction with the [release-notes style and template](release-notes.md). Lead with user-visible outcomes, keep Chinese and English highlights aligned, verify the asset names and comparison range, and leave commit-level detail at the end.
+Before publishing, apply the [release-notes style and template](release-notes.md). Lead with user-visible results. Keep both languages aligned, check the assets and comparison range, and leave commit details at the end.
 
 ## 🧩 Cross-Layer Change Checklist
 
@@ -183,7 +183,7 @@ $version = "1.3.0"
 go run ./tools/resourcegen.go -version $version
 ```
 
-Commit `app.ico`, both tray ICO files, `build/windows/manifest.xml`, and the generators together. Do not commit `.syso` files; the release workflow regenerates them from the tag version.
+Commit `app.ico`, both tray ICO files, `build/windows/manifest.xml`, and the generators together. Do not commit `.syso` files. The release workflow regenerates them from the tag.
 
 ## 📸 Regenerate README Screenshots
 

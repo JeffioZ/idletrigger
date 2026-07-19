@@ -11,7 +11,7 @@
 
 IdleTrigger 面向 Windows 10 / Windows Server 2016 及以上系统，仓库同时产出 `windows/amd64` 和 `windows/386`。
 
-主构建不支持 Windows 7。Go 1.20 是最后一个可运行于 Windows 7 的 Go 版本；如未来确有需求，应独立维护基于 Go 1.20、使用兼容依赖版本的 legacy 构建，并完成实机验证。
+主构建不支持 Windows 7。Go 1.20 是最后一个兼容版本。如未来确有需求，应独立维护 Go 1.20 legacy 分支，固定兼容依赖，并完成实机验证。
 
 ```powershell
 go version
@@ -20,7 +20,7 @@ go mod download
 
 ## 🔨 构建
 
-架构专用 `.syso` 文件包含应用图标、manifest 与 Windows 版本信息。它们是生成型构建产物，不提交到仓库。构建前先重新生成资源，使资源管理器属性页与应用版本保持一致。
+架构专用 `.syso` 文件包含图标、manifest 和 Windows 版本信息。它们是生成文件，不提交到仓库。构建前请重新生成，使资源管理器与应用显示相同版本。
 
 ```powershell
 $env:CGO_ENABLED = "0"
@@ -80,13 +80,13 @@ $env:GOARCH = "386"
 go build -trimpath "-ldflags=$ldflags" -o dist/IdleTrigger-x86.exe ./cmd/idletrigger
 ```
 
-发布工作流会先运行格式、依赖、test 与 vet 检查，再生成两种 EXE，并发布 `SHA256SUMS.txt`。
+发布工作流会先运行格式、依赖、test 和 vet 检查，再构建两种 EXE，并发布 `SHA256SUMS.txt`。
 
 ## 🚢 发布流程
 
-推送 `v*` tag 后，工作流会创建标题为 `IdleTrigger vX.Y.Z` 的草稿 Release，附加 x64、x86 两个 EXE 与 `SHA256SUMS.txt`，并生成初始变更记录。通过 PR 合入的内容会按 `.github/release.yml` 分组；直接提交的内容仍需人工整理。
+推送 `v*` tag 后，工作流会创建名为 `IdleTrigger vX.Y.Z` 的草稿 Release。草稿包含两个 EXE、`SHA256SUMS.txt` 和初始变更记录。`.github/release.yml` 会对 PR 分组；直接提交仍需人工整理。
 
-正式发布前，请按[更新说明格式与模板](release-notes.md)重写草稿开头：先讲用户可感知的结果，保持中英文重点一致，核对产物名称和版本对比范围，并把提交级明细留在末尾。
+正式发布前，请应用[更新说明格式与模板](release-notes.md)。先写用户可感知的结果，保持中英文一致，核对附件和版本对比范围，并把提交明细留在末尾。
 
 ## 🧩 跨层改动检查清单
 
@@ -156,7 +156,7 @@ $version = "1.3.0"
 go run ./tools/resourcegen.go -version $version
 ```
 
-请将 `app.ico`、两个托盘 ICO、`build/windows/manifest.xml` 和生成器一并提交。不要提交 `.syso` 文件；发布工作流会按 tag 版本自动重新生成。
+请将 `app.ico`、两个托盘 ICO、`build/windows/manifest.xml` 和生成器一并提交。不要提交 `.syso` 文件；发布工作流会按 tag 重新生成。
 
 ## 📸 重新生成 README 截图
 

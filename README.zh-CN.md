@@ -7,23 +7,17 @@
 <p>让任务持续运行，在真实输入空闲后执行电源动作，<br>并按时间或进程自动管理电源状态与 Windows 主题。</p>
 
 <p>
-  <a href="https://github.com/JeffioZ/idletrigger/releases/latest"><img alt="最新版本" src="https://img.shields.io/github/v/release/JeffioZ/idletrigger?display_name=tag&amp;sort=semver&amp;style=flat-square&amp;color=37BFF3"></a>
-  <a href="https://github.com/JeffioZ/idletrigger/actions/workflows/ci.yml"><img alt="构建状态" src="https://github.com/JeffioZ/idletrigger/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="LICENSE"><img alt="MIT 许可证" src="https://img.shields.io/github/license/JeffioZ/idletrigger?style=flat-square&amp;color=7C3AED"></a>
-  <a href="https://github.com/JeffioZ/idletrigger/releases"><img alt="累计下载" src="https://img.shields.io/github/downloads/JeffioZ/idletrigger/total?style=flat-square&amp;label=downloads&amp;color=0F9D7A"></a>
-</p>
-
-<p>
-  <img alt="Windows 10 或更高版本" src="https://img.shields.io/badge/Windows-10%2B-0078D4?style=flat-square&amp;logo=windows11&amp;logoColor=white">
-  <img alt="便携单文件" src="https://img.shields.io/badge/Portable-single_EXE-0F9D7A?style=flat-square">
-  <img alt="原生 Win32" src="https://img.shields.io/badge/UI-native_Win32-7C3AED?style=flat-square">
+  <a href="https://github.com/JeffioZ/idletrigger/releases/latest"><img alt="最新版本" src="https://img.shields.io/github/v/release/JeffioZ/idletrigger?display_name=tag&amp;sort=semver&amp;style=flat&amp;color=37BFF3"></a>
+  <a href="https://github.com/JeffioZ/idletrigger/actions/workflows/ci.yml"><img alt="Lint 状态" src="https://img.shields.io/github/actions/workflow/status/JeffioZ/idletrigger/ci.yml?branch=master&amp;style=flat&amp;logo=github&amp;label=Lint"></a>
+  <a href="LICENSE"><img alt="MIT 许可证" src="https://img.shields.io/github/license/JeffioZ/idletrigger?style=flat&amp;color=7C3AED"></a>
+  <a href="https://github.com/JeffioZ/idletrigger/releases"><img alt="累计下载" src="https://img.shields.io/github/downloads/JeffioZ/idletrigger/total?style=flat&amp;label=downloads&amp;color=0F9D7A"></a>
 </p>
 
 <img src="docs/images/github-social-preview.png" alt="IdleTrigger — Windows 托盘工具" width="840">
 
 <p>
-  <a href="https://github.com/JeffioZ/idletrigger/releases/latest/download/IdleTrigger-x64.exe"><img alt="下载适用于 64 位 Windows 的 x64 版本" src="https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD-x64-0078D4?style=flat-square&amp;logo=windows11&amp;logoColor=white"></a>
-  <a href="https://github.com/JeffioZ/idletrigger/releases/latest/download/IdleTrigger-x86.exe"><img alt="下载适用于 32 位 Windows 的 x86 版本" src="https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD-x86-64748B?style=flat-square&amp;logo=windows11&amp;logoColor=white"></a>
+  <a href="https://github.com/JeffioZ/idletrigger/releases/latest/download/IdleTrigger-x64.exe"><img alt="下载适用于 64 位 Windows 的 x64 版本" src="https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD-x64-0078D4?style=flat&amp;logo=windows11&amp;logoColor=white"></a>
+  <a href="https://github.com/JeffioZ/idletrigger/releases/latest/download/IdleTrigger-x86.exe"><img alt="下载适用于 32 位 Windows 的 x86 版本" src="https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD-x86-64748B?style=flat&amp;logo=windows11&amp;logoColor=white"></a>
 </p>
 
 <p><a href="README.md">English</a></p>
@@ -39,7 +33,7 @@
 | 🔁 | **自动任务** | 按计划或进程状态控制电源功能，也可执行内置系统动作。 |
 | 🌗 | **昼夜主题** | 按时间或日出日落切换 Windows 主题，并可适配电池和全屏场景。 |
 
-**为轻量而设计：** 不需要安装器、服务、WebView、模拟输入或额外运行时；设置保存在 EXE 旁边的可读 TOML 文件中。
+**为轻量而设计：** IdleTrigger 是面向 Windows 10 / Windows Server 2016 及以上的原生 Win32 便携程序。无需安装器、服务、WebView、模拟输入或额外运行时。设置保存在 EXE 旁边的可读 TOML 文件中。
 
 ## 🪟 原生控制浮层
 
@@ -60,8 +54,6 @@
 2. 将 EXE 放入准备长期保留的可写目录，然后运行。
 3. 左键 IdleTrigger 托盘图标，完成常用设置。
 
-需要 **Windows 10 / Windows Server 2016 及以上**，无需安装。
-
 ## 📚 文档
 
 | | 说明 |
@@ -73,7 +65,9 @@
 
 ## 🤝 致谢
 
-托盘集成基于 [getlantern/systray v1.2.2](https://github.com/getlantern/systray) 调整（[Apache-2.0 声明](internal/ui/trayicon/LICENSE)）。项目使用 [BurntSushi/toml](https://github.com/BurntSushi/toml) 和 [golang.org/x/sys](https://pkg.go.dev/golang.org/x/sys)；保持唤醒功能受到 [NoSleep](https://github.com/CHerSun/NoSleep) 启发。
+托盘集成基于 [getlantern/systray v1.2.2](https://github.com/getlantern/systray) 调整（[Apache-2.0 声明](internal/ui/trayicon/LICENSE)）。
+
+项目使用 [BurntSushi/toml](https://github.com/BurntSushi/toml) 和 [golang.org/x/sys](https://pkg.go.dev/golang.org/x/sys)；保持唤醒功能受到 [NoSleep](https://github.com/CHerSun/NoSleep) 启发。
 
 ## 📄 许可证
 

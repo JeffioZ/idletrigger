@@ -6,14 +6,15 @@ Write for people deciding whether to update, not as a copy of the commit log. / 
 
 ## ✍️ Editorial Rules / 编写原则
 
-- Lead with the most visible user benefit, not commit order or internal implementation details. / 先写用户最容易感知的收益，不按提交顺序罗列内部实现。
-- Group changes by two to four product areas, and omit empty categories. / 按 2–4 个产品领域分组，空分类直接省略。
-- Use product-area headings such as Automatic Tasks, Day / Night, or UI Tweaks instead of generic Added / Changed / Fixed buckets. Put small cleanup items under Other Changes. / 使用“自动任务”“昼夜模式”“界面体验”等产品模块标题，不按“新增 / 变更 / 修复”机械分类；零散改进归入“其他变化”。
-- Prefer specific outcomes: “preserves the current selection while refreshing” is better than “improved refresh logic.” / 描述明确结果：“刷新时保留当前选择”优于“优化刷新逻辑”。
-- Keep each language to roughly four to eight aligned highlights; translate meaning, not sentence structure. / 每种语言通常保留 4–8 条对应重点，翻译含义，不照搬句式。
-- A pre-release describes changes since the previous pre-release; a stable release may summarize everything since the previous stable version. / 预发布版只写相对上一个预发布版的增量；稳定版可汇总相对上一个稳定版的全部变化。
-- Put compatibility, migration, or required action near the top. Add one focused screenshot only when it explains a visible change. / 兼容性、迁移和必要操作放在前面；只有截图能解释可见变化时才添加一张聚焦图片。
-- Do not repeat the asset list or routine checksum instructions; GitHub already shows release assets, and the user guide covers verification. / 不重复附件清单和常规校验步骤；GitHub 已展示发布附件，校验方法由使用指南统一说明。
+- Lead with user-visible results, not commit order. / 先写用户可感知的结果，不按提交顺序。
+- Use two to four product-area headings and omit empty sections. / 使用 2–4 个产品模块标题，省略空分类。
+- Prefer Automatic Tasks, Day / Night, UI Tweaks, and Other Changes over Added / Changed / Fixed. / 优先使用“自动任务”“昼夜模式”“界面体验”“其他变化”，不按“新增 / 变更 / 修复”机械分类。
+- Keep one result in each bullet. Use a short sentence; split long or compound items. / 每条只说一个结果，尽量只用一个短句；内容过长或包含多个结果时拆开。
+- Be specific: “preserves the selection while refreshing” is better than “improved refresh logic.” / 写清结果：“刷新时保留选择”优于“优化刷新逻辑”。
+- Keep four to eight aligned highlights per language. Translate meaning, not sentence structure. / 每种语言保留 4–8 条对应重点；翻译含义，不照搬句式。
+- A pre-release covers changes since the previous pre-release. A stable release may summarize changes since the previous stable version. / 预发布版只写相对上一个预发布版的增量；稳定版可汇总相对上一个稳定版的变化。
+- Put required actions or compatibility notes first. Add one screenshot only when it helps explain a visible change. / 必要操作和兼容性说明放在前面；只有截图能解释可见变化时才添加。
+- Do not repeat the asset list or routine checksum steps. GitHub and the user guide already provide them. / 不重复附件清单和常规校验步骤；GitHub 与使用指南已经提供这些信息。
 - Leave PR lists and the comparison link at the end. / PR 明细和完整对比链接放在末尾。
 
 ## 🧱 Recommended Structure / 推荐结构
@@ -23,10 +24,6 @@ Copy the following structure into the draft release and remove every unused head
 将以下结构复制到 Release 草稿中，并删除所有未使用的标题和提示文字。
 
 ````markdown
-> 用一句话概括这个版本最值得升级的理由。
->
-> Summarize the best reason to update in one sentence.
-
 ## ✨ 更新重点
 
 ### 🔁 自动任务

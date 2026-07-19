@@ -7,23 +7,17 @@
 <p>Keep work running, respond to real input inactivity,<br>and automate power or Windows themes by time and process.</p>
 
 <p>
-  <a href="https://github.com/JeffioZ/idletrigger/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/JeffioZ/idletrigger?display_name=tag&amp;sort=semver&amp;style=flat-square&amp;color=37BFF3"></a>
-  <a href="https://github.com/JeffioZ/idletrigger/actions/workflows/ci.yml"><img alt="Build status" src="https://github.com/JeffioZ/idletrigger/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/github/license/JeffioZ/idletrigger?style=flat-square&amp;color=7C3AED"></a>
-  <a href="https://github.com/JeffioZ/idletrigger/releases"><img alt="Total downloads" src="https://img.shields.io/github/downloads/JeffioZ/idletrigger/total?style=flat-square&amp;label=downloads&amp;color=0F9D7A"></a>
-</p>
-
-<p>
-  <img alt="Windows 10 or later" src="https://img.shields.io/badge/Windows-10%2B-0078D4?style=flat-square&amp;logo=windows11&amp;logoColor=white">
-  <img alt="Portable" src="https://img.shields.io/badge/Portable-single_EXE-0F9D7A?style=flat-square">
-  <img alt="Native Win32" src="https://img.shields.io/badge/UI-native_Win32-7C3AED?style=flat-square">
+  <a href="https://github.com/JeffioZ/idletrigger/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/JeffioZ/idletrigger?display_name=tag&amp;sort=semver&amp;style=flat&amp;color=37BFF3"></a>
+  <a href="https://github.com/JeffioZ/idletrigger/actions/workflows/ci.yml"><img alt="Lint status" src="https://img.shields.io/github/actions/workflow/status/JeffioZ/idletrigger/ci.yml?branch=master&amp;style=flat&amp;logo=github&amp;label=Lint"></a>
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/github/license/JeffioZ/idletrigger?style=flat&amp;color=7C3AED"></a>
+  <a href="https://github.com/JeffioZ/idletrigger/releases"><img alt="Total downloads" src="https://img.shields.io/github/downloads/JeffioZ/idletrigger/total?style=flat&amp;label=downloads&amp;color=0F9D7A"></a>
 </p>
 
 <img src="docs/images/github-social-preview.png" alt="IdleTrigger — Windows tray utility" width="840">
 
 <p>
-  <a href="https://github.com/JeffioZ/idletrigger/releases/latest/download/IdleTrigger-x64.exe"><img alt="Download x64 for 64-bit Windows" src="https://img.shields.io/badge/Download-x64-0078D4?style=flat-square&amp;logo=windows11&amp;logoColor=white"></a>
-  <a href="https://github.com/JeffioZ/idletrigger/releases/latest/download/IdleTrigger-x86.exe"><img alt="Download x86 for 32-bit Windows" src="https://img.shields.io/badge/Download-x86-64748B?style=flat-square&amp;logo=windows11&amp;logoColor=white"></a>
+  <a href="https://github.com/JeffioZ/idletrigger/releases/latest/download/IdleTrigger-x64.exe"><img alt="Download x64 for 64-bit Windows" src="https://img.shields.io/badge/Download-x64-0078D4?style=flat&amp;logo=windows11&amp;logoColor=white"></a>
+  <a href="https://github.com/JeffioZ/idletrigger/releases/latest/download/IdleTrigger-x86.exe"><img alt="Download x86 for 32-bit Windows" src="https://img.shields.io/badge/Download-x86-64748B?style=flat&amp;logo=windows11&amp;logoColor=white"></a>
 </p>
 
 <p><a href="README.zh-CN.md">简体中文</a></p>
@@ -39,7 +33,7 @@
 | 🔁 | **Automatic Tasks** | Control power features or run built-in actions by schedule and process state. |
 | 🌗 | **Day / Night** | Switch Windows themes by time or sunrise and sunset, with battery and fullscreen options. |
 
-**Small by design:** no installer, service, WebView, simulated input, or extra runtime. Settings stay in a readable TOML file beside the EXE.
+**Small by design:** IdleTrigger is a portable native Win32 app for Windows 10 / Windows Server 2016 or later. It needs no installer, service, WebView, simulated input, or extra runtime. Settings stay in a readable TOML file beside the EXE.
 
 ## 🪟 Native Control Panel
 
@@ -60,8 +54,6 @@ Left-click the tray icon for everyday settings; advanced options remain in TOML.
 2. Put the EXE in a writable folder you intend to keep, then run it.
 3. Left-click the IdleTrigger tray icon and choose your settings.
 
-Requires **Windows 10 / Windows Server 2016 or later**. No installation is needed.
-
 ## 📚 Documentation
 
 | | Read this |
@@ -73,7 +65,9 @@ Requires **Windows 10 / Windows Server 2016 or later**. No installation is neede
 
 ## 🤝 Credits
 
-Tray integration is adapted from [getlantern/systray v1.2.2](https://github.com/getlantern/systray) ([Apache-2.0 notice](internal/ui/trayicon/LICENSE)). Built with [BurntSushi/toml](https://github.com/BurntSushi/toml) and [golang.org/x/sys](https://pkg.go.dev/golang.org/x/sys). Stay Awake was inspired by [NoSleep](https://github.com/CHerSun/NoSleep).
+Tray integration is adapted from [getlantern/systray v1.2.2](https://github.com/getlantern/systray) ([Apache-2.0 notice](internal/ui/trayicon/LICENSE)).
+
+Built with [BurntSushi/toml](https://github.com/BurntSushi/toml) and [golang.org/x/sys](https://pkg.go.dev/golang.org/x/sys). Stay Awake was inspired by [NoSleep](https://github.com/CHerSun/NoSleep).
 
 ## 📄 License
 
