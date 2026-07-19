@@ -60,6 +60,7 @@ jobs:
       - name: Create Draft Release
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3
         with:
+          name: IdleTrigger ${{ github.ref_name }}
           draft: true
           fail_on_unmatched_files: true
           files: |
