@@ -1,13 +1,19 @@
-# Roadmap / 开发计划
+# 🗺️ Roadmap / 开发计划
 
-## 发布检查清单
+[Documentation / 文档索引](README.md) · [Project Home](../README.md) · [项目主页](../README.zh-CN.md)
+
+> [!NOTE]
+> This is a maintainer-facing planning document, not a promise of delivery dates. / 本文面向维护者记录方向与取舍，不代表交付时间承诺。
+
+## ✅ 发布检查清单
 
 - [ ] `.\tools\check.ps1 -Full -Vulncheck` 完整检查通过，并确认 `SKIPPED` 项符合本次发布预期
 - [ ] 386 / amd64 Windows GUI 构建通过
 - [ ] 两种架构 EXE 均包含应用图标和 manifest
 - [ ] CLI、控制面板、自动任务/进程选择器、IPC、热键和两类预警做一次人工冒烟测试
+- [ ] 按 `docs/release-notes.md` 整理中英双语更新说明，并核对产物名称、SHA-256 与版本对比范围
 
-## v1.3.x 稳定性整理
+## 🧱 v1.3.x 稳定性整理
 
 - [x] 安全关机：移除 `EWX_FORCE`，保留应用保存/取消机会
 - [x] NoSleep 固定 OS 线程设置与清理
@@ -46,7 +52,7 @@
 - [x] 下拉浮层、任务列表、进程列表和当前选择预览统一主题滚动条，深色表头不再暴露原生浅色末端
 - [x] 自动任务相关子窗口统一深浅色标题栏图标，并补齐中英文 tooltip 和视觉截图入口
 
-## UI/UX 后续计划：Quiet Native Utility
+## 🎨 UI/UX 后续计划：Quiet Native Utility
 
 本节只记录尚未实施、且经当前 Win32/GDI 实现复核后仍有价值的 UI/UX 工作。优先级只看普通用户能否直接感知并受益：减少操作成本、避免误触、让状态和设置更容易理解；不因技术完整性、无障碍覆盖率或实现“现代化”而抬高优先级。性能或架构改动也按同一标准判断：能以数据或稳定复现证明其解决卡顿、耗电、状态延迟、异常恢复等实际问题时可以前置；仅为技术纯度、抽象完整性或无障碍适配而做的重构保持低优先级。不改变既有信息架构，不引入 WebView、网页技术或大型 UI 框架。
 
@@ -102,7 +108,7 @@
 - 不为“现代感”引入玻璃、模糊、强阴影、渐变、发光、复杂动效或独立插画；这些会削弱 Quiet Native Utility 的克制性并增加 GDI 成本。
 - 不把通用“全面无障碍框架”、自绘 tooltip 或绘制后端迁移当作近期必做项；均应以实测缺口或可复现质量问题为前置。
 
-## 后续计划
+## 🧭 后续计划
 
 ### 排序判断
 

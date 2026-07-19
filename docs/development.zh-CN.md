@@ -1,8 +1,8 @@
-# 构建 IdleTrigger
+# 🛠️ 构建 IdleTrigger
 
-[English](development.md)
+[文档索引](README.md) · [English](development.md) · [项目主页](../README.zh-CN.md)
 
-## 前置条件
+## 📦 前置条件
 
 - Go 1.26 或更高版本
 - Git
@@ -18,7 +18,7 @@ go version
 go mod download
 ```
 
-## 构建
+## 🔨 构建
 
 架构专用 `.syso` 文件包含应用图标、manifest 与 Windows 版本信息。它们是生成型构建产物，不提交到仓库。构建前先重新生成资源，使资源管理器属性页与应用版本保持一致。
 
@@ -34,7 +34,7 @@ go build -trimpath "-ldflags=$ldflags" -o $output ./cmd/idletrigger
 
 `CGO_ENABLED=0` 使 EXE 保持自包含；`-H windowsgui` 避免托盘程序启动时显示控制台窗口。
 
-## 验证
+## ✅ 验证
 
 在 PowerShell 7 或更高版本中执行本地标准检查：
 
@@ -82,7 +82,13 @@ go build -trimpath "-ldflags=$ldflags" -o dist/IdleTrigger-x86.exe ./cmd/idletri
 
 发布工作流会先运行格式、依赖、test 与 vet 检查，再生成两种 EXE，并发布 `SHA256SUMS.txt`。
 
-## 跨层改动检查清单
+## 🚢 发布流程
+
+推送 `v*` tag 后，工作流会创建标题为 `IdleTrigger vX.Y.Z` 的草稿 Release，附加 x64、x86 两个 EXE 与 `SHA256SUMS.txt`，并生成初始变更记录。通过 PR 合入的内容会按 `.github/release.yml` 分组；直接提交的内容仍需人工整理。
+
+正式发布前，请按[更新说明格式与模板](release-notes.md)重写草稿开头：先讲用户可感知的结果，保持中英文重点一致，核对产物名称和版本对比范围，并把提交级明细留在末尾。
+
+## 🧩 跨层改动检查清单
 
 完成改动前，按涉及范围核对对应条目：
 
@@ -134,7 +140,7 @@ go build -trimpath "-ldflags=$ldflags" -o dist/IdleTrigger-x86.exe ./cmd/idletri
 边界和包的直接分层关系。进程自动任务边界还会拒绝调试权限、进程内存、注入和
 强制结束进程相关 API；这些检查用于补充而不是替代具体行为测试。
 
-## 重新生成资源
+## 🎨 重新生成资源
 
 主图标与两套托盘图标采用独立图稿。更新时先生成主 ICO，再生成专门适配任务栏的托盘变体：
 
@@ -152,7 +158,7 @@ go run ./tools/resourcegen.go -version $version
 
 请将 `app.ico`、两个托盘 ICO、`build/windows/manifest.xml` 和生成器一并提交。不要提交 `.syso` 文件；发布工作流会按 tag 版本自动重新生成。
 
-## 重新生成 README 截图
+## 📸 重新生成 README 截图
 
 截图生成属于维护能力，只在使用 `devtools` 构建标签时编译。辅助脚本会临时构建
 devtools EXE、重新生成四张受版本管理的图片、校验 PNG 尺寸，并删除临时构建目录：
@@ -180,7 +186,7 @@ devtools EXE、重新生成四张受版本管理的图片、校验 PNG 尺寸，
 
 正式 EXE 明确不包含 `screenshot` 命令及其 PNG/压缩依赖。
 
-## 离线构建
+## 📴 离线构建
 
 先在联网环境 vendor 依赖，再将包含 `vendor/` 的仓库复制到离线机器：
 
@@ -193,7 +199,7 @@ go run ./tools/resourcegen.go -version dev
 go build -mod=vendor -trimpath -ldflags="-s -w -H windowsgui" -o dist/IdleTrigger-x64.exe ./cmd/idletrigger
 ```
 
-## 开发调试
+## 🔁 开发调试
 
 ```powershell
 go test ./...

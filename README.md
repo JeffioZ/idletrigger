@@ -1,135 +1,80 @@
-# IdleTrigger
+<div align="center">
 
-[简体中文](README.zh-CN.md)
+<h1>IdleTrigger</h1>
 
-**A lightweight Windows tray utility for idle actions, automatic tasks, stay-awake control, and scheduled theme switching.**
+<p><strong>Lightweight, native Windows power automation in one portable EXE.</strong></p>
 
-IdleTrigger is a single executable with no runtime dependencies beyond Windows system DLLs. It stays out of the way in the notification area and keeps its settings in a readable TOML file beside the executable.
+<p>Keep work running, respond to real input inactivity,<br>and automate power or Windows themes by time and process.</p>
 
-**[Download x64 for most PCs](https://github.com/JeffioZ/idletrigger/releases/latest/download/IdleTrigger-x64.exe)** · [Download x86 for 32-bit Windows](https://github.com/JeffioZ/idletrigger/releases/latest/download/IdleTrigger-x86.exe) · [Release notes and checksums](https://github.com/JeffioZ/idletrigger/releases/latest)
+<p>
+  <a href="https://github.com/JeffioZ/idletrigger/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/JeffioZ/idletrigger?display_name=tag&amp;sort=semver&amp;style=flat-square&amp;color=37BFF3"></a>
+  <a href="https://github.com/JeffioZ/idletrigger/actions/workflows/ci.yml"><img alt="Build status" src="https://github.com/JeffioZ/idletrigger/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/github/license/JeffioZ/idletrigger?style=flat-square&amp;color=7C3AED"></a>
+  <a href="https://github.com/JeffioZ/idletrigger/releases"><img alt="Total downloads" src="https://img.shields.io/github/downloads/JeffioZ/idletrigger/total?style=flat-square&amp;label=downloads&amp;color=0F9D7A"></a>
+</p>
 
-## When IdleTrigger Helps
+<p>
+  <img alt="Windows 10 or later" src="https://img.shields.io/badge/Windows-10%2B-0078D4?style=flat-square&amp;logo=windows11&amp;logoColor=white">
+  <img alt="Portable" src="https://img.shields.io/badge/Portable-single_EXE-0F9D7A?style=flat-square">
+  <img alt="Native Win32" src="https://img.shields.io/badge/UI-native_Win32-7C3AED?style=flat-square">
+</p>
 
-- Keep downloads, renders, backups, or remote sessions awake without changing your usual Windows sleep settings.
-- Lock, sleep, hibernate, or shut down after real keyboard and mouse inactivity.
-- Enable or pause Stay Awake and Idle Monitoring automatically while selected apps are running or during a time window.
-- Switch Windows light and dark themes on a schedule or around sunrise and sunset, with optional battery and fullscreen-aware behavior.
+<img src="docs/images/github-social-preview.png" alt="IdleTrigger — Windows tray utility" width="840">
 
-## How It Differs
+<p>
+  <a href="https://github.com/JeffioZ/idletrigger/releases/latest/download/IdleTrigger-x64.exe"><img alt="Download x64 for 64-bit Windows" src="https://img.shields.io/badge/Download-x64-0078D4?style=flat-square&amp;logo=windows11&amp;logoColor=white"></a>
+  <a href="https://github.com/JeffioZ/idletrigger/releases/latest/download/IdleTrigger-x86.exe"><img alt="Download x86 for 32-bit Windows" src="https://img.shields.io/badge/Download-x86-64748B?style=flat-square&amp;logo=windows11&amp;logoColor=white"></a>
+</p>
 
-Windows power settings are best for persistent display and sleep timeouts. [PowerToys Awake](https://learn.microsoft.com/windows/powertoys/awake) focuses on temporarily keeping a PC awake. IdleTrigger combines stay-awake control with actions after real keyboard and mouse inactivity, plus time- and process-based automation, in one portable tray app.
+<p><a href="README.zh-CN.md">简体中文</a></p>
 
-It uses Windows power requests and the system's last-input time instead of simulating mouse or keyboard activity.
+</div>
 
-## Requirements
+## ✨ At a Glance
 
-- Windows 10 / Windows Server 2016 or later
-- x64 build for most PCs; x86 build for 32-bit Windows
-- Theme switching requires writable Windows Personalize light/dark settings. IdleTrigger detects unavailable or policy-restricted profiles and disables the entire Day/Night section without discarding its saved configuration.
-
-Windows 7 is intentionally not supported by the main build. See [development guide](docs/development.md) for the compatibility rationale.
-
-## Quick Start
-
-1. Create a writable folder you intend to keep, such as `%LOCALAPPDATA%\IdleTrigger`.
-2. Download the x64 build above for most PCs, or x86 only for 32-bit Windows, and place the EXE in that folder.
-3. Run it. The app appears in the notification area without opening a main window.
-4. Left-click the tray icon to open or close the control panel. Right-click it for the native **Open** and **Exit** menu.
-5. Use the panel for common settings; edit `IdleTrigger.toml` beside the EXE for advanced settings.
-
-The control panel follows Windows light/dark mode, responds to DPI changes, and stays open until you close it or left-click the tray icon again. Tooltips explain each available option.
-
-### Updating or Moving
-
-Exit IdleTrigger before replacing its EXE. Keep `IdleTrigger.toml` and `IdleTrigger.state.json` beside the EXE to preserve settings and automatic-task state. If you move the app, move those files together and launch it once from the new location before relying on automatic startup.
-
-## Using the Control Panel
-
-- **Power Management** contains Stay Awake and Idle Monitoring. Their toggles show manual settings; automatic tasks may change the current runtime state without rewriting those settings.
-- **Automatic Tasks** shows the enabled count and next scheduled time. You can pause all tasks or manage individual rules and process conditions without editing TOML.
-- **System Controls** run immediately, so save your work before choosing Sleep, Hibernate, Shut Down, or Restart.
-- The panel supports mouse and keyboard navigation. Use `Tab` / `Shift+Tab` to move and `Space` to activate the focused control.
-
-## Screenshots
-
-<img src="docs/images/control-panel-en-light.png" alt="IdleTrigger control panel in English light mode" width="420">
-
-<details>
-<summary>More themes and languages</summary>
-
-| English dark | Simplified Chinese light | Simplified Chinese dark |
+| | Capability | Built for |
 | --- | --- | --- |
-| <img src="docs/images/control-panel-en-dark.png" alt="IdleTrigger control panel in English dark mode" width="260"> | <img src="docs/images/control-panel-zh-CN-light.png" alt="IdleTrigger control panel in Simplified Chinese light mode" width="260"> | <img src="docs/images/control-panel-zh-CN-dark.png" alt="IdleTrigger control panel in Simplified Chinese dark mode" width="260"> |
+| ⚡ | **Stay Awake** | Downloads, renders, backups, and remote sessions that must keep running. |
+| ⏱️ | **Idle Actions** | Lock, sleep, hibernate, or shut down after real keyboard and mouse inactivity. |
+| 🔁 | **Automatic Tasks** | Control power features or run built-in actions by schedule and process state. |
+| 🌗 | **Day / Night** | Switch Windows themes by time or sunrise and sunset, with battery and fullscreen options. |
 
-</details>
+**Small by design:** no installer, service, WebView, simulated input, or extra runtime. Settings stay in a readable TOML file beside the EXE.
 
-## Idle Monitoring
+## 🪟 Native Control Panel
 
-Idle Monitoring is enabled by default with a 30-minute idle time and Sleep as its action. Available panel idle-time choices are:
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/control-panel-en-dark.png">
+    <img src="docs/images/control-panel-en-light.png" alt="IdleTrigger control panel" width="430">
+  </picture>
+</p>
 
-`1, 2, 3, 5, 10, 15, 30 minutes; 1, 2, 5 hours`.
+<p align="center"><sub>Follows Windows light/dark mode and display DPI. The screenshot follows your GitHub theme.</sub></p>
 
-The monitor uses Windows `GetLastInputInfo` to observe real keyboard and mouse activity. Starting or re-enabling it begins a fresh idle window, so pre-existing idle time never triggers an immediate action. The timer resets after each action.
+Left-click the tray icon for everyday settings; advanced options remain in TOML.
 
-The **Enable Pre-action Reminder** switch shows a non-activating prompt before the action. Any keyboard or mouse input cancels the pending action; closing the prompt does the same. Set `idle_warning_seconds = 0` for silent operation.
+## 🚀 Get Started
 
-If a device, driver, or app repeatedly resets Windows idle time and prevents idle actions, try **Enable Enhanced Monitoring**. It learns stable reset patterns while continuing to treat normal keyboard and mouse input as activity.
+1. Download **x64** for most PCs, or **x86** for 32-bit Windows.
+2. Put the EXE in a writable folder you intend to keep, then run it.
+3. Left-click the IdleTrigger tray icon and choose your settings.
 
-## Automatic Tasks
+Requires **Windows 10 / Windows Server 2016 or later**. No installation is needed.
 
-Use **Manage Automatic Tasks** to create rules without editing TOML. A rule can temporarily enable or pause Stay Awake or Idle Monitoring while selected processes are running or during a time window. It can also lock, sleep, hibernate, shut down, or restart once, on a daily or weekly schedule, when a selected process starts, or after all selected processes exit.
+## 📚 Documentation
 
-Processes can be matched by executable name or by a specific EXE. State is sampled every five seconds: processes already running when IdleTrigger starts do not backfill a start event, and a process that starts and exits between samples may be missed. Exit rules wait for every matching instance to close and use a five-second grace period to avoid firing during brief restarts.
+| | Read this |
+| --- | --- |
+| 🧭 | [User guide](docs/user-guide.md) — features, automatic tasks, configuration, CLI, and updates |
+| 📝 | [Configuration reference](IdleTrigger.example.toml) — every TOML field in English and Chinese |
+| 🛠️ | [Build and development](docs/development.md) — local builds, checks, resources, and release process |
+| 🗂️ | [Documentation index](docs/README.md) — all project documents in one place |
 
-System actions always show a cancellable countdown of at least 10 seconds. Tasks work only while IdleTrigger is running, and schedules missed during sleep are not replayed after resume. Rules can use built-in actions only; they cannot run custom commands or launch programs. Process matching does not inject code, terminate processes, install a service, or create Windows Task Scheduler entries.
+## 🤝 Credits
 
-## Command Line
+Tray integration is adapted from [getlantern/systray v1.2.2](https://github.com/getlantern/systray) ([Apache-2.0 notice](internal/ui/trayicon/LICENSE)). Built with [BurntSushi/toml](https://github.com/BurntSushi/toml) and [golang.org/x/sys](https://pkg.go.dev/golang.org/x/sys). Stay Awake was inspired by [NoSleep](https://github.com/CHerSun/NoSleep).
 
-Run the EXE without arguments to launch the tray app.
+## 📄 License
 
-```text
-IdleTrigger sleep | hibernate | shutdown | restart | lock
-
-IdleTrigger nosleep on [--screen]
-IdleTrigger nosleep off | toggle | status
-
-IdleTrigger monitor on | off | status
-
-IdleTrigger autostart enable | disable | status
-IdleTrigger config:reload
-IdleTrigger status
-IdleTrigger version
-```
-
-Commands that change `nosleep` or `monitor` state, plus `config:reload`, require the tray app to be running. Status queries and one-shot power actions also work without it.
-
-## Configuration
-
-IdleTrigger creates and maintains `IdleTrigger.toml` next to the EXE while preserving valid existing values. Automatic rules are stored there; scheduler state is kept separately in `IdleTrigger.state.json`.
-
-Use [IdleTrigger.example.toml](IdleTrigger.example.toml) as the bilingual configuration reference. Changes apply automatically within a few seconds; to reload immediately, restart IdleTrigger or run:
-
-```powershell
-.\IdleTrigger-x64.exe config:reload
-```
-
-Auto-start is stored in the current user's Windows Run registry key and is managed by the panel or CLI, not TOML.
-
-## Logging
-
-Enable **Debug Log** in the panel or set `logging_enabled = true`. The log is written next to the EXE, with `%TEMP%` as a fallback. It rotates at 5 MiB, retains one previous file, and includes a session identifier on each line.
-
-## Build and Development
-
-See [development guide](docs/development.md) for prerequisites, dual-architecture builds, resource generation, and verification commands.
-
-## Acknowledgments
-
-- [getlantern/systray](https://github.com/getlantern/systray): Windows tray implementation adapted from v1.2.2 (Apache-2.0)
-- [BurntSushi/toml](https://github.com/BurntSushi/toml): TOML parser
-- [golang.org/x/sys](https://pkg.go.dev/golang.org/x/sys): Windows API bindings
-- [NoSleep](https://github.com/CHerSun/NoSleep): inspiration for the Stay Awake feature
-
-## License
-
-MIT
+[MIT](LICENSE)

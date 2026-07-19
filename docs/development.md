@@ -1,8 +1,8 @@
-# Build IdleTrigger
+# 🛠️ Build IdleTrigger
 
-[简体中文](development.zh-CN.md)
+[Documentation](README.md) · [简体中文](development.zh-CN.md) · [Project Home](../README.md)
 
-## Requirements
+## 📦 Requirements
 
 - Go 1.26 or later
 - Git
@@ -18,7 +18,7 @@ go version
 go mod download
 ```
 
-## Build
+## 🔨 Build
 
 The architecture-specific `.syso` files contain the application icon, manifest, and Windows version metadata. They are generated build artifacts and are not committed. Regenerate them before building so Explorer properties and the app version agree.
 
@@ -34,7 +34,7 @@ go build -trimpath "-ldflags=$ldflags" -o $output ./cmd/idletrigger
 
 `CGO_ENABLED=0` keeps the binary self-contained. `-H windowsgui` prevents a console window when launching the tray app.
 
-## Verify
+## ✅ Verify
 
 Run the standard local checks in PowerShell 7 or later:
 
@@ -85,7 +85,13 @@ go build -trimpath "-ldflags=$ldflags" -o dist/IdleTrigger-x86.exe ./cmd/idletri
 
 The release workflow runs formatting, module, test, and vet checks, produces both executables, and publishes `SHA256SUMS.txt`.
 
-## Cross-Layer Change Checklist
+## 🚢 Release Process
+
+Pushing a `v*` tag creates a draft release titled `IdleTrigger vX.Y.Z`, attaches the x64 and x86 executables plus `SHA256SUMS.txt`, and generates an initial changelog. Pull requests are grouped by `.github/release.yml`; direct commits still need editorial review.
+
+Before publishing the draft, rewrite its introduction with the [release-notes style and template](release-notes.md). Lead with user-visible outcomes, keep Chinese and English highlights aligned, verify the asset names and comparison range, and leave commit-level detail at the end.
+
+## 🧩 Cross-Layer Change Checklist
 
 Use the relevant row before considering a change complete:
 
@@ -160,7 +166,7 @@ layering. The process-automation boundary also rejects debug-privilege,
 process-memory, injection, and forced-termination APIs. These checks complement,
 rather than replace, behavior-specific tests.
 
-## Regenerate Resources
+## 🎨 Regenerate Resources
 
 The application icon and the two taskbar icons have separate artwork. Regenerate
 the application ICO first, then the purpose-built taskbar variants:
@@ -179,7 +185,7 @@ go run ./tools/resourcegen.go -version $version
 
 Commit `app.ico`, both tray ICO files, `build/windows/manifest.xml`, and the generators together. Do not commit `.syso` files; the release workflow regenerates them from the tag version.
 
-## Regenerate README Screenshots
+## 📸 Regenerate README Screenshots
 
 Screenshot generation is a maintenance-only capability and is compiled only
 with the `devtools` build tag. The helper builds a temporary devtools EXE,
@@ -213,7 +219,7 @@ The underlying devtools command names the two sets explicitly as
 The normal release EXE deliberately does not contain the `screenshot` command
 or its PNG/compression dependencies.
 
-## Offline Build
+## 📴 Offline Build
 
 Vendor dependencies while online, then copy the repository including `vendor/` to the offline machine:
 
@@ -226,7 +232,7 @@ go run ./tools/resourcegen.go -version dev
 go build -mod=vendor -trimpath -ldflags="-s -w -H windowsgui" -o dist/IdleTrigger-x64.exe ./cmd/idletrigger
 ```
 
-## Development Loop
+## 🔁 Development Loop
 
 ```powershell
 go test ./...

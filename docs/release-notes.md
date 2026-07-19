@@ -1,0 +1,75 @@
+# 📝 Release Notes Style / 更新说明格式
+
+[Documentation / 文档索引](README.md) · [Project Home](../README.md) · [项目主页](../README.zh-CN.md)
+
+Write for people deciding whether to update, not as a copy of the commit log. / 面向正在判断是否升级的用户编写，不要复制提交记录。
+
+## ✍️ Editorial Rules / 编写原则
+
+- Lead with the most visible user benefit, not commit order or internal implementation details. / 先写用户最容易感知的收益，不按提交顺序罗列内部实现。
+- Group changes by two to four product areas, and omit empty categories. / 按 2–4 个产品领域分组，空分类直接省略。
+- Use product-area headings such as Automatic Tasks, Day / Night, or UI Tweaks instead of generic Added / Changed / Fixed buckets. Put small cleanup items under Other Changes. / 使用“自动任务”“昼夜模式”“界面体验”等产品模块标题，不按“新增 / 变更 / 修复”机械分类；零散改进归入“其他变化”。
+- Prefer specific outcomes: “preserves the current selection while refreshing” is better than “improved refresh logic.” / 描述明确结果：“刷新时保留当前选择”优于“优化刷新逻辑”。
+- Keep each language to roughly four to eight aligned highlights; translate meaning, not sentence structure. / 每种语言通常保留 4–8 条对应重点，翻译含义，不照搬句式。
+- A pre-release describes changes since the previous pre-release; a stable release may summarize everything since the previous stable version. / 预发布版只写相对上一个预发布版的增量；稳定版可汇总相对上一个稳定版的全部变化。
+- Put compatibility, migration, or required action near the top. Add one focused screenshot only when it explains a visible change. / 兼容性、迁移和必要操作放在前面；只有截图能解释可见变化时才添加一张聚焦图片。
+- Do not repeat the asset list or routine checksum instructions; GitHub already shows release assets, and the user guide covers verification. / 不重复附件清单和常规校验步骤；GitHub 已展示发布附件，校验方法由使用指南统一说明。
+- Leave PR lists and the comparison link at the end. / PR 明细和完整对比链接放在末尾。
+
+## 🧱 Recommended Structure / 推荐结构
+
+Copy the following structure into the draft release and remove every unused heading or instruction.
+
+将以下结构复制到 Release 草稿中，并删除所有未使用的标题和提示文字。
+
+````markdown
+> 用一句话概括这个版本最值得升级的理由。
+>
+> Summarize the best reason to update in one sentence.
+
+## ✨ 更新重点
+
+### 🔁 自动任务
+
+- 说明用户现在能做什么，或哪个常见问题已解决。
+
+### 🌗 昼夜模式
+
+- 说明计划切换、定位或全屏行为的变化。
+
+### 🎨 界面体验
+
+- 描述可见结果；只有截图确实有帮助时才放在本分类后。
+
+### ⚙️ 其他变化
+
+- 收纳不值得单独成组、但用户能感知的改进。
+
+## 🌐 Highlights
+
+### 🔁 Automatic Tasks
+
+- Explain what users can now do, or which common problem is resolved.
+
+### 🌗 Day / Night
+
+- Describe changes to scheduling, location, or fullscreen behavior.
+
+### 🎨 UI Tweaks
+
+- Describe the visible result; add a screenshot after this category only when useful.
+
+### ⚙️ Other Changes
+
+- Collect smaller improvements that users can still notice.
+
+**完整变更 / Full Changelog**: https://github.com/JeffioZ/idletrigger/compare/vPREVIOUS...vCURRENT
+````
+
+## ✅ Final Check / 发布前检查
+
+- The title is `IdleTrigger vX.Y.Z`, and the release is still a draft while editing. / 标题为 `IdleTrigger vX.Y.Z`，编辑期间保持草稿状态。
+- Chinese and English highlights describe the same behavior. / 中英文亮点表达同一组行为。
+- Asset names, architectures, and the comparison range are correct. / 产物名称、架构和版本对比范围正确。
+- Every claim is supported by the release diff or completed verification. / 每条表述都能从版本差异或已完成验证中得到支持。
+- Mention internal work only when it materially changes compatibility, reliability, security, size, or performance. / 内部工作仅在确实影响兼容性、可靠性、安全性、体积或性能时进入重点说明。
