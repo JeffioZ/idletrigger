@@ -13,8 +13,6 @@
   <a href="https://github.com/JeffioZ/IdleTrigger/releases"><img alt="累计下载" src="https://img.shields.io/github/downloads/JeffioZ/IdleTrigger/total?style=flat&amp;label=downloads&amp;color=0F9D7A"></a>
 </p>
 
-<img src="docs/images/github-social-preview.png" alt="IdleTrigger — Windows 托盘工具" width="840">
-
 <p>
   <a href="https://github.com/JeffioZ/IdleTrigger/releases/latest/download/IdleTrigger-x64.exe"><img alt="下载适用于 64 位 Windows 的 x64 版本" src="https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD-x64-0078D4?style=flat&amp;logo=windows11&amp;logoColor=white"></a>
   <a href="https://github.com/JeffioZ/IdleTrigger/releases/latest/download/IdleTrigger-x86.exe"><img alt="下载适用于 32 位 Windows 的 x86 版本" src="https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD-x86-64748B?style=flat&amp;logo=windows11&amp;logoColor=white"></a>
@@ -23,17 +21,6 @@
 <p><a href="README.md">English</a></p>
 
 </div>
-
-## ✨ 核心能力
-
-| | 能力 | 适用场景 |
-| --- | --- | --- |
-| ⚡ | **保持唤醒** | 下载、渲染、备份或远程连接期间阻止自动睡眠。 |
-| ⏱️ | **空闲动作** | 真实键盘、鼠标持续无操作后，自动锁定、睡眠、休眠或关机。 |
-| 🔁 | **自动任务** | 按计划或进程状态控制电源功能，也可执行内置系统动作。 |
-| 🌗 | **昼夜主题** | 按时间或日出日落切换 Windows 主题，并可适配电池和全屏场景。 |
-
-**为轻量而设计：** IdleTrigger 是面向 Windows 10 / Windows Server 2016 及以上的原生 Win32 便携程序。无需安装器、服务、WebView、模拟输入或额外运行时。设置保存在 EXE 旁边的可读 TOML 文件中。
 
 ## 🪟 原生控制浮层
 
@@ -47,6 +34,17 @@
 <p align="center"><sub>跟随 Windows 深浅色与显示器 DPI；截图会随 GitHub 主题切换。</sub></p>
 
 左键托盘图标完成日常设置；高级选项保留在 TOML 中。
+
+## ✨ 核心能力
+
+| | 能力 | 适用场景 |
+| --- | --- | --- |
+| ⚡ | **保持唤醒** | 下载、渲染、备份或远程连接期间阻止自动睡眠。 |
+| ⏱️ | **空闲动作** | 真实键盘、鼠标持续无操作后，自动锁定、睡眠、休眠或关机。 |
+| 🔁 | **自动任务** | 按计划或进程状态控制电源功能，也可执行内置系统动作。 |
+| 🌗 | **昼夜主题** | 按时间或日出日落切换 Windows 主题，并可适配电池和全屏场景。 |
+
+**为轻量而设计：** IdleTrigger 是面向 Windows 10 / Windows Server 2016 及以上的原生 Win32 便携程序。无需安装器、服务、WebView、模拟输入或额外运行时。设置保存在 EXE 旁边的可读 TOML 文件中。
 
 ## 🚀 三步开始
 

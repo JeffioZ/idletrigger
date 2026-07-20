@@ -13,8 +13,6 @@
   <a href="https://github.com/JeffioZ/IdleTrigger/releases"><img alt="Total downloads" src="https://img.shields.io/github/downloads/JeffioZ/IdleTrigger/total?style=flat&amp;label=downloads&amp;color=0F9D7A"></a>
 </p>
 
-<img src="docs/images/github-social-preview.png" alt="IdleTrigger — Windows tray utility" width="840">
-
 <p>
   <a href="https://github.com/JeffioZ/IdleTrigger/releases/latest/download/IdleTrigger-x64.exe"><img alt="Download x64 for 64-bit Windows" src="https://img.shields.io/badge/Download-x64-0078D4?style=flat&amp;logo=windows11&amp;logoColor=white"></a>
   <a href="https://github.com/JeffioZ/IdleTrigger/releases/latest/download/IdleTrigger-x86.exe"><img alt="Download x86 for 32-bit Windows" src="https://img.shields.io/badge/Download-x86-64748B?style=flat&amp;logo=windows11&amp;logoColor=white"></a>
@@ -23,17 +21,6 @@
 <p><a href="README.zh-CN.md">简体中文</a></p>
 
 </div>
-
-## ✨ At a Glance
-
-| | Capability | Built for |
-| --- | --- | --- |
-| ⚡ | **Stay Awake** | Downloads, renders, backups, and remote sessions that must keep running. |
-| ⏱️ | **Idle Actions** | Lock, sleep, hibernate, or shut down after real keyboard and mouse inactivity. |
-| 🔁 | **Automatic Tasks** | Control power features or run built-in actions by schedule and process state. |
-| 🌗 | **Day / Night** | Switch Windows themes by time or sunrise and sunset, with battery and fullscreen options. |
-
-**Small by design:** IdleTrigger is a portable native Win32 app for Windows 10 / Windows Server 2016 or later. It needs no installer, service, WebView, simulated input, or extra runtime. Settings stay in a readable TOML file beside the EXE.
 
 ## 🪟 Native Control Panel
 
@@ -47,6 +34,17 @@
 <p align="center"><sub>Follows Windows light/dark mode and display DPI. The screenshot follows your GitHub theme.</sub></p>
 
 Left-click the tray icon for everyday settings; advanced options remain in TOML.
+
+## ✨ At a Glance
+
+| | Capability | Built for |
+| --- | --- | --- |
+| ⚡ | **Stay Awake** | Downloads, renders, backups, and remote sessions that must keep running. |
+| ⏱️ | **Idle Actions** | Lock, sleep, hibernate, or shut down after real keyboard and mouse inactivity. |
+| 🔁 | **Automatic Tasks** | Control power features or run built-in actions by schedule and process state. |
+| 🌗 | **Day / Night** | Switch Windows themes by time or sunrise and sunset, with battery and fullscreen options. |
+
+**Small by design:** IdleTrigger is a portable native Win32 app for Windows 10 / Windows Server 2016 or later. It needs no installer, service, WebView, simulated input, or extra runtime. Settings stay in a readable TOML file beside the EXE.
 
 ## 🚀 Get Started
 
