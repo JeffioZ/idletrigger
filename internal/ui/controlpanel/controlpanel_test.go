@@ -509,6 +509,30 @@ func TestUnavailableThemeDisablesEveryThemeControl(t *testing.T) {
 	}
 }
 
+func TestIdleMonitorDisablesEveryDependentControl(t *testing.T) {
+	p := &panel{
+		toggles:  map[uint16]bool{},
+		disabled: map[uint16]bool{},
+		controls: map[uint16]windows.Handle{},
+		tooltips: map[uint16][]uint16{},
+	}
+	ids := []uint16{idIdleWarning, idIdleEnhanced, idIdleTimeout, idIdleAction, idTestWarning}
+	p.applyDependentStates()
+	for _, id := range ids {
+		if !p.disabled[id] {
+			t.Fatalf("idle-monitor control %d remained enabled", id)
+		}
+	}
+
+	p.toggles[idIdle] = true
+	p.applyDependentStates()
+	for _, id := range ids {
+		if p.disabled[id] {
+			t.Fatalf("idle-monitor control %d remained disabled", id)
+		}
+	}
+}
+
 func TestOwnerDrawnButtonsIgnoreStaleNativeHotlight(t *testing.T) {
 	p := &panel{
 		toggles:  map[uint16]bool{},
@@ -552,7 +576,7 @@ func TestChoiceTriggerTogglesARealSharedPopup(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping native Win32 integration test in short mode")
 	}
-	err := Capture(State{IdleTimeout: 30}, func(key string) string { return key }, 1, func(hwnd windows.Handle) error {
+	err := Capture(State{IdleEnabled: true, IdleTimeout: 30}, func(key string) string { return key }, 1, func(hwnd windows.Handle) error {
 		p := panelFor(hwnd)
 		if p == nil {
 			t.Fatal("capture panel is not active")

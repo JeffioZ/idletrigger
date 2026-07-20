@@ -77,6 +77,8 @@ func (p *panel) applyDependentStates() {
 	monitorEnabled := p.toggles[idIdle]
 	p.setDisabled(idIdleWarning, !monitorEnabled)
 	p.setDisabled(idIdleEnhanced, !monitorEnabled)
+	p.setDisabled(idIdleTimeout, !monitorEnabled)
+	p.setDisabled(idIdleAction, !monitorEnabled)
 	p.setDisabled(idTestWarning, !monitorEnabled)
 	themeEnabled := p.toggles[idTheme] && !p.themeUnavailable
 	p.setDisabled(idTheme, p.themeUnavailable)
