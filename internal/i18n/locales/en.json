@@ -127,7 +127,7 @@
   "tip_logging": "Write diagnostics to IdleTrigger.log. Keep this off normally.",
   "tip_language": "Apply and save the language change now.",
   "tip_config": "Open IdleTrigger.toml in Notepad for advanced settings.",
-  "tip_project_home": "https://github.com/JeffioZ/idletrigger",
+  "tip_project_home": "https://github.com/JeffioZ/IdleTrigger",
   "tip_exit": "Exit the tray app and stop all active features.",
   "tip_toggle_state": "Currently %s.\n%s",
   "tip_choice_state": "Currently %s.\n%s",

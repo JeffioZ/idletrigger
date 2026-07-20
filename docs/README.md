@@ -18,6 +18,6 @@
 
 ## 🔗 Project Links / 项目链接
 
-- [Latest release / 最新版本](https://github.com/JeffioZ/idletrigger/releases/latest)
-- [Issue tracker / 问题反馈](https://github.com/JeffioZ/idletrigger/issues)
+- [Latest release / 最新版本](https://github.com/JeffioZ/IdleTrigger/releases/latest)
+- [Issue tracker / 问题反馈](https://github.com/JeffioZ/IdleTrigger/issues)
 - [MIT license / 许可证](../LICENSE)

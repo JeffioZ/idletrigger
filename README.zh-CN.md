@@ -7,17 +7,17 @@
 <p>让任务持续运行，在真实输入空闲后执行电源动作，<br>并按时间或进程自动管理电源状态与 Windows 主题。</p>
 
 <p>
-  <a href="https://github.com/JeffioZ/idletrigger/releases/latest"><img alt="最新版本" src="https://img.shields.io/github/v/release/JeffioZ/idletrigger?display_name=tag&amp;sort=semver&amp;style=flat&amp;color=37BFF3"></a>
-  <a href="https://github.com/JeffioZ/idletrigger/actions/workflows/ci.yml"><img alt="Lint 状态" src="https://img.shields.io/github/actions/workflow/status/JeffioZ/idletrigger/ci.yml?branch=master&amp;style=flat&amp;logo=github&amp;label=Lint"></a>
-  <a href="LICENSE"><img alt="MIT 许可证" src="https://img.shields.io/github/license/JeffioZ/idletrigger?style=flat&amp;color=7C3AED"></a>
-  <a href="https://github.com/JeffioZ/idletrigger/releases"><img alt="累计下载" src="https://img.shields.io/github/downloads/JeffioZ/idletrigger/total?style=flat&amp;label=downloads&amp;color=0F9D7A"></a>
+  <a href="https://github.com/JeffioZ/IdleTrigger/releases/latest"><img alt="最新版本" src="https://img.shields.io/github/v/release/JeffioZ/IdleTrigger?display_name=tag&amp;sort=semver&amp;style=flat&amp;color=37BFF3"></a>
+  <a href="https://github.com/JeffioZ/IdleTrigger/actions/workflows/ci.yml"><img alt="Lint 状态" src="https://img.shields.io/github/actions/workflow/status/JeffioZ/IdleTrigger/ci.yml?branch=master&amp;style=flat&amp;logo=github&amp;label=Lint"></a>
+  <a href="LICENSE"><img alt="MIT 许可证" src="https://img.shields.io/github/license/JeffioZ/IdleTrigger?style=flat&amp;color=7C3AED"></a>
+  <a href="https://github.com/JeffioZ/IdleTrigger/releases"><img alt="累计下载" src="https://img.shields.io/github/downloads/JeffioZ/IdleTrigger/total?style=flat&amp;label=downloads&amp;color=0F9D7A"></a>
 </p>
 
 <img src="docs/images/github-social-preview.png" alt="IdleTrigger — Windows 托盘工具" width="840">
 
 <p>
-  <a href="https://github.com/JeffioZ/idletrigger/releases/latest/download/IdleTrigger-x64.exe"><img alt="下载适用于 64 位 Windows 的 x64 版本" src="https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD-x64-0078D4?style=flat&amp;logo=windows11&amp;logoColor=white"></a>
-  <a href="https://github.com/JeffioZ/idletrigger/releases/latest/download/IdleTrigger-x86.exe"><img alt="下载适用于 32 位 Windows 的 x86 版本" src="https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD-x86-64748B?style=flat&amp;logo=windows11&amp;logoColor=white"></a>
+  <a href="https://github.com/JeffioZ/IdleTrigger/releases/latest/download/IdleTrigger-x64.exe"><img alt="下载适用于 64 位 Windows 的 x64 版本" src="https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD-x64-0078D4?style=flat&amp;logo=windows11&amp;logoColor=white"></a>
+  <a href="https://github.com/JeffioZ/IdleTrigger/releases/latest/download/IdleTrigger-x86.exe"><img alt="下载适用于 32 位 Windows 的 x86 版本" src="https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD-x86-64748B?style=flat&amp;logo=windows11&amp;logoColor=white"></a>
 </p>
 
 <p><a href="README.md">English</a></p>

@@ -7,7 +7,7 @@
 IdleTrigger supports Windows 10 / Windows Server 2016 and later. Use x64 on most PCs; use x86 only on 32-bit Windows.
 
 1. Create a writable folder you intend to keep, such as `%LOCALAPPDATA%\IdleTrigger`.
-2. Download a build into that folder: [x64](https://github.com/JeffioZ/idletrigger/releases/latest/download/IdleTrigger-x64.exe) for most PCs or [x86](https://github.com/JeffioZ/idletrigger/releases/latest/download/IdleTrigger-x86.exe) for 32-bit Windows.
+2. Download a build into that folder: [x64](https://github.com/JeffioZ/IdleTrigger/releases/latest/download/IdleTrigger-x64.exe) for most PCs or [x86](https://github.com/JeffioZ/IdleTrigger/releases/latest/download/IdleTrigger-x86.exe) for 32-bit Windows.
 3. Run the EXE. IdleTrigger appears in the notification area without opening a main window.
 4. Left-click the tray icon for the control panel; right-click for **Open** and **Exit**.
 
@@ -97,7 +97,7 @@ Changing `nosleep` or `monitor`, and running `config:reload`, require the tray a
 
 Exit IdleTrigger before replacing or moving the EXE. Keep `IdleTrigger.toml` and `IdleTrigger.state.json` beside it. After a move, launch the app once from its new location to refresh auto-start.
 
-Use [SHA256SUMS.txt](https://github.com/JeffioZ/idletrigger/releases/latest/download/SHA256SUMS.txt) to verify downloaded executables.
+Use [SHA256SUMS.txt](https://github.com/JeffioZ/IdleTrigger/releases/latest/download/SHA256SUMS.txt) to verify downloaded executables.
 
 ## 🧰 Logs
 

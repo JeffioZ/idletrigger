@@ -60,7 +60,7 @@ Copy the following structure into the draft release and remove every unused head
 
 - Collect smaller improvements that users can still notice.
 
-**完整变更 / Full Changelog**: https://github.com/JeffioZ/idletrigger/compare/vPREVIOUS...vCURRENT
+**完整变更 / Full Changelog**: https://github.com/JeffioZ/IdleTrigger/compare/vPREVIOUS...vCURRENT
 ````
 
 ## ✅ Final Check / 发布前检查

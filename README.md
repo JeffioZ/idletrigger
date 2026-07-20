@@ -7,17 +7,17 @@
 <p>Keep work running, respond to real input inactivity,<br>and automate power or Windows themes by time and process.</p>
 
 <p>
-  <a href="https://github.com/JeffioZ/idletrigger/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/JeffioZ/idletrigger?display_name=tag&amp;sort=semver&amp;style=flat&amp;color=37BFF3"></a>
-  <a href="https://github.com/JeffioZ/idletrigger/actions/workflows/ci.yml"><img alt="Lint status" src="https://img.shields.io/github/actions/workflow/status/JeffioZ/idletrigger/ci.yml?branch=master&amp;style=flat&amp;logo=github&amp;label=Lint"></a>
-  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/github/license/JeffioZ/idletrigger?style=flat&amp;color=7C3AED"></a>
-  <a href="https://github.com/JeffioZ/idletrigger/releases"><img alt="Total downloads" src="https://img.shields.io/github/downloads/JeffioZ/idletrigger/total?style=flat&amp;label=downloads&amp;color=0F9D7A"></a>
+  <a href="https://github.com/JeffioZ/IdleTrigger/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/JeffioZ/IdleTrigger?display_name=tag&amp;sort=semver&amp;style=flat&amp;color=37BFF3"></a>
+  <a href="https://github.com/JeffioZ/IdleTrigger/actions/workflows/ci.yml"><img alt="Lint status" src="https://img.shields.io/github/actions/workflow/status/JeffioZ/IdleTrigger/ci.yml?branch=master&amp;style=flat&amp;logo=github&amp;label=Lint"></a>
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/github/license/JeffioZ/IdleTrigger?style=flat&amp;color=7C3AED"></a>
+  <a href="https://github.com/JeffioZ/IdleTrigger/releases"><img alt="Total downloads" src="https://img.shields.io/github/downloads/JeffioZ/IdleTrigger/total?style=flat&amp;label=downloads&amp;color=0F9D7A"></a>
 </p>
 
 <img src="docs/images/github-social-preview.png" alt="IdleTrigger — Windows tray utility" width="840">
 
 <p>
-  <a href="https://github.com/JeffioZ/idletrigger/releases/latest/download/IdleTrigger-x64.exe"><img alt="Download x64 for 64-bit Windows" src="https://img.shields.io/badge/Download-x64-0078D4?style=flat&amp;logo=windows11&amp;logoColor=white"></a>
-  <a href="https://github.com/JeffioZ/idletrigger/releases/latest/download/IdleTrigger-x86.exe"><img alt="Download x86 for 32-bit Windows" src="https://img.shields.io/badge/Download-x86-64748B?style=flat&amp;logo=windows11&amp;logoColor=white"></a>
+  <a href="https://github.com/JeffioZ/IdleTrigger/releases/latest/download/IdleTrigger-x64.exe"><img alt="Download x64 for 64-bit Windows" src="https://img.shields.io/badge/Download-x64-0078D4?style=flat&amp;logo=windows11&amp;logoColor=white"></a>
+  <a href="https://github.com/JeffioZ/IdleTrigger/releases/latest/download/IdleTrigger-x86.exe"><img alt="Download x86 for 32-bit Windows" src="https://img.shields.io/badge/Download-x86-64748B?style=flat&amp;logo=windows11&amp;logoColor=white"></a>
 </p>
 
 <p><a href="README.zh-CN.md">简体中文</a></p>

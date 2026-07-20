@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-const projectHomeURL = "https://github.com/JeffioZ/idletrigger"
+const projectHomeURL = "https://github.com/JeffioZ/IdleTrigger"
 
 var executeShell = windows.ShellExecute
 

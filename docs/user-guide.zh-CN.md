@@ -7,7 +7,7 @@
 IdleTrigger 支持 Windows 10 / Windows Server 2016 及以上系统。大多数电脑使用 x64；只有 32 位 Windows 才使用 x86。
 
 1. 新建一个准备长期保留且可写的目录，例如 `%LOCALAPPDATA%\IdleTrigger`。
-2. 将对应版本下载到该目录：[x64](https://github.com/JeffioZ/idletrigger/releases/latest/download/IdleTrigger-x64.exe) 适用于大多数电脑，[x86](https://github.com/JeffioZ/idletrigger/releases/latest/download/IdleTrigger-x86.exe) 仅用于 32 位 Windows。
+2. 将对应版本下载到该目录：[x64](https://github.com/JeffioZ/IdleTrigger/releases/latest/download/IdleTrigger-x64.exe) 适用于大多数电脑，[x86](https://github.com/JeffioZ/IdleTrigger/releases/latest/download/IdleTrigger-x86.exe) 仅用于 32 位 Windows。
 3. 运行 EXE。程序不会打开主窗口，请在通知区域找到 IdleTrigger。
 4. 左键托盘图标打开控制浮层；右键使用“打开”和“退出”菜单。
 
@@ -97,7 +97,7 @@ IdleTrigger version
 
 替换或移动 EXE 前，先退出 IdleTrigger，并保留同目录的 `IdleTrigger.toml` 和 `IdleTrigger.state.json`。移动后请从新位置启动一次，以刷新开机自启路径。
 
-可使用 [SHA256SUMS.txt](https://github.com/JeffioZ/idletrigger/releases/latest/download/SHA256SUMS.txt) 校验下载的 EXE。
+可使用 [SHA256SUMS.txt](https://github.com/JeffioZ/IdleTrigger/releases/latest/download/SHA256SUMS.txt) 校验下载的 EXE。
 
 ## 🧰 日志
 

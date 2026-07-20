@@ -127,7 +127,7 @@
   "tip_logging": "写入 IdleTrigger.log 供排查使用；平时建议关闭。",
   "tip_language": "立即生效并保存语言设置。",
   "tip_config": "用记事本打开 IdleTrigger.toml，修改高级设置。",
-  "tip_project_home": "https://github.com/JeffioZ/idletrigger",
+  "tip_project_home": "https://github.com/JeffioZ/IdleTrigger",
   "tip_exit": "退出托盘程序，并停止所有已启用功能。",
   "tip_toggle_state": "当前：%s。\n%s",
   "tip_choice_state": "当前：%s。\n%s",
