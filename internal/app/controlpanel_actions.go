@@ -144,7 +144,10 @@ func (s *runtimeState) handleThemeControlAction(action controlpanel.Action) bool
 			return theme.Switch(mode)
 		}, nil)
 	case controlpanel.ActRepairTheme:
-		s.runThemeOperation("menu_theme_repair", theme.Refresh, nil)
+		s.runThemeOperation("menu_theme_repair", func() error {
+			defer trayicon.Post(controlpanel.RefreshThemeAfterSystemRepair)
+			return theme.Refresh()
+		}, nil)
 	default:
 		return false
 	}

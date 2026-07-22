@@ -65,7 +65,7 @@
 
 托盘集成基于 [getlantern/systray v1.2.2](https://github.com/getlantern/systray) 调整（[Apache-2.0 声明](internal/ui/trayicon/LICENSE)）。
 
-项目使用 [BurntSushi/toml](https://github.com/BurntSushi/toml) 和 [golang.org/x/sys](https://pkg.go.dev/golang.org/x/sys)；保持唤醒功能受到 [NoSleep](https://github.com/CHerSun/NoSleep) 启发。
+项目使用 [BurntSushi/toml](https://github.com/BurntSushi/toml) 和 [golang.org/x/sys](https://pkg.go.dev/golang.org/x/sys)；保持唤醒功能受到 [NoSleep](https://github.com/CHerSun/NoSleep) 启发。Windows 11 主题修复为独立实现，其行为参考了 [Auto Dark Mode 的 DWM 刷新策略](https://github.com/AutoDarkMode/Windows-Auto-Night-Mode/blob/master/AutoDarkModeSvc/Handlers/DwmRefreshHandler.cs)。
 
 ## 📄 许可证
 

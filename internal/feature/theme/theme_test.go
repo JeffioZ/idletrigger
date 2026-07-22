@@ -1,7 +1,6 @@
 package theme
 
 import (
-	"errors"
 	"math"
 	"os"
 	"path/filepath"
@@ -253,16 +252,21 @@ func TestSwitchFailureLogDedupesUntilSuccess(t *testing.T) {
 	}
 }
 
-func TestSchedulerReportsSwitchFailure(t *testing.T) {
+func TestSchedulerRetriesAfterThemeSwitchFailure(t *testing.T) {
 	s := NewScheduler("fixed", "07:00", "19:00", 0, 0, false, false)
-	want := errTestSwitchFailure{}
-	s.switchTheme = func(Mode) error { return want }
-	var got error
-	s.SetFailureHandler(func(err error) { got = err })
+	attempts := 0
+	s.switchTheme = func(Mode) error {
+		attempts++
+		if attempts == 1 {
+			return errTestSwitchFailure{}
+		}
+		return nil
+	}
 
 	s.switchIfAllowed("schedule", ModeDark, nil)
-	if !errors.Is(got, want) {
-		t.Fatalf("failure handler received %v, want %v", got, want)
+	s.switchIfAllowed("schedule", ModeDark, nil)
+	if attempts != 2 {
+		t.Fatalf("theme switch attempts = %d, want retry after the first failure", attempts)
 	}
 }
 

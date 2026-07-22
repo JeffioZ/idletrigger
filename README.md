@@ -65,7 +65,7 @@ Left-click the tray icon for everyday settings; advanced options remain in TOML.
 
 Tray integration is adapted from [getlantern/systray v1.2.2](https://github.com/getlantern/systray) ([Apache-2.0 notice](internal/ui/trayicon/LICENSE)).
 
-Built with [BurntSushi/toml](https://github.com/BurntSushi/toml) and [golang.org/x/sys](https://pkg.go.dev/golang.org/x/sys). Stay Awake was inspired by [NoSleep](https://github.com/CHerSun/NoSleep).
+Built with [BurntSushi/toml](https://github.com/BurntSushi/toml) and [golang.org/x/sys](https://pkg.go.dev/golang.org/x/sys). Stay Awake was inspired by [NoSleep](https://github.com/CHerSun/NoSleep). The Windows 11 theme-repair behavior is an independent implementation informed by [Auto Dark Mode's DWM refresh strategy](https://github.com/AutoDarkMode/Windows-Auto-Night-Mode/blob/master/AutoDarkModeSvc/Handlers/DwmRefreshHandler.cs).
 
 ## 📄 License
 

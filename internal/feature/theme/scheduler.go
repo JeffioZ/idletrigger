@@ -73,7 +73,6 @@ type Scheduler struct {
 	lastPauseErr   string
 	pauseCheck     func(<-chan struct{}) (ThemeSwitchPauseReason, error)
 	switchTheme    func(Mode) error
-	failureHandler func(error)
 }
 
 // NewScheduler creates a Scheduler.
@@ -88,14 +87,6 @@ func NewScheduler(mode, lightTime, darkTime string, lat, lon float64, skipFullsc
 		darkOnBattery:  darkOnBattery,
 		pauseCheck:     DetectThemeSwitchPause,
 		switchTheme:    Switch,
-	}
-}
-
-// SetFailureHandler receives a theme write failure after it has been logged.
-// Configure it before Start; the callback runs on the scheduler goroutine.
-func (s *Scheduler) SetFailureHandler(handler func(error)) {
-	if s != nil {
-		s.failureHandler = handler
 	}
 }
 
@@ -256,9 +247,6 @@ func (s *Scheduler) switchIfAllowed(source string, target Mode, cancel <-chan st
 
 	if err := s.switchTheme(target); err != nil {
 		s.logSwitchFailure(source, target, err)
-		if s.failureHandler != nil {
-			s.failureHandler(err)
-		}
 	} else {
 		s.clearSwitchFailure()
 	}

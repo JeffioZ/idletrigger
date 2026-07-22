@@ -22,21 +22,6 @@ func (s *runtimeState) themeAvailable() bool {
 	return !s.themeSupportChecked || s.themeSupported
 }
 
-func (s *runtimeState) disableThemeForRuntime(err error) {
-	if err == nil {
-		return
-	}
-	s.themeSupportChecked = true
-	s.themeSupported = false
-	s.themeSupportErr = err
-	s.stopThemeScheduler()
-	s.stopIPLocationCycle()
-	s.syncBatteryLoop()
-	s.updateIcon()
-	mylog.Info("Day/night theme disabled after a runtime failure: %v", err)
-	s.refreshControlPanel()
-}
-
 func (s *runtimeState) themeUnavailableDetail() string {
 	if s.themeSupportErr == nil {
 		return ""
@@ -54,13 +39,6 @@ func (s *runtimeState) startThemeScheduler() {
 		loc = s.themeLocationInfo(false)
 	}
 	scheduler := theme.NewScheduler(s.cfg.ThemeMode, s.cfg.ThemeLightTime, s.cfg.ThemeDarkTime, loc.Latitude, loc.Longitude, s.cfg.ThemeSkipFullscreen, s.cfg.ThemeDarkOnBattery)
-	scheduler.SetFailureHandler(func(err error) {
-		s.post(func() {
-			if s.themeSched == scheduler {
-				s.disableThemeForRuntime(err)
-			}
-		})
-	})
 	s.themeSched = scheduler
 	scheduler.Start()
 	mylog.Info("Theme scheduler started: mode=%s light=%s dark=%s lat=%.4f lon=%.4f source=%s", s.cfg.ThemeMode, s.cfg.ThemeLightTime, s.cfg.ThemeDarkTime, loc.Latitude, loc.Longitude, loc.Source)

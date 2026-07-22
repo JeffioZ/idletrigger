@@ -247,6 +247,19 @@ func RefreshTheme() {
 	}
 }
 
+// RefreshThemeAfterSystemRepair forces one complete frame even when the
+// semantic light/dark palette did not change. A full Windows theme-file apply
+// can repaint native controls progressively; this final atomic presentation
+// replaces any intermediate surface without hiding the panel for the repair.
+func RefreshThemeAfterSystemRepair() {
+	panelMu.Lock()
+	p := active
+	panelMu.Unlock()
+	if p != nil {
+		p.refreshThemeWithForce(true, true)
+	}
+}
+
 func Destroy() {
 	Hide()
 }

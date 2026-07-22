@@ -12,6 +12,10 @@ import (
 var applyPanelControlTheme = nativeform.ApplyControl
 
 func (p *panel) refreshTheme(invalidate bool) {
+	p.refreshThemeWithForce(invalidate, false)
+}
+
+func (p *panel) refreshThemeWithForce(invalidate, force bool) {
 	if p.themeRefreshing {
 		return
 	}
@@ -20,7 +24,7 @@ func (p *panel) refreshTheme(invalidate bool) {
 	// Windows broadcasts several closely related color/theme messages for one
 	// user selection. Avoid rebuilding GDI resources and presenting duplicate
 	// frames once the requested semantic palette is already active.
-	if invalidate && p.backgroundBrush != 0 && p.themeDark == dark && p.palette == palette {
+	if !force && invalidate && p.backgroundBrush != 0 && p.themeDark == dark && p.palette == palette {
 		return
 	}
 	p.themeRefreshing = true

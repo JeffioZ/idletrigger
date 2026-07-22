@@ -1,7 +1,9 @@
 package theme
 
 import (
+	"errors"
 	"fmt"
+	"sync"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -12,9 +14,17 @@ var (
 	themeSwitchUser32              = windows.NewLazySystemDLL("user32.dll")
 	pUpdatePerUserSystemParameters = themeSwitchUser32.NewProc("UpdatePerUserSystemParameters")
 	pSendMessageTimeout            = themeSwitchUser32.NewProc("SendMessageTimeoutW")
+	themeOperationMu               sync.Mutex
 )
 
 const regPath = `Software\Microsoft\Windows\CurrentVersion\Themes\Personalize`
+
+var themeModeValueNames = [...]string{"AppsUseLightTheme", "SystemUsesLightTheme"}
+
+type themePreferenceStore interface {
+	GetIntegerValue(name string) (value uint64, valueType uint32, err error)
+	SetDWordValue(name string, value uint32) error
+}
 
 // DetectSupport verifies that the current Windows profile exposes writable
 // light/dark Personalize settings. It deliberately does not change either
@@ -25,7 +35,7 @@ func DetectSupport() error {
 		return fmt.Errorf("open Windows Personalize settings: %w", err)
 	}
 	defer k.Close()
-	for _, name := range []string{"AppsUseLightTheme", "SystemUsesLightTheme"} {
+	for _, name := range themeModeValueNames {
 		value, valueType, err := k.GetIntegerValue(name)
 		if err != nil {
 			return fmt.Errorf("read %s: %w", name, err)
@@ -47,6 +57,9 @@ const (
 
 // Switch sets the Windows app and system theme.
 func Switch(mode Mode) error {
+	themeOperationMu.Lock()
+	defer themeOperationMu.Unlock()
+
 	var val uint32
 	if mode == ModeLight {
 		val = 1
@@ -56,30 +69,99 @@ func Switch(mode Mode) error {
 		return err
 	}
 	defer k.Close()
-	if err := k.SetDWordValue("AppsUseLightTheme", val); err != nil {
-		return fmt.Errorf("set AppsUseLightTheme: %w", err)
-	}
-	if err := k.SetDWordValue("SystemUsesLightTheme", val); err != nil {
-		return fmt.Errorf("set SystemUsesLightTheme: %w", err)
-	}
-	for _, name := range []string{"AppsUseLightTheme", "SystemUsesLightTheme"} {
-		actual, valueType, err := k.GetIntegerValue(name)
-		if err != nil {
-			return fmt.Errorf("verify %s: %w", name, err)
-		}
-		if valueType != registry.DWORD || uint32(actual) != val {
-			return fmt.Errorf("verify %s: Windows did not retain the requested value", name)
-		}
+	if err := applyThemeModeValues(k, val); err != nil {
+		return err
 	}
 
 	notifyThemeChanged()
 	return nil
 }
 
-// Refresh asks Windows shell surfaces to re-read the current theme settings.
-func Refresh() error {
-	notifyThemeChanged()
+// applyThemeModeValues treats the app and system preferences as one logical
+// update. Registry writes are not transactional, so any write or verification
+// failure restores the values observed before the operation.
+func applyThemeModeValues(store themePreferenceStore, value uint32) error {
+	desired := make(map[string]uint32, len(themeModeValueNames))
+	for _, name := range themeModeValueNames {
+		desired[name] = value
+	}
+	return applyThemePreferenceValues(store, desired)
+}
+
+func applyThemePreferenceValues(store themePreferenceStore, desired map[string]uint32) error {
+	if err := validateThemePreferenceTargets(desired); err != nil {
+		return err
+	}
+
+	previous := make(map[string]uint32, len(themeModeValueNames))
+	for _, name := range themeModeValueNames {
+		current, valueType, err := store.GetIntegerValue(name)
+		if err != nil {
+			return fmt.Errorf("read %s before theme switch: %w", name, err)
+		}
+		if valueType != registry.DWORD || current > 1 {
+			return fmt.Errorf("read %s before theme switch: invalid Windows light/dark setting", name)
+		}
+		previous[name] = uint32(current)
+	}
+
+	attempted := make([]string, 0, len(themeModeValueNames))
+	for _, name := range themeModeValueNames {
+		attempted = append(attempted, name)
+		if err := store.SetDWordValue(name, desired[name]); err != nil {
+			return themeModeUpdateError(store, previous, attempted, fmt.Errorf("set %s: %w", name, err))
+		}
+	}
+
+	for _, name := range themeModeValueNames {
+		actual, valueType, err := store.GetIntegerValue(name)
+		if err != nil {
+			return themeModeUpdateError(store, previous, attempted, fmt.Errorf("verify %s: %w", name, err))
+		}
+		if valueType != registry.DWORD || uint32(actual) != desired[name] {
+			return themeModeUpdateError(store, previous, attempted,
+				fmt.Errorf("verify %s: Windows did not retain the requested value", name))
+		}
+	}
 	return nil
+}
+
+func validateThemePreferenceTargets(desired map[string]uint32) error {
+	for _, name := range themeModeValueNames {
+		target, ok := desired[name]
+		if !ok || target > 1 {
+			return fmt.Errorf("target %s is not a valid Windows light/dark setting", name)
+		}
+	}
+	return nil
+}
+
+func themeModeUpdateError(store themePreferenceStore, previous map[string]uint32, attempted []string, updateErr error) error {
+	var rollbackErrs []error
+	for i := len(attempted) - 1; i >= 0; i-- {
+		name := attempted[i]
+		if err := store.SetDWordValue(name, previous[name]); err != nil {
+			rollbackErrs = append(rollbackErrs, fmt.Errorf("restore %s: %w", name, err))
+		}
+	}
+	if len(rollbackErrs) == 0 {
+		return updateErr
+	}
+	return errors.Join(updateErr, fmt.Errorf("roll back partial theme switch: %w", errors.Join(rollbackErrs...)))
+}
+
+// Refresh repairs partially updated Windows 11 shell surfaces and then asks
+// every top-level window to re-read the current theme settings.
+func Refresh() error {
+	themeOperationMu.Lock()
+	defer themeOperationMu.Unlock()
+
+	var repairErr error
+	if windows.RtlGetVersion().BuildNumber >= windows11FullDWMRefreshBuild {
+		repairErr = refreshDWMColorization()
+	}
+	notifyThemeChanged()
+	return repairErr
 }
 
 type themeChangeNotification struct {

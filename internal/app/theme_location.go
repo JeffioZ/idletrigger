@@ -112,7 +112,6 @@ func (s *runtimeState) runThemeOperation(actionKey string, fn func() error, onSu
 	go func() {
 		if err := fn(); err != nil {
 			s.post(func() {
-				s.disableThemeForRuntime(err)
 				s.showError(actionKey, err)
 			})
 			return

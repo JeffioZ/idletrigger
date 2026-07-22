@@ -479,6 +479,43 @@ func TestThemeRefreshCommitsCompleteFrame(t *testing.T) {
 	}
 }
 
+func TestThemeRepairCompletionForcesCompleteFrame(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping native Win32 integration test in short mode")
+	}
+	getUpdateRect := windows.NewLazySystemDLL("user32.dll").NewProc("GetUpdateRect")
+	err := Capture(State{Theme: ThemeDark}, func(key string) string { return key }, 1, func(hwnd windows.Handle) error {
+		p := panelFor(hwnd)
+		if p == nil {
+			t.Fatal("capture panel is not active")
+		}
+		originalApplyControlTheme := applyPanelControlTheme
+		defer func() { applyPanelControlTheme = originalApplyControlTheme }()
+		themedControls := make(map[windows.Handle]int)
+		applyPanelControlTheme = func(control windows.Handle, dark bool) {
+			themedControls[control]++
+			originalApplyControlTheme(control, dark)
+		}
+
+		RefreshThemeAfterSystemRepair()
+		for id, control := range p.controls {
+			if control == 0 {
+				continue
+			}
+			if count := themedControls[control]; count != 1 {
+				t.Fatalf("repair completion themed control %d %d times, want once", id, count)
+			}
+			if pending, _, _ := getUpdateRect.Call(uintptr(control), 0, 0); pending != 0 {
+				t.Fatalf("repair completion left control %d with a deferred paint region", id)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestControlStateCombinesModelAndNativeState(t *testing.T) {
 	p := &panel{
 		toggles:            map[uint16]bool{idIdle: true},
