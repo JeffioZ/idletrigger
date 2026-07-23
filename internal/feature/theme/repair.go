@@ -33,10 +33,13 @@ const (
 	themeManagerInitMethod            = 3
 	themeManagerGetCurrentThemeMethod = 11
 	themeManagerSetCurrentThemeMethod = 12
+	themeManagerGetCustomThemeMethod  = 13
+	themeManagerUpdateCustomMethod    = 26
 	legacyThemeManagerApplyMethod     = 4
 )
 
 const (
+	themesRegistryPath    = `Software\Microsoft\Windows\CurrentVersion\Themes`
 	themesPersonalizePath = `Software\Microsoft\Windows\CurrentVersion\Themes\Personalize`
 	explorerAccentPath    = `Software\Microsoft\Windows\CurrentVersion\Explorer\Accent`
 	dwmRegistryPath       = `Software\Microsoft\Windows\DWM`
@@ -55,7 +58,7 @@ var (
 )
 
 type themeManager2 struct {
-	vtable *[themeManagerSetCurrentThemeMethod + 1]uintptr
+	vtable *[themeManagerUpdateCustomMethod + 1]uintptr
 }
 
 type legacyThemeManager struct {
@@ -85,7 +88,7 @@ func refreshDWMColorization() error {
 	if err != nil {
 		return fmt.Errorf("prepare full DWM refresh: %w", err)
 	}
-	appsLight, systemLight, err := currentThemeModes()
+	appsLight, systemLight, err := currentThemeModes(source)
 	if err != nil {
 		return fmt.Errorf("read current theme modes: %w", err)
 	}
@@ -142,39 +145,168 @@ func refreshDWMColorization() error {
 }
 
 func currentThemeSnapshot() ([]byte, error) {
+	syncErr := syncCustomThemeMetadata()
 	localAppData, err := os.UserCacheDir()
 	if err != nil {
 		return nil, err
 	}
-	path := filepath.Join(localAppData, "Microsoft", "Windows", "Themes", "Custom.theme")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
+	customPath := filepath.Join(localAppData, "Microsoft", "Windows", "Themes", "Custom.theme")
+	paths := make([]string, 0, 2)
+	key, pathErr := registry.OpenKey(registry.CURRENT_USER, themesRegistryPath, registry.QUERY_VALUE)
+	if pathErr == nil {
+		if currentPath, _, currentErr := key.GetStringValue("CurrentTheme"); currentErr == nil && currentPath != "" {
+			paths = append(paths, currentPath)
+		} else if currentErr != nil && !errors.Is(currentErr, registry.ErrNotExist) {
+			pathErr = currentErr
+		}
+		key.Close()
 	}
-	return data, nil
+	paths = append(paths, customPath)
+	data, readErr := readThemeSnapshotFromPaths(paths)
+	if readErr == nil {
+		return data, nil
+	}
+	var snapshotErrs []error
+	if syncErr != nil {
+		snapshotErrs = append(snapshotErrs, fmt.Errorf("synchronize current Windows theme metadata: %w", syncErr))
+	}
+	if pathErr != nil {
+		snapshotErrs = append(snapshotErrs, fmt.Errorf("read CurrentTheme registry value: %w", pathErr))
+	}
+	snapshotErrs = append(snapshotErrs, readErr)
+	return nil, errors.Join(snapshotErrs...)
 }
 
-func currentThemeModes() (appsLight, systemLight bool, err error) {
+func syncCustomThemeMetadata() error {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	initialized, err := initializeThemeCOM()
+	if err != nil {
+		return err
+	}
+	if initialized {
+		defer windows.CoUninitialize()
+	}
+	manager, err := createThemeManager2()
+	if err != nil {
+		return err
+	}
+	defer manager.release()
+	if err := manager.init(); err != nil {
+		return err
+	}
+	currentTheme, err := manager.currentTheme()
+	if err != nil {
+		return err
+	}
+	customTheme, err := manager.customTheme()
+	if err != nil {
+		return err
+	}
+	if currentTheme == customTheme {
+		return manager.updateCustomTheme()
+	}
+	return nil
+}
+
+func readThemeSnapshotFromPaths(paths []string) ([]byte, error) {
+	seen := make(map[string]struct{}, len(paths))
+	var readErrs []error
+	for _, path := range paths {
+		if path == "" {
+			continue
+		}
+		cleanPath := filepath.Clean(path)
+		key := strings.ToLower(cleanPath)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		data, err := os.ReadFile(cleanPath)
+		if err != nil {
+			readErrs = append(readErrs, fmt.Errorf("read %s: %w", cleanPath, err))
+			continue
+		}
+		if !themeFileHasSection(data, "Theme") || !themeFileHasSection(data, "VisualStyles") {
+			readErrs = append(readErrs, fmt.Errorf("read %s: incomplete theme file", cleanPath))
+			continue
+		}
+		return data, nil
+	}
+	if len(readErrs) == 0 {
+		return nil, errors.New("no current Windows theme file path is available")
+	}
+	return nil, errors.Join(readErrs...)
+}
+
+func themeFileHasSection(source []byte, section string) bool {
+	want := "[" + section + "]"
+	for _, line := range strings.Split(strings.ReplaceAll(string(source), "\r\n", "\n"), "\n") {
+		if strings.EqualFold(strings.TrimSpace(line), want) {
+			return true
+		}
+	}
+	return false
+}
+
+func currentThemeModes(source []byte) (appsLight, systemLight bool, err error) {
 	key, err := registry.OpenKey(registry.CURRENT_USER, themesPersonalizePath, registry.QUERY_VALUE)
 	if err != nil {
 		return false, false, err
 	}
 	defer key.Close()
-	apps, appsType, err := key.GetIntegerValue("AppsUseLightTheme")
+	appsLight, err = currentThemeMode(key, "AppsUseLightTheme", "AppMode", source)
 	if err != nil {
 		return false, false, err
 	}
-	if appsType != registry.DWORD || apps > 1 {
-		return false, false, errors.New("AppsUseLightTheme is not a valid Windows light/dark setting")
-	}
-	system, systemType, err := key.GetIntegerValue("SystemUsesLightTheme")
+	systemLight, err = currentThemeMode(key, "SystemUsesLightTheme", "SystemMode", source)
 	if err != nil {
 		return false, false, err
 	}
-	if systemType != registry.DWORD || system > 1 {
-		return false, false, errors.New("SystemUsesLightTheme is not a valid Windows light/dark setting")
+	return appsLight, systemLight, nil
+}
+
+func currentThemeMode(store themePreferenceStore, registryName, themeName string, source []byte) (bool, error) {
+	preference, err := readThemePreferenceValue(store, registryName)
+	if err != nil {
+		return false, err
 	}
-	return apps != 0, system != 0, nil
+	if preference.exists {
+		return preference.value != 0, nil
+	}
+	if light, ok := themeModeFromThemeFile(source, themeName); ok {
+		return light, nil
+	}
+	// An absent Personalize value means the Windows default, which is light.
+	return true, nil
+}
+
+func themeModeFromThemeFile(source []byte, name string) (bool, bool) {
+	inVisualStyles := false
+	for _, line := range strings.Split(strings.ReplaceAll(string(source), "\r\n", "\n"), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+			inVisualStyles = strings.EqualFold(trimmed, "[VisualStyles]")
+			continue
+		}
+		if !inVisualStyles {
+			continue
+		}
+		key, value, found := strings.Cut(trimmed, "=")
+		if !found || !strings.EqualFold(strings.TrimSpace(key), name) {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "light":
+			return true, true
+		case "dark":
+			return false, true
+		default:
+			return false, false
+		}
+	}
+	return false, false
 }
 
 func currentAccentColor() (uint32, error) {
@@ -497,6 +629,30 @@ func (m *themeManager2) currentTheme() (int32, error) {
 		return 0, hresultError("get current Windows theme", hr)
 	}
 	return index, nil
+}
+
+func (m *themeManager2) customTheme() (int32, error) {
+	var index int32
+	hr, _, _ := syscall.SyscallN(
+		m.vtable[themeManagerGetCustomThemeMethod],
+		uintptr(unsafe.Pointer(m)),
+		uintptr(unsafe.Pointer(&index)),
+	)
+	if hresultFailed(hr) {
+		return 0, hresultError("get custom Windows theme", hr)
+	}
+	return index, nil
+}
+
+func (m *themeManager2) updateCustomTheme() error {
+	hr, _, _ := syscall.SyscallN(
+		m.vtable[themeManagerUpdateCustomMethod],
+		uintptr(unsafe.Pointer(m)),
+	)
+	if hresultFailed(hr) {
+		return hresultError("update custom Windows theme", hr)
+	}
+	return nil
 }
 
 func (m *themeManager2) setCurrentTheme(index int32, applyFlags uintptr) error {

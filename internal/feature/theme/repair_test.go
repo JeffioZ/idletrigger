@@ -1,6 +1,8 @@
 package theme
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -55,6 +57,40 @@ func TestPatchThemeFileRejectsMissingRequiredSection(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "VisualStyles") {
 		t.Fatalf("patchThemeFile error = %v, want missing VisualStyles", err)
+	}
+}
+
+func TestReadThemeSnapshotSkipsIncompleteCurrentTheme(t *testing.T) {
+	dir := t.TempDir()
+	incomplete := filepath.Join(dir, "Custom.theme")
+	complete := filepath.Join(dir, "Current.theme")
+	if err := os.WriteFile(incomplete, []byte("[Theme]\nDisplayName=Incomplete\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	want := []byte("[Theme]\nDisplayName=Current\n[VisualStyles]\nAppMode=Dark\nSystemMode=Light\n")
+	if err := os.WriteFile(complete, want, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := readThemeSnapshotFromPaths([]string{incomplete, complete, complete})
+	if err != nil {
+		t.Fatalf("readThemeSnapshotFromPaths: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("theme snapshot = %q, want complete current theme", got)
+	}
+}
+
+func TestThemeModeFromThemeFile(t *testing.T) {
+	source := []byte("[Theme]\nDisplayName=Current\n[VisualStyles]\nAppMode=Dark\nSystemMode=Light\n")
+	if light, ok := themeModeFromThemeFile(source, "AppMode"); !ok || light {
+		t.Fatalf("AppMode = light:%v found:%v, want dark", light, ok)
+	}
+	if light, ok := themeModeFromThemeFile(source, "SystemMode"); !ok || !light {
+		t.Fatalf("SystemMode = light:%v found:%v, want light", light, ok)
+	}
+	if _, ok := themeModeFromThemeFile(source, "MissingMode"); ok {
+		t.Fatal("missing theme mode was reported as present")
 	}
 }
 

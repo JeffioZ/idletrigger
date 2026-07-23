@@ -10,11 +10,12 @@ import (
 )
 
 type fakeThemePreferenceStore struct {
-	values     map[string]uint64
-	valueTypes map[string]uint32
-	failSet    map[string]int
-	discardSet map[string]bool
-	setCalls   []string
+	values      map[string]uint64
+	valueTypes  map[string]uint32
+	failSet     map[string]int
+	discardSet  map[string]bool
+	setCalls    []string
+	deleteCalls []string
 }
 
 func newFakeThemePreferenceStore(apps, system uint64) *fakeThemePreferenceStore {
@@ -35,7 +36,7 @@ func newFakeThemePreferenceStore(apps, system uint64) *fakeThemePreferenceStore 
 func (s *fakeThemePreferenceStore) GetIntegerValue(name string) (uint64, uint32, error) {
 	value, ok := s.values[name]
 	if !ok {
-		return 0, 0, errors.New("value not found")
+		return 0, 0, registry.ErrNotExist
 	}
 	return value, s.valueTypes[name], nil
 }
@@ -50,6 +51,13 @@ func (s *fakeThemePreferenceStore) SetDWordValue(name string, value uint32) erro
 		s.values[name] = uint64(value)
 		s.valueTypes[name] = registry.DWORD
 	}
+	return nil
+}
+
+func (s *fakeThemePreferenceStore) DeleteValue(name string) error {
+	s.deleteCalls = append(s.deleteCalls, name)
+	delete(s.values, name)
+	delete(s.valueTypes, name)
 	return nil
 }
 
@@ -88,6 +96,24 @@ func TestApplyThemeModeValuesRollsBackPartialWrite(t *testing.T) {
 	wantCalls := []string{"AppsUseLightTheme", "SystemUsesLightTheme", "SystemUsesLightTheme", "AppsUseLightTheme"}
 	if !slices.Equal(store.setCalls, wantCalls) {
 		t.Fatalf("write order = %v, want %v", store.setCalls, wantCalls)
+	}
+}
+
+func TestApplyThemeModeValuesRestoresMissingValue(t *testing.T) {
+	store := newFakeThemePreferenceStore(1, 1)
+	delete(store.values, "AppsUseLightTheme")
+	delete(store.valueTypes, "AppsUseLightTheme")
+	store.failSet["SystemUsesLightTheme"] = 1
+
+	err := applyThemeModeValues(store, 0)
+	if err == nil || !strings.Contains(err.Error(), "set SystemUsesLightTheme") {
+		t.Fatalf("applyThemeModeValues error = %v, want system write failure", err)
+	}
+	if _, exists := store.values["AppsUseLightTheme"]; exists {
+		t.Fatalf("missing app preference was recreated after rollback: %v", store.values)
+	}
+	if !slices.Equal(store.deleteCalls, []string{"AppsUseLightTheme"}) {
+		t.Fatalf("delete calls = %v, want missing app preference restored", store.deleteCalls)
 	}
 }
 

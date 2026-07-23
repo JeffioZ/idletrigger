@@ -15,3 +15,7 @@ func TestEnable_Idempotent(t *testing.T) {
 	Enable()
 	Enable()
 }
+
+func TestAppsUseDark_NoPanic(t *testing.T) {
+	AppsUseDark()
+}

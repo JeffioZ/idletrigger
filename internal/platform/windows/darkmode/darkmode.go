@@ -54,6 +54,23 @@ func RefreshMenuThemes() {
 	})
 }
 
+// AppsUseDark reports the effective Windows app theme through the same
+// immersive-theme API used by native controls. The second result is false on
+// Windows versions that do not expose ShouldAppsUseDarkMode.
+func AppsUseDark() (dark, supported bool) {
+	withUxtheme(func(uxtheme uintptr, getProc *syscall.LazyProc) {
+		// ShouldAppsUseDarkMode — ordinal 132.
+		proc, _, _ := getProc.Call(uxtheme, uintptr(132))
+		if proc == 0 {
+			return
+		}
+		result, _, _ := syscall.SyscallN(proc)
+		dark = result != 0
+		supported = true
+	})
+	return dark, supported
+}
+
 func withUxtheme(fn func(uxtheme uintptr, getProc *syscall.LazyProc)) {
 	uxtheme, err := syscall.LoadLibrary("uxtheme.dll")
 	if err != nil {

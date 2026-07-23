@@ -8,6 +8,8 @@ import (
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
+
+	"github.com/JeffioZ/idletrigger/internal/platform/windows/darkmode"
 )
 
 var (
@@ -24,6 +26,12 @@ var themeModeValueNames = [...]string{"AppsUseLightTheme", "SystemUsesLightTheme
 type themePreferenceStore interface {
 	GetIntegerValue(name string) (value uint64, valueType uint32, err error)
 	SetDWordValue(name string, value uint32) error
+	DeleteValue(name string) error
+}
+
+type themePreferenceValue struct {
+	value  uint32
+	exists bool
 }
 
 // DetectSupport verifies that the current Windows profile exposes writable
@@ -36,12 +44,9 @@ func DetectSupport() error {
 	}
 	defer k.Close()
 	for _, name := range themeModeValueNames {
-		value, valueType, err := k.GetIntegerValue(name)
+		_, err := readThemePreferenceValue(k, name)
 		if err != nil {
 			return fmt.Errorf("read %s: %w", name, err)
-		}
-		if valueType != registry.DWORD || value > 1 {
-			return fmt.Errorf("%s is not a valid Windows light/dark setting", name)
 		}
 	}
 	return nil
@@ -93,16 +98,13 @@ func applyThemePreferenceValues(store themePreferenceStore, desired map[string]u
 		return err
 	}
 
-	previous := make(map[string]uint32, len(themeModeValueNames))
+	previous := make(map[string]themePreferenceValue, len(themeModeValueNames))
 	for _, name := range themeModeValueNames {
-		current, valueType, err := store.GetIntegerValue(name)
+		current, err := readThemePreferenceValue(store, name)
 		if err != nil {
 			return fmt.Errorf("read %s before theme switch: %w", name, err)
 		}
-		if valueType != registry.DWORD || current > 1 {
-			return fmt.Errorf("read %s before theme switch: invalid Windows light/dark setting", name)
-		}
-		previous[name] = uint32(current)
+		previous[name] = current
 	}
 
 	attempted := make([]string, 0, len(themeModeValueNames))
@@ -136,11 +138,34 @@ func validateThemePreferenceTargets(desired map[string]uint32) error {
 	return nil
 }
 
-func themeModeUpdateError(store themePreferenceStore, previous map[string]uint32, attempted []string, updateErr error) error {
+func readThemePreferenceValue(store themePreferenceStore, name string) (themePreferenceValue, error) {
+	current, valueType, err := store.GetIntegerValue(name)
+	if errors.Is(err, registry.ErrNotExist) {
+		return themePreferenceValue{}, nil
+	}
+	if err != nil {
+		return themePreferenceValue{}, err
+	}
+	if valueType != registry.DWORD || current > 1 {
+		return themePreferenceValue{}, errors.New("invalid Windows light/dark setting")
+	}
+	return themePreferenceValue{value: uint32(current), exists: true}, nil
+}
+
+func themeModeUpdateError(store themePreferenceStore, previous map[string]themePreferenceValue, attempted []string, updateErr error) error {
 	var rollbackErrs []error
 	for i := len(attempted) - 1; i >= 0; i-- {
 		name := attempted[i]
-		if err := store.SetDWordValue(name, previous[name]); err != nil {
+		var err error
+		if previous[name].exists {
+			err = store.SetDWordValue(name, previous[name].value)
+		} else {
+			err = store.DeleteValue(name)
+			if errors.Is(err, registry.ErrNotExist) {
+				err = nil
+			}
+		}
+		if err != nil {
 			rollbackErrs = append(rollbackErrs, fmt.Errorf("restore %s: %w", name, err))
 		}
 	}
@@ -211,11 +236,21 @@ func notifyThemeChanged() {
 func Current() Mode {
 	k, err := registry.OpenKey(registry.CURRENT_USER, regPath, registry.QUERY_VALUE)
 	if err != nil {
-		return ModeLight
+		return currentModeFromImmersiveTheme()
 	}
 	defer k.Close()
-	val, _, err := k.GetIntegerValue("AppsUseLightTheme")
-	if err != nil || val == 0 {
+	preference, err := readThemePreferenceValue(k, "AppsUseLightTheme")
+	if err == nil && preference.exists {
+		if preference.value == 0 {
+			return ModeDark
+		}
+		return ModeLight
+	}
+	return currentModeFromImmersiveTheme()
+}
+
+func currentModeFromImmersiveTheme() Mode {
+	if dark, supported := darkmode.AppsUseDark(); supported && dark {
 		return ModeDark
 	}
 	return ModeLight
